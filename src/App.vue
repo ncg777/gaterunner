@@ -331,6 +331,7 @@ import { renderOfflineAudio } from './audio/offlineRender';
 import { buildTrackFadeEnvelope } from './audio/trackFade';
 import { getStepDurations } from './audio/stepDurations';
 import { Phaser } from './audio/phaser';
+import { setTremoloSpread } from './audio/tremolo';
 import {
   createSkewLfoState,
   getLfoFrequencyHz,
@@ -1761,16 +1762,25 @@ export default defineComponent({
       }
       return chain.choir;
     },
-    ensureTrackVibrato(chain: TrackAudioChain): Tone.Vibrato {
+    ensureTrackVibrato(chain: TrackAudioChain, track: PresetTrackData): Tone.Vibrato {
       if (!chain.vibrato) {
-        chain.vibrato = markRaw(new Tone.Vibrato());
+        chain.vibrato = markRaw(new Tone.Vibrato({
+          frequency: track.vibratoFrequency,
+          depth: this.clampNormalRange(track.vibratoDepth),
+          wet: 1,
+        }));
         chain.routingSignature = '';
       }
       return chain.vibrato;
     },
-    ensureTrackTremolo(chain: TrackAudioChain): Tone.Tremolo {
+    ensureTrackTremolo(chain: TrackAudioChain, track: PresetTrackData): Tone.Tremolo {
       if (!chain.tremolo) {
-        chain.tremolo = markRaw(new Tone.Tremolo());
+        chain.tremolo = markRaw(new Tone.Tremolo({
+          frequency: track.tremoloFrequency,
+          depth: this.clampNormalRange(track.tremoloDepth),
+          spread: track.tremoloSpread,
+          wet: 1,
+        }));
         chain.tremolo.start();
         chain.routingSignature = '';
       }
@@ -2393,10 +2403,10 @@ export default defineComponent({
 
       const signalChain: Tone.ToneAudioNode[] = [chain.sourceBus, chain.limiterGain, chain.limiter, chain.outputGain];
       if (track.vibratoEnabled && !isNoise) {
-        signalChain.push(this.ensureTrackVibrato(chain));
+        signalChain.push(this.ensureTrackVibrato(chain, track));
       }
       if (track.tremoloEnabled) {
-        signalChain.push(this.ensureTrackTremolo(chain));
+        signalChain.push(this.ensureTrackTremolo(chain, track));
       }
       if (track.chorusEnabled) {
         signalChain.push(this.ensureTrackChorus(chain));
@@ -2518,15 +2528,16 @@ export default defineComponent({
       }
       chain.limiterGain.gain.value = this.dbToGain(track.limiterGain);
       if (track.tremoloEnabled) {
-        this.ensureTrackTremolo(chain).set({
+        const tremolo = this.ensureTrackTremolo(chain, track);
+        tremolo.set({
           frequency: track.tremoloFrequency,
           depth: this.clampNormalRange(track.tremoloDepth),
-          spread: track.tremoloSpread,
           wet: 1,
         });
+        setTremoloSpread(tremolo, track.tremoloSpread);
       }
       if (track.vibratoEnabled && !isNoise) {
-        this.ensureTrackVibrato(chain).set({
+        this.ensureTrackVibrato(chain, track).set({
           frequency: track.vibratoFrequency,
           depth: this.clampNormalRange(track.vibratoDepth),
           wet: 1,
@@ -2579,15 +2590,14 @@ export default defineComponent({
       chain.dryGain.gain.value = this.dbToGain(this.reverbDry);
       chain.reverbSend.gain.value = this.reverbEnabled ? this.dbToGain(track.reverbWet + this.reverbWet) : 0;
       const context = chain.sourceBus.context;
-      if (context.lookAhead !== 0.4) {
+      if (!context.isOffline && context.lookAhead !== 0.4) {
         context.lookAhead = 0.4;
       }
       if (routingSignature !== chain.routingSignature) {
         this.routeTrackAudioChain(track, chain);
         chain.routingSignature = routingSignature;
-        // Tone modulation sources can end up stopped after graph rewires / param sets
-        // (especially on the first chain build before Transport starts). Restart them so
-        // tremolo, vibrato, chorus, flanger, and phaser keep modulating the signal.
+        // Vibrato and tremolo start once at creation; rewiring must not reset their
+        // phase or schedule a second oscillator at the beginning of an offline render.
         this.ensureTrackModulationRunning(chain);
       }
     },
@@ -2669,15 +2679,11 @@ export default defineComponent({
       }
     },
     /**
-     * Force-restart every free-running modulator on the track chain.
+     * Recover the remaining free-running modulators on the track chain.
      * stop()+start() recreates each LFO's internal oscillator and re-binds frequency,
      * which recovers units that report "started" but are no longer producing motion.
      */
     ensureTrackModulationRunning(chain: TrackAudioChain) {
-      if (chain.tremolo) {
-        chain.tremolo.stop();
-        chain.tremolo.start();
-      }
       if (chain.chorus) {
         chain.chorus.stop();
         chain.chorus.start();
@@ -2689,12 +2695,6 @@ export default defineComponent({
       if (chain.phaser) {
         chain.phaser.lfo.stop();
         chain.phaser.lfo.start();
-      }
-      // Vibrato keeps its LFO private; restart through the same Tone surface when present.
-      const vibratoLfo = (chain.vibrato as unknown as { _lfo?: Tone.LFO } | null)?._lfo;
-      if (vibratoLfo && typeof vibratoLfo.stop === 'function' && typeof vibratoLfo.start === 'function') {
-        vibratoLfo.stop();
-        vibratoLfo.start();
       }
     },
     updateSynths(trackId?: string, createMissingChains = true) {
