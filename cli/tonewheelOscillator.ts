@@ -1,8 +1,11 @@
 import {
   PULSE_DUTY,
+  REED_HARMONICS,
   getFluteHarmonicAmplitude,
   getPulseHarmonicAmplitude,
+  getReedHarmonicAmplitude,
   isPulseWaveform,
+  isReedWaveform,
 } from '../src/audio/spectra.js';
 
 const TONEWHEEL_RATIOS = [0.5, 1.5, 1, 2, 3, 4, 5, 6, 8];
@@ -10,13 +13,15 @@ const OSCILLATOR_TABLE_SIZE = 65536;
 const oscillatorTables = new Map<string, Float64Array>();
 
 function sampleAdditiveOscillator(phase: number, waveform: string): number {
-  const harmonicCount = waveform === 'flute' ? 5 : 32;
+  const harmonicCount = waveform === 'flute' ? 5
+    : isReedWaveform(waveform) ? REED_HARMONICS[waveform].length : 32;
   let sample = 0;
   let energy = 0;
   for (let harmonic = 1; harmonic <= harmonicCount; harmonic += 1) {
     const amplitude = waveform === 'flute'
       ? getFluteHarmonicAmplitude(harmonic)
-      : getPulseHarmonicAmplitude(PULSE_DUTY[waveform as keyof typeof PULSE_DUTY], harmonic);
+      : isReedWaveform(waveform) ? getReedHarmonicAmplitude(waveform, harmonic)
+        : getPulseHarmonicAmplitude(PULSE_DUTY[waveform as keyof typeof PULSE_DUTY], harmonic);
     sample += amplitude * Math.sin(2 * Math.PI * harmonic * phase);
     energy += amplitude * amplitude;
   }
@@ -39,7 +44,7 @@ function getOscillatorTable(waveform: string): Float64Array {
 }
 
 export function sampleOscillator(phase: number, waveform: string): number {
-  if (waveform === 'flute' || isPulseWaveform(waveform)) {
+  if (waveform === 'flute' || isReedWaveform(waveform) || isPulseWaveform(waveform)) {
     const table = getOscillatorTable(waveform);
     const tablePosition = phase * OSCILLATOR_TABLE_SIZE;
     const index = Math.floor(tablePosition);

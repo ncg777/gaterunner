@@ -350,7 +350,9 @@ import {
   PULSE_DUTY,
   getFluteHarmonicAmplitude,
   getPulseHarmonicAmplitude,
+  getReedHarmonicAmplitude,
   isPulseWaveform,
+  isReedWaveform,
 } from './audio/spectra';
 import {
   quantizeNormalizedTime,
@@ -2025,6 +2027,9 @@ export default defineComponent({
       if (waveform === 'flute') {
         return getFluteHarmonicAmplitude(harmonic)
           + (0.02 * noisyTail * this.gaussian(harmonic, 8, 3));
+      }
+      if (isReedWaveform(waveform)) {
+        return getReedHarmonicAmplitude(waveform, harmonic);
       }
       if (isPulseWaveform(waveform)) {
         return getPulseHarmonicAmplitude(PULSE_DUTY[waveform], harmonic);
