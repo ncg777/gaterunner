@@ -10,7 +10,7 @@
         <v-tab v-if="draftTrack.trackKind !== 'rhythmic'" value="envelopes" prepend-icon="mdi-chart-bell-curve-cumulative">Envelopes</v-tab>
         <v-tab v-if="draftTrack.trackKind !== 'rhythmic'" value="unison" prepend-icon="mdi-account-voice">Voices &amp; Glide</v-tab>
         <v-tab value="modulation" prepend-icon="mdi-sine-wave">Tremolo/Vibrato</v-tab>
-        <v-tab value="drive" prepend-icon="mdi-lightning-bolt-outline">Tanh Drive</v-tab>
+        <v-tab value="drive" prepend-icon="mdi-lightning-bolt-outline">Drive</v-tab>
         <v-tab value="chorus" prepend-icon="mdi-blur">Chorus</v-tab>
         <v-tab value="flanger" prepend-icon="mdi-waves">Flanger</v-tab>
         <v-tab value="phaser" prepend-icon="mdi-vector-curve">Phaser</v-tab>
@@ -662,6 +662,8 @@
         </v-window-item>
 
         <v-window-item value="drive" class="control-tab-panel">
+          <WaveshaperControls v-model="draftTrack.waveshaper" @update:modelValue="handleTrackDraftChange" />
+          <v-divider class="my-4" />
           <EditableSlider :label="'Tanh Drive (' + Number(draftTrack.limiterGain).toFixed(1) + ' dB before tanh)'" :min="-48" :max="72" :step="0.1" v-model="draftTrack.limiterGain" @update:modelValue="handleTrackDraftChange" />
         </v-window-item>
 
@@ -956,6 +958,7 @@ import ReverbControls from './ReverbControls.vue';
 import RhythmTrackControls from './RhythmTrackControls.vue';
 import RhythmSoundControls from './RhythmSoundControls.vue';
 import TimeWarpPreview from './TimeWarpPreview.vue';
+import WaveshaperControls from './WaveshaperControls.vue';
 import {
   interpolateTonewheelDrawbars,
   MAX_WAVETABLE_CONFIGURATIONS,
@@ -995,6 +998,7 @@ export default defineComponent({
     RhythmTrackControls,
     RhythmSoundControls,
     TimeWarpPreview,
+    WaveshaperControls,
   },
   props: {
     track: {

@@ -6,8 +6,61 @@ import { join } from 'node:path';
 import test from 'node:test';
 import ToneMidi from '@tonejs/midi';
 import { generateMidi, generateWav, type GenerateOptions } from './generate.js';
+import { presetDataToGeneratorInput } from './cli.js';
+import { parsePresetImportPayload } from '../src/presets.js';
+import { normalizeWaveshaperSettings } from '../src/audio/waveshaper.js';
 
 const { Midi } = ToneMidi;
+
+const customWaveshaper = normalizeWaveshaperSettings({
+  enabled: true, curve: 'custom', expression: 'sin(amount*x)', dcBlock: false,
+  customParameters: [{ name: 'amount', value: 7, min: 0, max: 12, step: 0.1 }],
+});
+
+test('legacy flags and tracks JSON forward limiter gain and custom waveshaper settings', async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'gaterunner-cli-drive-'));
+  try {
+    for (const useTracks of [false, true]) {
+      const outputPath = join(tempDir, `${useTracks}.wav`);
+      const track = { sequence: '1', denominator: 16, limiterGain: 18, waveshaper: customWaveshaper };
+      const args = useTracks
+        ? ['--tracks', JSON.stringify([track])]
+        : ['--sequence', '1', '--denominator', '16', '--limiter-gain', '18', '--waveshaper', JSON.stringify(customWaveshaper)];
+      const result = spawnSync(process.execPath, ['--import', 'tsx', 'cli/cli.ts', '--output', outputPath,
+        '--format', 'wav', '--bpm', '240', '--reverb', '{"enabled":false}', ...args], { encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stderr);
+      const expected = await generateWav({ bpm: 240, reverb: { enabled: false },
+        ...(useTracks ? { tracks: [track] } : track) });
+      assert.deepEqual(readFileSync(outputPath), Buffer.from(expected));
+    }
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('preset import forwards normalized limiter and waveshaper fields to the generator', () => {
+  const imported = parsePresetImportPayload(JSON.stringify({
+    version: 2, kind: 'single-preset', exportedAt: new Date(0).toISOString(),
+    preset: { id: 'drive', name: 'Drive', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString(),
+      folderId: null, data: { bpm: 240, a4: 440, forte: '5-35.05', tracks: [
+        { id: 'drive-track', name: 'Drive', sequenceInput: '1', limiterGain: 27, waveshaper: customWaveshaper },
+      ] } },
+  }));
+  assert.equal(imported.kind, 'single-preset');
+  if (imported.kind !== 'single-preset') throw new Error('Expected single preset');
+  const input = presetDataToGeneratorInput(imported.preset.data);
+  assert.equal(input.tracks[0].limiterGain, 27);
+  assert.deepEqual(input.tracks[0].waveshaper, customWaveshaper);
+});
+
+test('CLI rejects malformed waveshaper JSON', () => {
+  for (const json of ['{', '[]', 'null']) {
+    const result = spawnSync(process.execPath, ['--import', 'tsx', 'cli/cli.ts', '--output', 'unused.wav',
+      '--waveshaper', json], { encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Invalid --waveshaper JSON/);
+  }
+});
 
 test('cli accepts a preset JSON file and writes output', () => {
   const tempDir = mkdtempSync(join(tmpdir(), 'gaterunner-cli-'));

@@ -1,4 +1,9 @@
 import {
+  cloneWaveshaperSettings,
+  normalizeWaveshaperSettings,
+  type WaveshaperSettings,
+} from './audio/waveshaper.js';
+import {
   DEFAULT_PITCH_ENVELOPE_SHAPE,
   normalizePitchEnvelopeShape,
   PITCH_ENVELOPE_SHAPE_MAX,
@@ -152,6 +157,7 @@ export interface PresetTrackData {
   /** Normalized filter LFO start phase in [0, 1). */
   filterLfoInitPhase: number;
   limiterGain: number;
+  waveshaper: WaveshaperSettings;
   echoEnabled: boolean;
   echoDelay: EchoDelayValue;
   echoFeedback: number;
@@ -460,6 +466,7 @@ export const DEFAULT_PRESET_TRACK_DATA: PresetTrackData = {
   filterLfoWaveform: 'sine',
   filterLfoInitPhase: 0,
   limiterGain: 0,
+  waveshaper: normalizeWaveshaperSettings(undefined),
   echoEnabled: false,
   echoDelay: '1/4',
   echoFeedback: 0.25,
@@ -907,6 +914,7 @@ export function clonePresetTrackData(track: PresetTrackData): PresetTrackData {
     filterLfoWaveform: track.filterLfoWaveform,
     filterLfoInitPhase: track.filterLfoInitPhase,
     limiterGain: track.limiterGain,
+    waveshaper: cloneWaveshaperSettings(track.waveshaper),
     echoEnabled: track.echoEnabled,
     echoDelay: track.echoDelay,
     echoFeedback: track.echoFeedback,
@@ -1020,6 +1028,7 @@ export function normalizePresetTrackData(value: unknown, index = 0): PresetTrack
     filterLfoWaveform: normalizeSkewLfoWaveform(raw.filterLfoWaveform),
     filterLfoInitPhase: clamp(parseNumber(raw.filterLfoInitPhase, DEFAULT_PRESET_TRACK_DATA.filterLfoInitPhase), 0, 0.999999),
     limiterGain: clamp(parseNumber(raw.limiterGain, DEFAULT_PRESET_TRACK_DATA.limiterGain), -48, 72),
+    waveshaper: normalizeWaveshaperSettings(raw.waveshaper),
     echoEnabled: Boolean(raw.echoEnabled ?? DEFAULT_PRESET_TRACK_DATA.echoEnabled),
     echoDelay: normalizeEchoDelay(raw.echoDelay),
     echoFeedback: clamp(parseNumber(raw.echoFeedback, DEFAULT_PRESET_TRACK_DATA.echoFeedback), 0, 0.95),
@@ -1252,6 +1261,7 @@ export function arePresetDataEqual(left: PresetData, right: PresetData): boolean
       || leftTrack.filterLfoWaveform !== rightTrack.filterLfoWaveform
       || leftTrack.filterLfoInitPhase !== rightTrack.filterLfoInitPhase
       || leftTrack.limiterGain !== rightTrack.limiterGain
+      || JSON.stringify(leftTrack.waveshaper) !== JSON.stringify(rightTrack.waveshaper)
       || leftTrack.echoEnabled !== rightTrack.echoEnabled
       || leftTrack.echoDelay !== rightTrack.echoDelay
       || leftTrack.echoFeedback !== rightTrack.echoFeedback

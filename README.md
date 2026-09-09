@@ -57,6 +57,60 @@ Each melodic track uses one bounded-cost tonewheel engine.
 - Imported presets that contain retired FM or virtual-analog fields remain loadable.
   Those fields are silently discarded and the track keeps its tonewheel-compatible settings.
 
+### Waveshaper And Tanh Drive
+
+The **Drive** tab has an optional waveshaper for each melodic or rhythmic track,
+independent of the existing **Tanh Drive** control. The signal order is:
+
+```text
+track source sum -> optional waveshaper -> limiterGain (Tanh Drive) -> tanh lookup -> track gain -> downstream effects
+```
+
+- Choose from **33 built-in curves**, or select **Custom**. The sine family includes
+  Sine Fold (`sin(k*x)`), Sine Phase (`sin(k*x+p)`), Cosine Bend, Nested Sine
+  (`sin(a*sin(b*x))`), Sine Phase Modulation, Dual Sine, Odd/Even Harmonic Sine,
+  Power Sine, and Damped Sine. Other groups cover saturation, folding/rectification,
+  polynomials, bells, and identity.
+- In a custom formula, `x` is the signed input sample, not time. `PI` and `E` are
+  constants. Valid free variables, such as `k` and `p` in `sin(k*x+p)`, become
+  parameter controls automatically. For example, `sin(PI*x/2)` needs no parameters,
+  while `tanh(amount*x)` creates an `amount` control.
+- Each custom parameter stores its value and editable **Min**, **Max**, and **Step**.
+  Min must be less than Max; Step must be positive and no larger than the range.
+  These are numeric controls, not automation lanes. The transfer graph is read-only;
+  drawing curves and parameter automation are not supported.
+- Curves are sampled over the signed domain `[-1, 1]`. Native Web Audio lookup
+  clamps driven inputs outside that domain to the nearest endpoint; the CLI matches
+  that lookup behavior. Finite formula outputs are clipped to `[-1, 1]`, not rescaled.
+  Invalid syntax or non-finite math detected during curve validation bypasses the
+  **whole new effect**, including its drive, wet path, and DC filter. For example,
+  `sqrt(x)` fails on negative inputs and `1/x` fails at zero. The legacy tanh stage
+  still runs; invalid math does not mute the track or disable Tanh Drive.
+- **Input Drive** (-24 to +36 dB) drives only the new effect's wet path. **Mix**
+  (0%-100%) blends the untouched dry signal with the shaped wet signal. **DC block**
+  optionally applies a 10 Hz high-pass filter to the wet signal after shaping;
+  browser and CLI use shared filter coefficients. Neither transfer stage uses
+  oversampling, so strong nonlinear shaping can alias.
+- **Tanh Drive** (`limiterGain`, -48 to +72 dB) is a separate gain before the legacy
+  tanh lookup. Its native transfer table also covers `[-1, 1]` and clamps at the
+  endpoints: the output of this stage is bounded near `+/-0.7616` (`tanh(1)`), not
+  unrestricted `tanh(drivenInput)` approaching `+/-1`. Track gain and downstream
+  processing follow it, so this is not a bound on the final mix.
+- New and older presets without waveshaper settings default to **off**, Sine Fold,
+  0 dB Input Drive, 100% Mix, and DC block on. Switching curves or disabling the
+  effect retains the custom formula, parameter metadata, and per-built-in values.
+  Save/Save As, track copying/merging, and preset/library JSON export-import retain
+  these nested settings independently. Editing them marks the draft as changed,
+  including when the effect is off. Waveshaping does not change MIDI output.
+
+Browser playback and browser WAV export use the same audio graph. Native CLI WAV
+rendering implements the same nonlinear stages and DC-filter coefficients, but it
+is not the full browser synth/effects graph and is not promised to sound identical.
+**CLI WAV compatibility:** previous CLI rendering omitted the legacy tanh stage.
+It now always runs, even at 0 dB Tanh Drive with the new waveshaper disabled. Old
+CLI WAV renders therefore change; refresh audio/hash references deliberately.
+This does not change MIDI generation.
+
 ### Import And Export
 
 Preset files use JSON.
@@ -101,6 +155,31 @@ Build or run the TypeScript CLI directly:
 ```sh
 yarn cli --format wav --output output.wav --preset preset.json
 ```
+
+`--preset` accepts a single-preset export or a library export (using the selected
+preset, or the first if that selection is unavailable). It replaces individual
+generation parameters and forwards each track's `limiterGain` and nested
+`waveshaper` settings; separate drive flags do not override the loaded preset.
+
+For legacy single-track input, use `--limiter-gain <dB>` and `--waveshaper <json>`.
+The latter must be a JSON object; unspecified fields use waveshaper defaults.
+For example, in a shell that preserves single-quoted JSON arguments:
+
+```sh
+yarn cli --format wav --output shaped.wav --sequence "1 2 4 8" --limiter-gain 6 --waveshaper '{"enabled":true,"curve":"sine-fold","builtinParameters":{"sine-fold":{"k":3}},"inputDriveDb":6,"mix":75,"dcBlock":true}'
+```
+
+With `--tracks`, put `limiterGain` and `waveshaper` on each track object. The
+generator field is `sequence`, mapped from a preset's `sequenceInput`:
+
+```sh
+yarn cli --format wav --output tracks.wav --tracks '[{"sequence":"1 2 4","limiterGain":3,"waveshaper":{"enabled":true,"curve":"custom","expression":"sin(k*x)","customParameters":[{"name":"k","value":3,"min":0.1,"max":12,"step":0.1}],"mix":50}}]'
+```
+
+An omitted per-track `limiterGain` or `waveshaper` inherits the top-level fallback.
+A supplied waveshaper object is normalized with defaults, not deep-merged with
+the top-level object. Omit both flags to leave the new effect off; the legacy tanh
+stage still runs. These settings affect WAV audio only, not MIDI notes or timing.
 
 Multi-track WAV rendering uses available CPU cores by default. Use `--threads 1` for
 inline rendering or `--threads N` to set an explicit worker count. `--verbose` prints

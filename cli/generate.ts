@@ -7,6 +7,8 @@ import {
   normalizePitchEnvelopeShape,
 } from '../src/audio/pitchEnvelope.js';
 import { getTrackFadeGain } from '../src/audio/trackFade.js';
+import { createWaveshaperProcessor, lookupTransferCurve, TANH_CURVE } from '../src/audio/trackDistortion.js';
+import { normalizeWaveshaperSettings, type WaveshaperSettings } from '../src/audio/waveshaper.js';
 import { getStepDurations } from '../src/audio/stepDurations.js';
 import {
   DEFAULT_TIME_WARP_CURVE,
@@ -90,6 +92,8 @@ export interface GenerateTrackOptions {
   midiChannel?: number;
   /** Audio level in dB (-96 to +24). */
   gain?: number;
+  limiterGain?: number;
+  waveshaper?: WaveshaperSettings;
   /** Velocity multiplier (0-4), clamped to 1 after velocity math. */
   velocityMultiplier?: number;
   /** Number of bars to wait before the track starts (0-64). */
@@ -245,6 +249,8 @@ export interface GenerateOptions {
   midiChannel?: number;
   /** Legacy single-track audio gain in dB used when tracks is omitted. */
   gain?: number;
+  limiterGain?: number;
+  waveshaper?: WaveshaperSettings;
   /** Legacy single-track waveform metadata used when tracks is omitted. */
   waveform?: string;
   /** Legacy single-track delay in bars used when tracks is omitted. */
@@ -525,6 +531,8 @@ function normalizeTracks(options: GenerateOptions): NormalizedTrack[] {
     lengthOffset: clamp(options.lengthOffset ?? 0, 0, 64),
     midiChannel: clamp(options.midiChannel ?? 1, 1, 16),
     gain: clamp(options.gain ?? 0, -96, 24),
+    limiterGain: Number.isFinite(options.limiterGain) ? clamp(options.limiterGain!, -48, 72) : 0,
+    waveshaper: normalizeWaveshaperSettings(options.waveshaper),
     velocityMultiplier: 1,
     delay: clamp(options.delay ?? 0, 0, 64),
     fadeIn: clamp(options.fadeIn ?? 0, 0, 64),
@@ -611,6 +619,9 @@ function normalizeTracks(options: GenerateOptions): NormalizedTrack[] {
     lengthOffset: clamp(track.lengthOffset ?? fallbackTrack.lengthOffset, 0, 64),
     midiChannel: clamp(track.midiChannel ?? (track.trackKind === 'rhythmic' ? 10 : clamp(index + 1, 1, 16)), 1, 16),
     gain: clamp(track.gain ?? fallbackTrack.gain, -96, 24),
+    limiterGain: Number.isFinite(track.limiterGain)
+      ? clamp(track.limiterGain!, -48, 72) : fallbackTrack.limiterGain,
+    waveshaper: normalizeWaveshaperSettings(track.waveshaper ?? fallbackTrack.waveshaper),
     velocityMultiplier: clamp(track.velocityMultiplier ?? fallbackTrack.velocityMultiplier, 0, 4),
     delay: clamp(track.delay ?? fallbackTrack.delay, 0, 64),
     fadeIn: clamp(track.fadeIn ?? fallbackTrack.fadeIn, 0, 64),
@@ -948,40 +959,93 @@ function createSimpleFilter(track: NormalizedTrack, sampleRate: number): (sample
     return (sample) => sample;
   }
 
-  const state = { low: 0, high: 0, band: 0 };
-  const q = Math.max(0.05, track.filterQ);
-  const gain = Math.pow(10, track.filterGain / 20) - 1;
+  const quality = clamp(Number.isFinite(track.filterQ) ? track.filterQ : 1, 0.0001, 30);
+  const amplitude = Math.pow(10, clamp(Number.isFinite(track.filterGain) ? track.filterGain : 0, -48, 48) / 40);
+  let input1 = 0;
+  let input2 = 0;
+  let output1 = 0;
+  let output2 = 0;
+  let b0 = 0;
+  let b1 = 0;
+  let b2 = 0;
+  let a1 = 0;
+  let a2 = 0;
   let previousCutoff = Number.NaN;
-  let coefficient = 0;
   return (sample, cutoff) => {
-    if (cutoff !== previousCutoff) {
-      const frequency = clamp(cutoff, 20, sampleRate / 2 - 100);
-      coefficient = 2 * Math.sin(Math.PI * frequency / sampleRate);
-      previousCutoff = cutoff;
+    const frequency = clamp(Number.isFinite(cutoff) ? cutoff : 20, 20, sampleRate * 0.49);
+    if (frequency !== previousCutoff) {
+      const omega = 2 * Math.PI * frequency / sampleRate;
+      const cosine = Math.cos(omega);
+      const sine = Math.sin(omega);
+      const alpha = sine / (2 * quality);
+      const shelfTerm = Math.sqrt(2 * amplitude) * sine;
+      let a0 = 1 + alpha;
+      a1 = -2 * cosine;
+      a2 = 1 - alpha;
+      switch (track.filterType) {
+        case 'highpass':
+          b0 = (1 + cosine) / 2;
+          b1 = -(1 + cosine);
+          b2 = b0;
+          break;
+        case 'bandpass':
+          b0 = alpha;
+          b1 = 0;
+          b2 = -alpha;
+          break;
+        case 'notch':
+          b0 = 1;
+          b1 = -2 * cosine;
+          b2 = 1;
+          break;
+        case 'peaking':
+          b0 = 1 + alpha * amplitude;
+          b1 = -2 * cosine;
+          b2 = 1 - alpha * amplitude;
+          a0 = 1 + alpha / amplitude;
+          a2 = 1 - alpha / amplitude;
+          break;
+        case 'lowshelf':
+          b0 = amplitude * (amplitude + 1 - (amplitude - 1) * cosine + shelfTerm);
+          b1 = 2 * amplitude * (amplitude - 1 - (amplitude + 1) * cosine);
+          b2 = amplitude * (amplitude + 1 - (amplitude - 1) * cosine - shelfTerm);
+          a0 = amplitude + 1 + (amplitude - 1) * cosine + shelfTerm;
+          a1 = -2 * (amplitude - 1 + (amplitude + 1) * cosine);
+          a2 = amplitude + 1 + (amplitude - 1) * cosine - shelfTerm;
+          break;
+        case 'highshelf':
+          b0 = amplitude * (amplitude + 1 + (amplitude - 1) * cosine + shelfTerm);
+          b1 = -2 * amplitude * (amplitude - 1 + (amplitude + 1) * cosine);
+          b2 = amplitude * (amplitude + 1 + (amplitude - 1) * cosine - shelfTerm);
+          a0 = amplitude + 1 - (amplitude - 1) * cosine + shelfTerm;
+          a1 = 2 * (amplitude - 1 - (amplitude + 1) * cosine);
+          a2 = amplitude + 1 - (amplitude - 1) * cosine - shelfTerm;
+          break;
+        case 'allpass':
+          b0 = 1 - alpha;
+          b1 = -2 * cosine;
+          b2 = 1 + alpha;
+          break;
+        case 'lowpass':
+        default:
+          b0 = (1 - cosine) / 2;
+          b1 = 1 - cosine;
+          b2 = b0;
+          break;
+      }
+      b0 /= a0;
+      b1 /= a0;
+      b2 /= a0;
+      a1 /= a0;
+      a2 /= a0;
+      previousCutoff = frequency;
     }
-    state.low += coefficient * state.band;
-    state.high = sample - state.low - q * state.band;
-    state.band += coefficient * state.high;
-
-    switch (track.filterType) {
-      case 'highpass':
-        return state.high;
-      case 'bandpass':
-        return state.band;
-      case 'notch':
-        return state.low + state.high;
-      case 'peaking':
-        return sample + state.band * gain;
-      case 'lowshelf':
-        return sample + state.low * gain;
-      case 'highshelf':
-        return sample + state.high * gain;
-      case 'allpass':
-        return sample;
-      case 'lowpass':
-      default:
-        return state.low;
-    }
+    const output = b0 * sample + b1 * input1 + b2 * input2 - a1 * output1 - a2 * output2;
+    input2 = input1;
+    input1 = sample;
+    output2 = output1;
+    output1 = output;
+    return output;
   };
 }
 
@@ -997,6 +1061,19 @@ function applyFeedbackEcho(left: Float32Array, right: Float32Array, track: Norma
     const echoRight = (track.echoPingPong ? left[frame - delayFrames] : right[frame - delayFrames]) * track.echoFeedback;
     left[frame] += echoLeft * wetGain;
     right[frame] += echoRight * wetGain;
+  }
+}
+
+function applyDrumEchoReturn(left: Float32Array, right: Float32Array, track: NormalizedTrack, sampleRate: number, delaySeconds: number, returnLeft: Float32Array, returnRight: Float32Array): void {
+  const delayFrames = Math.max(1, Math.round(delaySeconds * sampleRate));
+  const wetGain = dbToGain(track.echoWet);
+  for (let frame = delayFrames; frame < left.length; frame += 1) {
+    const echoLeft = track.echoPingPong ? right[frame - delayFrames] : left[frame - delayFrames];
+    const echoRight = track.echoPingPong ? left[frame - delayFrames] : right[frame - delayFrames];
+    left[frame] += echoLeft * track.echoFeedback;
+    right[frame] += echoRight * track.echoFeedback;
+    returnLeft[frame] += echoLeft * wetGain;
+    returnRight[frame] += echoRight * wetGain;
   }
 }
 
@@ -1138,6 +1215,11 @@ export async function renderWavChannels(
 
     const trackLeft = new Float32Array(frameCount);
     const trackRight = new Float32Array(frameCount);
+    const isDrumTrack = entry.track.trackKind === 'rhythmic';
+    const drumEchoLeft = isDrumTrack && entry.track.echoEnabled && entry.track.echoWet > -96 ? new Float32Array(frameCount) : null;
+    const drumEchoRight = drumEchoLeft ? new Float32Array(frameCount) : null;
+    const drumReverbLeft = isDrumTrack && hasReverbSend && entry.track.reverbWet > -96 ? new Float32Array(frameCount) : null;
+    const drumReverbRight = drumReverbLeft ? new Float32Array(frameCount) : null;
     const staticTonewheel = prepareTonewheel(interpolateTonewheelDrawbars(
       entry.track.tonewheelWavetable,
       entry.track.tonewheelDrawbars,
@@ -1162,7 +1244,6 @@ export async function renderWavChannels(
         nextGroupHitTimes.set(group, times);
       }
     }
-    const drumFilter = createSimpleFilter(entry.track, sampleRate);
     const isMonoTrack = entry.track.trackKind !== 'rhythmic' && isMonophonic(entry.track.polyphony);
     const glideState = createMonoGlideState();
 
@@ -1170,12 +1251,11 @@ export async function renderWavChannels(
       const start = event.time;
       const duration = event.duration;
       const notes = event.notes;
-      const noteAmplitude = event.velocity * 0.12 * trackGain;
+      const noteAmplitude = event.velocity * 0.12;
 
       if (entry.track.trackKind === 'rhythmic') {
         const startFrame = Math.max(0, Math.floor(start * sampleRate));
         const noteVelocities = event.noteVelocities ?? notes.map(() => event.velocity);
-        const filterCutoff = createFilterCutoff(entry.track, notes, duration, prepared.a4);
         for (let noteIndex = 0; noteIndex < notes.length; noteIndex += 1) {
           const voiceId = event.drumVoiceIds?.[noteIndex];
           const parameters = voiceId ? drumParameters.get(voiceId) : undefined;
@@ -1187,6 +1267,10 @@ export async function renderWavChannels(
           const laterGroupHit = group === 0
             ? undefined
             : findNextHitTime(nextGroupHitTimes.get(group), start + 1e-9);
+          const echoSend = typeof parameters.echoSend === 'number' && parameters.echoSend > -96
+            ? dbToGain(parameters.echoSend) : 0;
+          const reverbSend = typeof parameters.reverbSend === 'number' && parameters.reverbSend > -96
+            ? dbToGain(parameters.reverbSend) : 0;
           renderDrumHitIntoBuffers({
             left: trackLeft,
             right: trackRight,
@@ -1197,12 +1281,16 @@ export async function renderWavChannels(
             voiceId,
             parameters,
             chokeUntil: laterGroupHit === undefined ? undefined : laterGroupHit - start,
-            transform: entry.track.filterEnabled
-              ? (sample, elapsed) => drumFilter(
-                sample * trackGain,
-                filterCutoff(elapsed),
-              )
-              : (sample) => sample * trackGain,
+            onSample: drumEchoLeft || drumReverbLeft ? (frame, leftSample, rightSample) => {
+              if (drumEchoLeft && drumEchoRight) {
+                drumEchoLeft[frame] += leftSample * echoSend;
+                drumEchoRight[frame] += rightSample * echoSend;
+              }
+              if (drumReverbLeft && drumReverbRight) {
+                drumReverbLeft[frame] += leftSample * reverbSend;
+                drumReverbRight[frame] += rightSample * reverbSend;
+              }
+            } : undefined,
           });
         }
         continue;
@@ -1212,7 +1300,6 @@ export async function renderWavChannels(
       const voiceRelease = entry.track.release;
       const endFrame = Math.min(frameCount, Math.ceil((start + duration + voiceRelease) * sampleRate));
       const voicedNotes = limitPolyphony(notes, entry.track.polyphony);
-      const filterCutoff = createFilterCutoff(entry.track, voicedNotes, duration, prepared.a4);
       // High-note priority already picked the winner, so the glide follows a single pitch.
       const glidePlan: GlidePlan | null = isMonoTrack && voicedNotes.length > 0
         ? planMonoGlide(
@@ -1241,7 +1328,6 @@ export async function renderWavChannels(
             const voiceGain = noteAmplitude / Math.sqrt(voiceCount);
             const leftPan = Math.cos(voicePan * Math.PI / 2);
             const rightPan = Math.sin(voicePan * Math.PI / 2);
-            const filter = createSimpleFilter(entry.track, sampleRate);
             let phase = 0;
             let tonewheel = staticTonewheel;
             for (let frame = startFrame; frame < endFrame; frame += 1) {
@@ -1279,9 +1365,6 @@ export async function renderWavChannels(
                 env = 0;
               }
 
-              const tremolo = entry.track.tremoloEnabled
-                ? 1 - entry.track.tremoloDepth * (0.5 + 0.5 * Math.sin(2 * Math.PI * entry.track.tremoloFrequency * t))
-                : 1;
               const vibrato = entry.track.vibratoEnabled
                 ? Math.pow(2, Math.sin(2 * Math.PI * entry.track.vibratoFrequency * t) * entry.track.vibratoDepth / 12)
                 : 1;
@@ -1292,10 +1375,7 @@ export async function renderWavChannels(
                 )
                 : 1;
               const oscillatorSample = sampleTonewheel(phase, entry.track.waveform, tonewheel);
-              const sample = filter(
-                oscillatorSample * voiceGain * env * tremolo,
-                filterCutoff(t),
-              );
+              const sample = oscillatorSample * voiceGain * env;
               trackLeft[frame] += sample * leftPan;
               trackRight[frame] += sample * rightPan;
 
@@ -1324,7 +1404,28 @@ export async function renderWavChannels(
         }
     }
 
-    applyFeedbackEcho(trackLeft, trackRight, entry.track, sampleRate, getEchoDelaySeconds(prepared.bpm, entry.track.echoDelay));
+    const echoDelaySeconds = getEchoDelaySeconds(prepared.bpm, entry.track.echoDelay);
+    if (drumEchoLeft && drumEchoRight) {
+      applyDrumEchoReturn(drumEchoLeft, drumEchoRight, entry.track, sampleRate, echoDelaySeconds, trackLeft, trackRight);
+    }
+    const shapeLeft = createWaveshaperProcessor(entry.track.waveshaper, sampleRate);
+    const shapeRight = createWaveshaperProcessor(entry.track.waveshaper, sampleRate);
+    const limiterGain = dbToGain(entry.track.limiterGain);
+    for (let frame = 0; frame < frameCount; frame += 1) {
+      const elapsed = frame / sampleRate;
+      const tremolo = entry.track.tremoloEnabled
+        ? 1 - entry.track.tremoloDepth * (0.5 + 0.5 * Math.sin(2 * Math.PI * entry.track.tremoloFrequency * elapsed))
+        : 1;
+      trackLeft[frame] = Math.fround(lookupTransferCurve(TANH_CURVE, Math.fround(shapeLeft(trackLeft[frame]) * limiterGain))) * trackGain * tremolo;
+      trackRight[frame] = Math.fround(lookupTransferCurve(TANH_CURVE, Math.fround(shapeRight(trackRight[frame]) * limiterGain))) * trackGain * tremolo;
+    }
+    if (!isDrumTrack) applyFeedbackEcho(trackLeft, trackRight, entry.track, sampleRate, echoDelaySeconds);
+    const filterLeft = createSimpleFilter(entry.track, sampleRate);
+    const filterRight = createSimpleFilter(entry.track, sampleRate);
+    const filterEvents = events.slice().sort((left, right) => left.time - right.time || left.order - right.order);
+    let filterEventIndex = 0;
+    let filterStart = 0;
+    let filterCutoff = createFilterCutoff(entry.track, [], 0, prepared.a4);
     const barSeconds = entry.track.numerator * (60 / prepared.bpm);
     const trackStartSeconds = getTrackDelaySeconds(prepared.bpm, entry.track);
     const activeDurationSeconds = entry.track.repeats * getTrackRepeatDurationSeconds(prepared.bpm, entry);
@@ -1333,6 +1434,15 @@ export async function renderWavChannels(
     const hasTrackFade = fadeInSeconds > 0 || fadeOutSeconds > 0;
     const sendWet = hasReverbSend ? dbToGain(entry.track.reverbWet) : 0;
     for (let frame = 0; frame < frameCount; frame += 1) {
+      const time = frame / sampleRate;
+      while (filterEventIndex < filterEvents.length && filterEvents[filterEventIndex].time <= time) {
+        const event = filterEvents[filterEventIndex++];
+        filterStart = event.time;
+        filterCutoff = createFilterCutoff(entry.track,
+          entry.track.trackKind === 'rhythmic' ? event.notes : limitPolyphony(event.notes, entry.track.polyphony),
+          event.duration, prepared.a4);
+      }
+      const cutoff = filterCutoff(time - filterStart);
       const fadeGain = hasTrackFade
         ? getTrackFadeGain(
           frame / sampleRate - trackStartSeconds,
@@ -1341,13 +1451,13 @@ export async function renderWavChannels(
           fadeOutSeconds,
         )
         : 1;
-      const trackLeftSample = trackLeft[frame] * fadeGain;
-      const trackRightSample = trackRight[frame] * fadeGain;
+      const trackLeftSample = filterLeft(trackLeft[frame], cutoff) * fadeGain;
+      const trackRightSample = filterRight(trackRight[frame], cutoff) * fadeGain;
       left[frame] += trackLeftSample;
       right[frame] += trackRightSample;
       if (reverbLeft && reverbRight && sendWet > 0) {
-        reverbLeft[frame] += trackLeftSample * sendWet;
-        reverbRight[frame] += trackRightSample * sendWet;
+        reverbLeft[frame] += (isDrumTrack ? (drumReverbLeft?.[frame] ?? 0) * trackGain * fadeGain : trackLeftSample) * sendWet;
+        reverbRight[frame] += (isDrumTrack ? (drumReverbRight?.[frame] ?? 0) * trackGain * fadeGain : trackRightSample) * sendWet;
       }
     }
   });

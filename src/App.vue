@@ -331,6 +331,13 @@ import { renderOfflineAudio } from './audio/offlineRender';
 import { buildTrackFadeEnvelope } from './audio/trackFade';
 import { getStepDurations } from './audio/stepDurations';
 import { Phaser } from './audio/phaser';
+import { TANH_CURVE } from './audio/trackDistortion';
+import {
+  createWaveshaperAudioChain,
+  updateWaveshaperAudioChain,
+  disposeWaveshaperAudioChain,
+  type WaveshaperAudioChain,
+} from './audio/waveshaperEffect';
 import { setTremoloSpread } from './audio/tremolo';
 import {
   createSkewLfoState,
@@ -422,6 +429,7 @@ interface TrackAudioChain {
   filter: Tone.Filter | null;
   choir: ChoirFormantBank | null;
   sourceBus: Tone.Gain;
+  waveshaper: WaveshaperAudioChain | null;
   limiterGain: Tone.Gain;
   limiter: Tone.WaveShaper;
   tremolo: Tone.Tremolo | null;
@@ -1590,7 +1598,7 @@ export default defineComponent({
       const phaserCenterFrequency = options.phaserCenterFrequency ?? this.midiToFrequency(DEFAULT_PRESET_TRACK_DATA.phaserCenter);
       const sourceBus = markRaw(new Tone.Gain(1));
       const limiterGain = markRaw(new Tone.Gain(1));
-      const limiter = markRaw(new Tone.WaveShaper((value) => Math.tanh(value)));
+      const limiter = markRaw(new Tone.WaveShaper(TANH_CURVE));
       const outputGain = markRaw(new Tone.Gain(1));
       const fadeGain = markRaw(new Tone.Gain(1));
       const mixGain = markRaw(new Tone.Gain(1));
@@ -1618,6 +1626,7 @@ export default defineComponent({
         filter: null,
         choir: null,
         sourceBus,
+        waveshaper: null,
         limiterGain,
         limiter,
         tremolo: null,
@@ -2316,6 +2325,7 @@ export default defineComponent({
         chain.choir.output.dispose();
       }
       chain.sourceBus.dispose();
+      if (chain.waveshaper) disposeWaveshaperAudioChain(chain.waveshaper);
       chain.limiterGain.dispose();
       chain.limiter.dispose();
       chain.tremolo?.dispose();
@@ -2371,6 +2381,7 @@ export default defineComponent({
         });
       }
       chain.sourceBus.disconnect();
+      chain.waveshaper?.output.disconnect();
       chain.limiterGain.disconnect();
       chain.limiter.disconnect();
       chain.outputGain.disconnect();
@@ -2406,7 +2417,13 @@ export default defineComponent({
         }
       }
 
-      const signalChain: Tone.ToneAudioNode[] = [chain.sourceBus, chain.limiterGain, chain.limiter, chain.outputGain];
+      const signalChain: Tone.ToneAudioNode[] = [chain.limiterGain, chain.limiter, chain.outputGain];
+      if (chain.waveshaper) {
+        chain.sourceBus.connect(chain.waveshaper.input);
+        chain.waveshaper.output.connect(chain.limiterGain);
+      } else {
+        chain.sourceBus.connect(chain.limiterGain);
+      }
       if (track.vibratoEnabled && !isNoise) {
         signalChain.push(this.ensureTrackVibrato(chain, track));
       }
@@ -2442,6 +2459,12 @@ export default defineComponent({
     },
     updateTrackChainSettings(track: PresetTrackData, chain: TrackAudioChain) {
       chain.modulationTrack = track;
+      if (!chain.waveshaper && track.waveshaper.enabled) {
+        chain.waveshaper = markRaw(createWaveshaperAudioChain(track.waveshaper));
+        chain.routingSignature = '';
+      } else if (chain.waveshaper) {
+        updateWaveshaperAudioChain(chain.waveshaper, track.waveshaper);
+      }
       this.rebuildDrumInstruments(track, chain);
       this.syncTrackChainNodeOptions(track, chain);
       const routingSignature = this.getTrackRoutingSignature(track);

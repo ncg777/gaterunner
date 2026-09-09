@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { readFileSync, writeFileSync } from 'fs';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { parsePresetImportPayload, type PresetData } from '../src/presets.js';
+import { normalizeWaveshaperSettings, type WaveshaperSettings } from '../src/audio/waveshaper.js';
 import { generateMidi, generateWav, type GenerateReverbOptions, type GenerateTrackOptions } from './generate.js';
 
 const program = new Command();
 
-function presetDataToGeneratorInput(data: PresetData) {
+export function presetDataToGeneratorInput(data: PresetData) {
   return {
     bpm: data.bpm,
     a4: data.a4,
@@ -29,6 +32,8 @@ function presetDataToGeneratorInput(data: PresetData) {
       lengthOffset: track.lengthOffset,
       midiChannel: track.midiChannel,
       gain: track.gain,
+      limiterGain: track.limiterGain,
+      waveshaper: track.waveshaper,
       velocityMultiplier: track.velocityMultiplier,
       delay: track.delay,
       fadeIn: track.fadeIn,
@@ -172,6 +177,19 @@ function parseReverbJson(value: string): GenerateReverbOptions {
   }
 }
 
+function parseWaveshaperJson(value: string): WaveshaperSettings {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error('waveshaper must be a JSON object');
+    }
+    return normalizeWaveshaperSettings(parsed);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid --waveshaper JSON: ${message}`);
+  }
+}
+
 program
   .name('gaterunner')
   .description('Generate a MIDI/WAV file from a GateRunner sequence')
@@ -189,6 +207,8 @@ program
   .option('--length-offset <number>', 'Legacy single-track fixed note length in steps (0-64)', '0')
   .option('--midi-channel <number>', 'Legacy single-track MIDI channel (1-16)', '1')
   .option('--gain <number>', 'Legacy single-track audio gain in dB (-96 to +24)', '0')
+  .option('--limiter-gain <number>', 'Legacy single-track tanh input gain in dB (-48 to +72)', '0')
+  .option('--waveshaper <json>', 'Legacy single-track waveshaper settings JSON object', parseWaveshaperJson)
   .option('--waveform <string>', 'Legacy single-track waveform metadata', 'sine')
   .option('--delay <number>', 'Legacy single-track delay in bars (0-64)', '0')
   .option('--fade-in <number>', 'Legacy single-track fade-in duration in bars (0-64)', '0')
@@ -226,6 +246,8 @@ program
             lengthOffset: parseFloat(options.lengthOffset),
             midiChannel: parseInt(options.midiChannel),
             gain: parseFloat(options.gain),
+            limiterGain: parseFloat(options.limiterGain),
+            waveshaper: options.waveshaper,
             waveform: options.waveform,
             delay: parseInt(options.delay),
             fadeIn: parseFloat(options.fadeIn),
@@ -267,4 +289,6 @@ program
     }
   });
 
-program.parse();
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  program.parse();
+}

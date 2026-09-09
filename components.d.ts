@@ -17,5 +17,7 @@ declare module 'vue' {
     RhythmTrackControls: typeof import('./src/components/RhythmTrackControls.vue')['default']
     TimeWarpPreview: typeof import('./src/components/TimeWarpPreview.vue')['default']
     TrackStrip: typeof import('./src/components/TrackStrip.vue')['default']
+    WaveshaperControls: typeof import('./src/components/WaveshaperControls.vue')['default']
+    WaveshaperPreview: typeof import('./src/components/WaveshaperPreview.vue')['default']
   }
 }

@@ -222,8 +222,9 @@ export function renderDrumHitIntoBuffers(options: {
   /** Seconds after the hit start when another exclusive-group member cuts this tail off. */
   chokeUntil?: number;
   transform?: (sample: number, elapsed: number) => number;
+  onSample?: (frame: number, left: number, right: number) => void;
 }): void {
-  const { left, right, startFrame, sampleRate, duration, velocity, voiceId, parameters, chokeUntil, transform } = options;
+  const { left, right, startFrame, sampleRate, duration, velocity, voiceId, parameters, chokeUntil, transform, onSample } = options;
   const tailSeconds = getDrumVoiceTailSeconds(voiceId, parameters, duration);
   const fadeSeconds = 0.008;
   const audibleSeconds = chokeUntil === undefined
@@ -242,5 +243,6 @@ export function renderDrumHitIntoBuffers(options: {
     }
     left[frame] += sample * panGain;
     right[frame] += sample * panGain;
+    onSample?.(frame, sample * panGain, sample * panGain);
   }
 }

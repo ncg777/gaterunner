@@ -1,3 +1,5 @@
+import { compileMathExpression, type MathExpressionProfile } from '../domain/mathExpression.js';
+
 export type TimeWarpFn = (t: number) => number;
 
 export interface TimeWarpCurveOption {
@@ -18,26 +20,8 @@ interface BuiltinCurveEntry extends TimeWarpCurveOption {
 
 type EvalValue = number | number[];
 
-type TokenType = 'number' | 'identifier' | 'operator' | 'paren' | 'comma' | 'eof';
-
-interface Token {
-  type: TokenType;
-  value: string;
-  pos: number;
-}
-
-type AstNode =
-  | { kind: 'number'; value: number }
-  | { kind: 'variable' }
-  | { kind: 'constant'; name: 'PI' | 'E' }
-  | { kind: 'unary'; op: '+' | '-'; arg: AstNode }
-  | { kind: 'binary'; op: '+' | '-' | '*' | '/' | '%' | '^'; left: AstNode; right: AstNode }
-  | { kind: 'call'; name: string; args: AstNode[] };
-
 const PI = Math.PI;
 const MIN_NOTE_DIVISIONS = 1;
-const MAX_EXPRESSION_LENGTH = 512;
-const MAX_AST_NODES = 256;
 
 export const DEFAULT_TIME_WARP_CURVE = 'lin';
 export const CUSTOM_TIME_WARP_CURVE = 'custom';
@@ -356,260 +340,6 @@ const ALLOWED_FUNCTIONS = new Set<string>([
   'seq', 'wform', 'stowform', 'saw_wform', 'revsaw_wform', 'triangle_wform',
 ]);
 
-class Parser {
-  private tokens: Token[];
-
-  private index = 0;
-
-  private nodes = 0;
-
-  constructor(tokens: Token[]) {
-    this.tokens = tokens;
-  }
-
-  parseExpression(): AstNode {
-    const expression = this.parseAdditive();
-    const next = this.peek();
-    if (next.type !== 'eof') {
-      throw new Error(`Unexpected token '${next.value}' at position ${next.pos}.`);
-    }
-    return expression;
-  }
-
-  private parseAdditive(): AstNode {
-    let node = this.parseMultiplicative();
-    while (true) {
-      const token = this.peek();
-      if (token.type !== 'operator' || (token.value !== '+' && token.value !== '-')) {
-        return node;
-      }
-      this.consume();
-      node = this.makeNode({
-        kind: 'binary',
-        op: token.value,
-        left: node,
-        right: this.parseMultiplicative(),
-      });
-    }
-  }
-
-  private parseMultiplicative(): AstNode {
-    let node = this.parsePower();
-    while (true) {
-      const token = this.peek();
-      if (token.type !== 'operator' || (token.value !== '*' && token.value !== '/' && token.value !== '%')) {
-        return node;
-      }
-      this.consume();
-      node = this.makeNode({
-        kind: 'binary',
-        op: token.value,
-        left: node,
-        right: this.parsePower(),
-      });
-    }
-  }
-
-  private parsePower(): AstNode {
-    let node = this.parseUnary();
-    const token = this.peek();
-    if (token.type === 'operator' && token.value === '^') {
-      this.consume();
-      node = this.makeNode({
-        kind: 'binary',
-        op: '^',
-        left: node,
-        right: this.parsePower(),
-      });
-    }
-    return node;
-  }
-
-  private parseUnary(): AstNode {
-    const token = this.peek();
-    if (token.type === 'operator' && (token.value === '+' || token.value === '-')) {
-      this.consume();
-      return this.makeNode({
-        kind: 'unary',
-        op: token.value,
-        arg: this.parseUnary(),
-      });
-    }
-    return this.parsePrimary();
-  }
-
-  private parsePrimary(): AstNode {
-    const token = this.peek();
-
-    if (token.type === 'number') {
-      this.consume();
-      return this.makeNode({ kind: 'number', value: Number.parseFloat(token.value) });
-    }
-
-    if (token.type === 'identifier') {
-      this.consume();
-      if (this.peek().type === 'paren' && this.peek().value === '(') {
-        if (!ALLOWED_FUNCTIONS.has(token.value)) {
-          throw new Error(`Unknown function '${token.value}' at position ${token.pos}.`);
-        }
-        this.consume();
-        const args: AstNode[] = [];
-        if (!(this.peek().type === 'paren' && this.peek().value === ')')) {
-          while (true) {
-            args.push(this.parseAdditive());
-            const separator = this.peek();
-            if (separator.type === 'comma') {
-              this.consume();
-              continue;
-            }
-            break;
-          }
-        }
-
-        const closing = this.peek();
-        if (!(closing.type === 'paren' && closing.value === ')')) {
-          throw new Error(`Expected ')' at position ${closing.pos}.`);
-        }
-        this.consume();
-        return this.makeNode({ kind: 'call', name: token.value, args });
-      }
-
-      if (token.value === 'T') {
-        return this.makeNode({ kind: 'variable' });
-      }
-      if (token.value === 'PI' || token.value === 'E') {
-        return this.makeNode({ kind: 'constant', name: token.value });
-      }
-      throw new Error(`Unknown identifier '${token.value}' at position ${token.pos}.`);
-    }
-
-    if (token.type === 'paren' && token.value === '(') {
-      this.consume();
-      const expression = this.parseAdditive();
-      const closing = this.peek();
-      if (!(closing.type === 'paren' && closing.value === ')')) {
-        throw new Error(`Expected ')' at position ${closing.pos}.`);
-      }
-      this.consume();
-      return expression;
-    }
-
-    throw new Error(`Unexpected token '${token.value}' at position ${token.pos}.`);
-  }
-
-  private makeNode<T extends AstNode>(node: T): T {
-    this.nodes += 1;
-    if (this.nodes > MAX_AST_NODES) {
-      throw new Error('Expression is too complex.');
-    }
-    return node;
-  }
-
-  private peek(): Token {
-    return this.tokens[this.index];
-  }
-
-  private consume(): Token {
-    const token = this.tokens[this.index];
-    this.index += 1;
-    return token;
-  }
-}
-
-function tokenize(expression: string): Token[] {
-  const tokens: Token[] = [];
-  let index = 0;
-
-  while (index < expression.length) {
-    const char = expression[index];
-
-    if (/\s/.test(char)) {
-      index += 1;
-      continue;
-    }
-
-    if (/[0-9.]/.test(char)) {
-      const start = index;
-      let hasDigit = false;
-      let hasDot = false;
-      while (index < expression.length) {
-        const current = expression[index];
-        if (/[0-9]/.test(current)) {
-          hasDigit = true;
-          index += 1;
-          continue;
-        }
-        if (current === '.' && !hasDot) {
-          hasDot = true;
-          index += 1;
-          continue;
-        }
-        if ((current === 'e' || current === 'E') && hasDigit) {
-          const next = expression[index + 1];
-          const nextNext = expression[index + 2];
-          if (/[+-]/.test(next) && /[0-9]/.test(nextNext)) {
-            index += 3;
-            while (index < expression.length && /[0-9]/.test(expression[index])) {
-              index += 1;
-            }
-            hasDigit = true;
-            continue;
-          }
-          if (/[0-9]/.test(next)) {
-            index += 2;
-            while (index < expression.length && /[0-9]/.test(expression[index])) {
-              index += 1;
-            }
-            hasDigit = true;
-            continue;
-          }
-        }
-        break;
-      }
-
-      const raw = expression.slice(start, index);
-      if (!hasDigit || !Number.isFinite(Number.parseFloat(raw))) {
-        throw new Error(`Invalid number '${raw}' at position ${start}.`);
-      }
-      tokens.push({ type: 'number', value: raw, pos: start });
-      continue;
-    }
-
-    if (/[A-Za-z_]/.test(char)) {
-      const start = index;
-      index += 1;
-      while (index < expression.length && /[A-Za-z0-9_]/.test(expression[index])) {
-        index += 1;
-      }
-      tokens.push({ type: 'identifier', value: expression.slice(start, index), pos: start });
-      continue;
-    }
-
-    if ('+-*/%^'.includes(char)) {
-      tokens.push({ type: 'operator', value: char, pos: index });
-      index += 1;
-      continue;
-    }
-
-    if (char === '(' || char === ')') {
-      tokens.push({ type: 'paren', value: char, pos: index });
-      index += 1;
-      continue;
-    }
-
-    if (char === ',') {
-      tokens.push({ type: 'comma', value: char, pos: index });
-      index += 1;
-      continue;
-    }
-
-    throw new Error(`Invalid token '${char}' at position ${index}.`);
-  }
-
-  tokens.push({ type: 'eof', value: '', pos: expression.length });
-  return tokens;
-}
-
 function asNumber(value: EvalValue): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     throw new Error('Expected a number value.');
@@ -685,102 +415,42 @@ function evaluateFunction(name: string, args: EvalValue[]): EvalValue {
   }
 }
 
-function evaluateAst(node: AstNode, t: number): EvalValue {
-  switch (node.kind) {
-    case 'number':
-      return node.value;
-    case 'variable':
-      return t;
-    case 'constant':
-      return node.name === 'PI' ? PI : Math.E;
-    case 'unary': {
-      const value = asNumber(evaluateAst(node.arg, t));
-      return node.op === '-' ? -value : value;
-    }
-    case 'binary': {
-      const left = asNumber(evaluateAst(node.left, t));
-      const right = asNumber(evaluateAst(node.right, t));
-      switch (node.op) {
-        case '+':
-          return left + right;
-        case '-':
-          return left - right;
-        case '*':
-          return left * right;
-        case '/':
-          return right === 0 ? 0 : left / right;
-        case '%':
-          return right === 0 ? 0 : left % right;
-        case '^':
-          return Math.pow(left, right);
-        default:
-          return 0;
-      }
-    }
-    case 'call': {
-      const args = node.args.map((arg) => evaluateAst(arg, t));
-      return evaluateFunction(node.name, args);
-    }
-    default:
-      return 0;
-  }
-}
-
-const expressionCache = new Map<string, TimeWarpResolution>();
+const TIME_WARP_EXPRESSION_PROFILE: MathExpressionProfile = {
+  input: 'T',
+  strict: false,
+  allowParameters: false,
+  legacyAssignment: true,
+  functions: new Map([...ALLOWED_FUNCTIONS].map((name) => [name, {
+    minArgs: 0,
+    maxArgs: Infinity,
+    evaluate: (args: EvalValue[]) => evaluateFunction(name, args),
+  }])),
+};
 
 export function compileWarpExpression(source: string): TimeWarpResolution {
-  const raw = source.trim();
-  if (raw.length === 0) {
-    return {
-      fn: (t) => t,
-      error: 'Expression is empty.',
-      source: 'custom',
-    };
-  }
-
-  const expression = raw.replace(/^Y\s*=\s*/i, '');
-  if (expression.length > MAX_EXPRESSION_LENGTH) {
-    return {
-      fn: (t) => t,
-      error: `Expression exceeds ${MAX_EXPRESSION_LENGTH} characters.`,
-      source: 'custom',
-    };
-  }
-
-  const cached = expressionCache.get(expression);
-  if (cached) {
-    return cached;
-  }
-
   try {
-    const tokens = tokenize(expression);
-    const parser = new Parser(tokens);
-    const ast = parser.parseExpression();
+    const compiled = compileMathExpression(source, TIME_WARP_EXPRESSION_PROFILE);
     const fn: TimeWarpFn = (t: number) => {
       try {
-        const evaluated = asNumber(evaluateAst(ast, t));
+        const evaluated = asNumber(compiled.evaluate(t));
         return Number.isFinite(evaluated) ? evaluated : t;
       } catch {
         return t;
       }
     };
 
-    const resolution: TimeWarpResolution = {
+    return {
       fn,
       error: null,
       source: 'custom',
     };
-    expressionCache.set(expression, resolution);
-    return resolution;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Invalid expression.';
-    const resolution: TimeWarpResolution = {
+    return {
       fn: (t) => t,
       error: message,
       source: 'custom',
     };
-    expressionCache.set(expression, resolution);
-    return resolution;
   }
 }
 
