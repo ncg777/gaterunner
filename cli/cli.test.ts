@@ -519,6 +519,36 @@ test('flute with breath noise renders audible deterministic CLI audio', async ()
   assert.ok(peak > 100, `expected audible flute output, got PCM peak ${peak}`);
 });
 
+test('reed waveforms render audible, deterministic and distinct CLI audio', async () => {
+  const renders: Uint8Array[] = [];
+  for (const waveform of ['sine', 'oboe', 'clarinet', 'saxophone']) {
+    const options = {
+      bpm: 120,
+      tracks: [{
+        waveform,
+        sequence: '1',
+        numerator: 1,
+        denominator: 4,
+        octave: 4,
+        tonewheelDrawbars: [0, 0, 8, 0, 0, 0, 0, 0, 0],
+      }],
+      reverb: { enabled: false },
+    };
+    const wav = await generateWav(options);
+    assert.deepEqual(wav, await generateWav(options), `${waveform} must render reproducibly`);
+    const pcm = new DataView(wav.buffer, wav.byteOffset + 44, wav.byteLength - 44);
+    let peak = 0;
+    for (let offset = 0; offset + 1 < pcm.byteLength; offset += 2) {
+      peak = Math.max(peak, Math.abs(pcm.getInt16(offset, true)));
+    }
+    assert.ok(peak > 100, `expected audible ${waveform} output, got PCM peak ${peak}`);
+    for (const previous of renders) {
+      assert.notDeepEqual(wav, previous, `${waveform} must have a distinct timbre`);
+    }
+    renders.push(wav);
+  }
+});
+
 test('unknown generator values fall back to tonewheel rendering', async () => {
   const wav = await generateWav({
     tracks: [{

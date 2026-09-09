@@ -165,7 +165,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                   denominator: { type: 'number' },
                   waveform: {
                     type: 'string',
-                    description: 'Tonewheel source shape, including flute, pulse-25, and pulse-12.',
+                    description: 'Tonewheel source shape, including flute, oboe, clarinet, saxophone, pulse-25, and pulse-12.',
                   },
                   breathEnabled: { type: 'boolean', description: 'Adds one filtered pink-noise breath layer per melodic event.' },
                   breathLevel: { type: 'number', minimum: -60, maximum: 0, description: 'Breath layer level in dB.' },

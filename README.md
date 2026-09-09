@@ -45,12 +45,14 @@ wavetable from the **Generator** tab.
 Each melodic track uses one bounded-cost tonewheel engine.
 
 - Source shapes include sine, triangle, sawtooth, square, choir vowels, colored noise,
-  resonant spectra, a compact flute spectrum, and fixed 25% and 12.5% pulse spectra.
+  resonant spectra, flute, oboe, clarinet, saxophone, and fixed 25% and 12.5% pulse spectra.
+  The reed-inspired shapes offer a bright, nasal oboe, an odd-harmonic-led clarinet,
+  and a full, buzzy saxophone.
 - Nine Hammond-style drawbars and the multidimensional wavetable apply across pitched
   source shapes, with polyphony, unison, glide, envelopes, filters, and effects downstream.
 - **Breath noise** adds one filtered pink-noise layer per track event. Its level and
   filter harmonic provide air without multiplying noise graphs by voice count.
-- Browser playback and CLI WAV export share the flute and pulse harmonic definitions.
+- Browser playback and CLI WAV export share the woodwind and pulse harmonic definitions.
   CLI breath noise is seeded, so repeated exports of the same input are byte-identical.
 - Imported presets that contain retired FM or virtual-analog fields remain loadable.
   Those fields are silently discarded and the track keeps its tonewheel-compatible settings.
