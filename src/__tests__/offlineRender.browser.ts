@@ -14,7 +14,43 @@ import { DEFAULT_PRESET_TRACK_DATA } from '../presets';
 import { normalizePresetTrackData } from '../presets';
 import { generatePartialSpectrum, normalizePartialGenerator } from '../audio/partialGenerator';
 import { interpolateModulatedTonewheelDrawbars } from '../audio/tonewheelWavetable';
+import { PitchEnvelopeSynth } from '../audio/pitchEnvelopeSynth';
+import { prewarmVoicePool } from '../audio/voicePool';
 import type App from '../App.vue';
+
+export async function runVoiceFilterChecks() {
+  const labels: string[] = [];
+  const check = (condition: boolean, label: string) => {
+    if (!condition) throw new Error(label);
+    labels.push(label);
+  };
+
+  await Tone.Offline(() => {
+    const synth = new Tone.PolySynth(PitchEnvelopeSynth);
+    synth.maxPolyphony = 2;
+    prewarmVoicePool(synth as unknown as Tone.PolySynth, 2);
+    const voices = (synth as unknown as { _voices: PitchEnvelopeSynth[] })._voices;
+    check(voices.length === 2, 'PolySynth prewarms both requested voices');
+    check(voices[0].filter !== voices[1].filter, 'Each pooled synth voice owns a distinct filter');
+
+    const voiceFilter = {
+      ...PitchEnvelopeSynth.getDefaults().voiceFilter,
+      enabled: true,
+      frequencyMidi: 69,
+      keyFollow: 100,
+      attack: 0.01,
+      amount: 0,
+    };
+    synth.set({ voiceFilter } as Parameters<typeof synth.set>[0]);
+    voices[0].triggerAttackRelease(220, 0.1, 0);
+    voices[1].triggerAttackRelease(880, 0.1, 0);
+    const lowNoteCutoff = voices[0].filter.frequency.getValueAtTime(0.02);
+    const highNoteCutoff = voices[1].filter.frequency.getValueAtTime(0.02);
+    check(highNoteCutoff > lowNoteCutoff * 3.9, 'Voice filters retain independent key-follow automation');
+  }, 0.2);
+
+  return labels;
+}
 
 export async function runPartialGeneratorChecks(app: InstanceType<typeof App>) {
   const labels: string[] = [];

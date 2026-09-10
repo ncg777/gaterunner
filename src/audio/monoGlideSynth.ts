@@ -83,6 +83,7 @@ export class MonoGlideSynth extends PitchEnvelopeSynth {
     } else {
       this.frequency.exponentialRampToValueAtTime(plan.toFrequency, startTime + plan.seconds);
     }
+    this.scheduleFilterAttack(note, startTime);
     return this;
   }
 

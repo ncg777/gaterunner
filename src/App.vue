@@ -2141,6 +2141,11 @@ export default defineComponent({
         return;
       }
 
+      const isNoise = this.isNoiseWaveform(this.getEffectiveTrackWaveform(track));
+      if (track.trackKind !== 'rhythmic' && !isNoise) {
+        return;
+      }
+
       const filter = this.ensureTrackFilter(chain);
       const startTime = typeof when === 'number' ? when : Tone.Time(when).toSeconds();
       const baseMidi = Math.max(0, Math.min(127,
@@ -2341,7 +2346,7 @@ export default defineComponent({
       if (track.echoEnabled && track.trackKind !== 'rhythmic') {
         signalChain.push(this.ensureTrackEcho(chain));
       }
-      if (track.filterEnabled) {
+      if (track.filterEnabled && (track.trackKind === 'rhythmic' || isNoise)) {
         signalChain.push(this.ensureTrackFilter(chain));
       }
       signalChain.push(chain.fadeGain, chain.mixGain);
@@ -2413,6 +2418,30 @@ export default defineComponent({
               },
               pitchEnvelopeAmount: track.pitchEnvelopeAmount,
               pitchEnvelopeShape: track.pitchEnvelopeShape,
+              voiceFilter: {
+                enabled: track.filterEnabled,
+                type: track.filterType as BiquadFilterType,
+                frequencyMidi: track.filterFrequency,
+                rolloff: track.filterRolloff as -12 | -24 | -48 | -96,
+                Q: track.filterQ,
+                gain: track.filterGain,
+                keyFollow: track.filterKeyFollow,
+                attack: track.filterEnvelopeAttack,
+                decay: track.filterEnvelopeDecay,
+                sustain: track.filterEnvelopeSustain,
+                release: track.filterEnvelopeRelease,
+                amount: track.filterEnvelopeAmount,
+                lfoEnabled: track.filterLfoEnabled,
+                lfoFrequencyHz: getLfoFrequencyHz({
+                  sync: track.filterLfoSync,
+                  rateHz: track.filterLfoRateHz,
+                  syncRate: track.filterLfoRate,
+                  bpm: this.bpm,
+                }),
+                lfoAmount: track.filterLfoAmount,
+                lfoWaveform: track.filterLfoWaveform as LfoWaveform,
+                lfoInitPhase: track.filterLfoInitPhase,
+              },
             } as Parameters<PitchEnvelopeSynth['set']>[0];
             // PolySynth.set typings only expose base SynthOptions; PitchEnvelopeSynth accepts the extras.
             const synth = this.ensureTrackSynth(chain, track);
@@ -2445,7 +2474,7 @@ export default defineComponent({
       }
       this.syncTonewheelModulationLoop(track, chain);
 
-      if (track.filterEnabled) {
+      if (track.filterEnabled && (track.trackKind === 'rhythmic' || isNoise)) {
         this.ensureTrackFilter(chain).set({
           type: track.filterType as BiquadFilterType,
           frequency: this.midiToFrequency(track.filterFrequency),
@@ -2555,6 +2584,26 @@ export default defineComponent({
         track.pitchEnvelopeRelease,
         track.pitchEnvelopeAmount,
         track.pitchEnvelopeShape,
+        track.filterEnabled,
+        track.filterType,
+        track.filterFrequency,
+        track.filterRolloff,
+        track.filterQ,
+        track.filterGain,
+        track.filterKeyFollow,
+        track.filterEnvelopeAttack,
+        track.filterEnvelopeDecay,
+        track.filterEnvelopeSustain,
+        track.filterEnvelopeRelease,
+        track.filterEnvelopeAmount,
+        track.filterLfoEnabled,
+        track.filterLfoSync,
+        track.filterLfoRateHz,
+        track.filterLfoRate,
+        track.filterLfoAmount,
+        track.filterLfoWaveform,
+        track.filterLfoInitPhase,
+        this.bpm,
         track.polyphony,
         track.glideTime,
         track.glideMode,

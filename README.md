@@ -251,6 +251,7 @@ For the browser-specific clock equivalence and context-restoration checks, start
 
 ```js
 const checks = await import('/gaterunner/src/__tests__/offlineRender.browser.ts');
+await checks.runVoiceFilterChecks();
 await checks.runOfflineRenderChecks();
 await checks.runModulationChecks(document.querySelector('#app').__vue_app__._instance.proxy);
 ```
