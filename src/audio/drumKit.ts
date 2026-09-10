@@ -106,7 +106,7 @@ interface PooledVoice<T extends TriggerVoice> {
 }
 
 /** Per-layer polyphony ceiling for a single GM drum voice. */
-const MAX_POOLED_DRUM_VOICES = 2;
+const MAX_POOLED_DRUM_VOICES = 1;
 
 /** Matches Tone's source timeline epsilon for strictly ordered restarts. */
 const MIN_POOLED_VOICE_RESTART_INTERVAL_SECONDS = 1e-6;
@@ -116,7 +116,7 @@ const MIN_POOLED_VOICE_RESTART_INTERVAL_SECONDS = 1e-6;
  * long as the instance exists, so an idle instance still costs render-thread time. Cymbal
  * layers therefore get a much tighter ceiling than the cheap oscillator/noise layers.
  */
-const MAX_POOLED_METAL_VOICES = 2;
+const MAX_POOLED_METAL_VOICES = 1;
 
 function timeToSeconds(value: Tone.Unit.Time): number {
   if (typeof value === 'number') {
