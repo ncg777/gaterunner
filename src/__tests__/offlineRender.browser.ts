@@ -11,7 +11,75 @@ import {
   updateWaveshaperAudioChain,
 } from '../audio/waveshaperEffect';
 import { DEFAULT_PRESET_TRACK_DATA } from '../presets';
+import { normalizePresetTrackData } from '../presets';
+import { generatePartialSpectrum, normalizePartialGenerator } from '../audio/partialGenerator';
+import { interpolateModulatedTonewheelDrawbars } from '../audio/tonewheelWavetable';
 import type App from '../App.vue';
+
+export async function runPartialGeneratorChecks(app: InstanceType<typeof App>) {
+  const labels: string[] = [];
+  const check = (condition: boolean, label: string) => {
+    if (!condition) throw new Error(label);
+    labels.push(label);
+  };
+  const trim = (values: number[]) => {
+    while (values.length > 1 && values.at(-1) === 0) values.pop();
+    return values;
+  };
+  const track = normalizePresetTrackData({
+    waveform: 'sawtooth', partialGenerator: { type: 'sequence', sequence: 'natural' },
+  });
+  const first = app.getTonewheelPartials(track);
+  check(JSON.stringify(first) === JSON.stringify(trim(generatePartialSpectrum(track.partialGenerator, track.waveform))),
+    'Browser uses shared procedural spectrum');
+  check(first === app.getTonewheelPartials(track, 10, 5), 'Static spectrum cache reuses arrays across time');
+  const signature = app.getTrackVoiceSignature(track);
+  track.partialGenerator = normalizePartialGenerator({ type: 'binary', mode: 'parity' });
+  check(first !== app.getTonewheelPartials(track), 'Generator changes invalidate cached spectrum');
+  check(signature !== app.getTrackVoiceSignature(track), 'Generator changes update voice settings');
+  const binary = app.getTonewheelPartials(track);
+  track.waveform = 'square';
+  check(binary !== app.getTonewheelPartials(track), 'Waveform changes invalidate cached spectrum');
+
+  const animated = normalizePresetTrackData({
+    waveform: 'sine',
+    tonewheelWavetable: {
+      enabled: true, dimensions: [{ name: 'X', value: 0.5 }],
+      configurations: [
+        { name: 'A', position: [0], drawbars: [8, 0, 0, 0, 0, 0, 0, 0, 0] },
+        { name: 'B', position: [1], drawbars: [0, 0, 0, 0, 0, 0, 0, 0, 8] },
+      ],
+      lfos: [{ enabled: true, waveform: 'sine', sync: false, rateHz: 1, depth: 0.5, routes: [1] }],
+    },
+  });
+  const animatedFirst = app.getTonewheelPartials(animated, 0);
+  const animatedNext = app.getTonewheelPartials(animated, 0.25);
+  check(JSON.stringify(animatedFirst) !== JSON.stringify(animatedNext), 'Animated tonewheel spectra follow LFO time');
+  const drawbars = interpolateModulatedTonewheelDrawbars(animated.tonewheelWavetable, animated.tonewheelDrawbars,
+    { timeSeconds: 0.25, noteStartSeconds: 0, bpm: app.bpm });
+  check(JSON.stringify(animatedNext) === JSON.stringify(trim(generatePartialSpectrum({ type: 'tonewheel' }, 'sine', drawbars))),
+    'Legacy tonewheel delegates with current interpolated drawbars');
+  animated.partialGenerator = normalizePartialGenerator({ type: 'sequence', sequence: 'natural' });
+  check(app.getTonewheelPartials(animated, 0) === app.getTonewheelPartials(animated, 0.25),
+    'Inactive wavetable modulation does not affect procedural cache');
+
+  for (const partialGenerator of [
+    normalizePartialGenerator({ type: 'sequence' }),
+    normalizePartialGenerator({ type: 'binary', mode: 'bit', bit: 5, harmonicCount: 1 }),
+  ]) {
+    track.partialGenerator = partialGenerator;
+    const partials = app.getTonewheelPartials(track);
+    const buffer = await renderOfflineAudio(() => {
+      new Tone.Oscillator({ frequency: 110, type: 'custom', partials }).toDestination().start(0).stop(0.02);
+    }, 0.025, 1, 48000);
+    const samples = buffer.getChannelData(0);
+    check(samples.every(Number.isFinite), `Finite browser audio for ${partialGenerator.type}`);
+    check(partialGenerator.type === 'binary' ? samples.every(sample => sample === 0) : samples.some(sample => Math.abs(sample) > 0.001),
+      `Expected browser ${partialGenerator.type === 'binary' ? 'silence' : 'signal'}`);
+    buffer.dispose();
+  }
+  return labels;
+}
 
 export async function runWaveshaperChecks(app: InstanceType<typeof App>) {
   const originalContext = Tone.getContext();

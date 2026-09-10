@@ -28,6 +28,9 @@ import {
   type DrumLane,
 } from './domain/rhythmTrack.js';
 import { normalizeBitmaskSequenceInput } from './trackActivation.js';
+import { normalizePartialGenerator, type PartialGenerator } from './audio/partialGenerator.js';
+import { DEFAULT_TONEWHEEL_DRAWBARS } from './audio/tonewheelSpectrum.js';
+export { DEFAULT_TONEWHEEL_DRAWBARS } from './audio/tonewheelSpectrum.js';
 import {
   MAX_WAVETABLE_CONFIGURATIONS,
   MAX_WAVETABLE_DIMENSIONS,
@@ -60,6 +63,7 @@ export interface PresetTrackData {
   denominator: number;
   phase: number;
   waveform: string;
+  partialGenerator?: PartialGenerator;
   sequenceInput: string;
   octave: number;
   lengthFactor: number;
@@ -269,7 +273,6 @@ export const WAVEFORM_OPTIONS = [
   { title: 'Stochastic Bandpass', value: 'stochastic-bandpass' },
 ] as const;
 
-export const DEFAULT_TONEWHEEL_DRAWBARS = [0, 0, 0, 8, 0, 0, 0, 0, 0];
 export const TONEWHEEL_DRAWBAR_LABELS = ["16'", "5 1/3'", "8'", "4'", "2 2/3'", "2'", "1 3/5'", "1 1/3'", "1'"];
 
 export interface PresetReverbData {
@@ -391,6 +394,7 @@ export const DEFAULT_PRESET_TRACK_DATA: PresetTrackData = {
   denominator: 4,
   phase: 0,
   waveform: 'sine',
+  partialGenerator: { type: 'tonewheel' },
   sequenceInput: '1 2 4 8',
   octave: 4,
   lengthFactor: 100,
@@ -832,6 +836,7 @@ export function clonePresetTrackData(track: PresetTrackData): PresetTrackData {
     denominator: track.denominator,
     phase: track.phase,
     waveform: track.waveform,
+    partialGenerator: normalizePartialGenerator(track.partialGenerator),
     sequenceInput: track.sequenceInput,
     octave: track.octave,
     lengthFactor: track.lengthFactor,
@@ -958,6 +963,7 @@ export function normalizePresetTrackData(value: unknown, index = 0): PresetTrack
     denominator: clamp(parseInteger(raw.denominator?.toString(), DEFAULT_PRESET_TRACK_DATA.denominator), 1, 16),
     phase: clamp(parseNumber(raw.phase, DEFAULT_PRESET_TRACK_DATA.phase), 0, 1),
     waveform: normalizeWaveform(raw.waveform),
+    partialGenerator: normalizePartialGenerator(raw.partialGenerator),
     sequenceInput: typeof raw.sequenceInput === 'string' ? raw.sequenceInput : DEFAULT_PRESET_TRACK_DATA.sequenceInput,
     octave: clamp(parseInteger(raw.octave?.toString(), DEFAULT_PRESET_TRACK_DATA.octave), 0, 10),
     lengthFactor: clamp(parseInteger(raw.lengthFactor?.toString(), DEFAULT_PRESET_TRACK_DATA.lengthFactor), 0, 400),
@@ -1192,6 +1198,8 @@ export function arePresetDataEqual(left: PresetData, right: PresetData): boolean
       || leftTrack.denominator !== rightTrack.denominator
       || leftTrack.phase !== rightTrack.phase
       || leftTrack.waveform !== rightTrack.waveform
+      || JSON.stringify(normalizePartialGenerator(leftTrack.partialGenerator))
+        !== JSON.stringify(normalizePartialGenerator(rightTrack.partialGenerator))
       || leftTrack.sequenceInput !== rightTrack.sequenceInput
       || leftTrack.octave !== rightTrack.octave
       || leftTrack.lengthFactor !== rightTrack.lengthFactor

@@ -52,6 +52,8 @@ import {
 } from '../src/audio/spectra.js';
 import { encodeWavFromChannelsSync } from '../src/audio/wav.js';
 import { prepareTonewheel, sampleTonewheel } from './tonewheelOscillator.js';
+import { normalizePartialGenerator, type PartialGenerator } from '../src/audio/partialGenerator.js';
+import { preparePartialOscillator } from './partialOscillator.js';
 
 export interface GenerateTrackOptions {
   /** Optional display name for the track. */
@@ -68,6 +70,8 @@ export interface GenerateTrackOptions {
   denominator?: number;
   /** Oscillator shape metadata (not used by MIDI export). */
   waveform?: string;
+  /** Optional procedural harmonic weighting; omitted values retain legacy tonewheel synthesis. */
+  partialGenerator?: PartialGenerator;
   /** @deprecated Legacy generator values are accepted and normalized to tonewheel. */
   generatorType?: string;
   /** @deprecated Legacy FM settings are ignored. */
@@ -253,6 +257,7 @@ export interface GenerateOptions {
   waveshaper?: WaveshaperSettings;
   /** Legacy single-track waveform metadata used when tracks is omitted. */
   waveform?: string;
+  partialGenerator?: PartialGenerator;
   /** Legacy single-track delay in bars used when tracks is omitted. */
   delay?: number;
   /** Legacy single-track fade-in duration in bars used when tracks is omitted. */
@@ -522,6 +527,7 @@ function normalizeTracks(options: GenerateOptions): NormalizedTrack[] {
     numerator: clamp(options.numerator ?? 4, 1, 16),
     denominator: clamp(options.denominator ?? 5, 1, 16),
     waveform: options.waveform ?? 'sine',
+    partialGenerator: normalizePartialGenerator(options.partialGenerator),
     breathEnabled: false,
     breathLevel: -18,
     breathHarmonic: 2,
@@ -655,6 +661,7 @@ function normalizeTracks(options: GenerateOptions): NormalizedTrack[] {
     unisonVoices: clamp(track.unisonVoices ?? fallbackTrack.unisonVoices, 1, 8),
     unisonDetune: clamp(track.unisonDetune ?? fallbackTrack.unisonDetune, 0, 100),
     tonewheelDrawbars: normalizeTonewheelDrawbars(track.tonewheelDrawbars),
+    partialGenerator: normalizePartialGenerator(track.partialGenerator),
     tonewheelWavetable: track.tonewheelWavetable ?? fallbackTrack.tonewheelWavetable,
     tremoloEnabled: Boolean(track.tremoloEnabled ?? fallbackTrack.tremoloEnabled),
     tremoloFrequency: clamp(track.tremoloFrequency ?? fallbackTrack.tremoloFrequency, 0.01, 40),
@@ -1224,7 +1231,13 @@ export async function renderWavChannels(
       entry.track.tonewheelWavetable,
       entry.track.tonewheelDrawbars,
     ));
-    const hasTonewheelModulation = entry.track.tonewheelWavetable.enabled
+    const partialGenerator = normalizePartialGenerator(entry.track.partialGenerator);
+    const isNoiseWaveform = entry.track.waveform === 'pink-noise' || entry.track.waveform === 'brown-noise';
+    const partialOscillator = !isDrumTrack && !isNoiseWaveform && partialGenerator.type !== 'tonewheel'
+      ? preparePartialOscillator(partialGenerator, entry.track.waveform)
+      : null;
+    const hasTonewheelModulation = partialOscillator === null
+      && entry.track.tonewheelWavetable.enabled
       && entry.track.tonewheelWavetable.lfos.some((lfo) => (
         lfo.enabled && lfo.depth !== 0 && lfo.routes.some((route) => route !== 0)
       ));
@@ -1374,7 +1387,9 @@ export async function renderWavChannels(
                   getPitchEnvelopeMidiOffset(entry.track, getPitchEnvelopeLevel(entry.track, t, duration)) / 12,
                 )
                 : 1;
-              const oscillatorSample = sampleTonewheel(phase, entry.track.waveform, tonewheel);
+              const oscillatorSample = partialOscillator
+                ? partialOscillator(phase)
+                : sampleTonewheel(phase, entry.track.waveform, tonewheel);
               const sample = oscillatorSample * voiceGain * env;
               trackLeft[frame] += sample * leftPan;
               trackRight[frame] += sample * rightPan;

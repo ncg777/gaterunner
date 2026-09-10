@@ -67,6 +67,7 @@ export function presetDataToGeneratorInput(data: PresetData) {
       unisonVoices: track.unisonVoices,
       unisonDetune: track.unisonDetune,
       tonewheelDrawbars: track.tonewheelDrawbars,
+      partialGenerator: track.partialGenerator,
       tonewheelWavetable: track.tonewheelWavetable,
       tremoloEnabled: track.tremoloEnabled,
       tremoloFrequency: track.tremoloFrequency,
