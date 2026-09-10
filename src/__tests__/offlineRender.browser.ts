@@ -78,6 +78,24 @@ export async function runPartialGeneratorChecks(app: InstanceType<typeof App>) {
       `Expected browser ${partialGenerator.type === 'binary' ? 'silence' : 'signal'}`);
     buffer.dispose();
   }
+  const peaks: number[] = [];
+  for (const normalize of [true, false]) {
+    const sineTrack = normalizePresetTrackData({
+      waveform: 'sine', partialGenerator: { type: 'sequence', sequence: 'natural', harmonicCount: 16, normalize },
+    });
+    const partials = app.getTonewheelPartials(sineTrack);
+    const buffer = await renderOfflineAudio(() => {
+      new Tone.Oscillator({
+        frequency: 110, type: 'custom', partials, volume: app.getPartialOscillatorVolume(sineTrack, partials),
+      }).toDestination().start(0).stop(0.02);
+    }, 0.025, 1, 48000);
+    peaks.push(Math.max(...buffer.getChannelData(0).map(Math.abs)));
+    buffer.dispose();
+  }
+  check(Math.abs(peaks[0] - 1 / 16) < 0.001 && Math.abs(peaks[1] - 1) < 0.001,
+    'Browser oscillator preserves procedural peak normalization levels');
+  check(app.getPartialOscillatorVolume(normalizePresetTrackData({}), [0.125]) === 0,
+    'Legacy tonewheel oscillator gain is unchanged');
   return labels;
 }
 

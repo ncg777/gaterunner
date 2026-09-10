@@ -32,6 +32,26 @@ test('CLI oscillators sample the shared browser spectrum at the musical fundamen
   }
 });
 
+test('CLI excludes harmonics at and above Nyquist, including changing pitch and sample rate', () => {
+  const generator = normalizePartialGenerator({
+    type: 'sequence', sequence: 'powers-of-two', harmonicCount: 64,
+  });
+  if (generator.type === 'tonewheel') throw new Error('Expected procedural generator');
+  const spectrum = generatePartialSpectrum(generator, 'sawtooth');
+  const sample = preparePartialOscillator(generator, 'sawtooth');
+  for (const sampleRate of [44100, 48000, 96000]) {
+    for (const frequency of [880, 220, 10000, sampleRate / 2, 440]) {
+      const phase = 0.13571;
+      const expected = spectrum.reduce((sum, amplitude, bin) => {
+        const ratio = (bin + 1) / 2;
+        return ratio * frequency < sampleRate / 2
+          ? sum + amplitude * Math.sin(2 * Math.PI * ratio * phase) : sum;
+      }, 0);
+      assert.ok(Math.abs(sample(phase, frequency, sampleRate) - expected) < 1e-7);
+    }
+  }
+});
+
 const track: GenerateTrackOptions = {
   sequence: '1 2', denominator: 16, waveform: 'sawtooth',
   attack: 0, decay: 0, sustain: 1, release: 0.01, gain: -18,

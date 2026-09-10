@@ -1388,7 +1388,9 @@ export async function renderWavChannels(
                 )
                 : 1;
               const oscillatorSample = partialOscillator
-                ? partialOscillator(phase)
+                ? partialOscillator(phase, frequency * vibrato * pitchEnvelopeRatio * (
+                  glidePlan && glidePlan.seconds > 0 ? getGlideFrequency(glidePlan, t) / glidePlan.toFrequency : 1
+                ), sampleRate)
                 : sampleTonewheel(phase, entry.track.waveform, tonewheel);
               const sample = oscillatorSample * voiceGain * env;
               trackLeft[frame] += sample * leftPan;

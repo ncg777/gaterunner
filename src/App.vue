@@ -353,6 +353,7 @@ import { claimVoices, getSynthVoiceCount, prewarmVoicePool, retainVoicePool, typ
 import { createDrumInstrument, type DrumInstrument } from './audio/drumKit';
 import { interpolateModulatedTonewheelDrawbars } from './audio/tonewheelWavetable';
 import { generatePartialSpectrum, normalizePartialGenerator } from './audio/partialGenerator';
+import { getPartialSpectrumGain } from './audio/partialSpectrumGain';
 import {
   BREATH_FILTER_Q,
 } from './audio/spectra';
@@ -2009,6 +2010,10 @@ export default defineComponent({
     getOscillatorType(track: PresetTrackData): string {
       return track.unisonVoices > 1 ? 'fatcustom' : 'custom';
     },
+    getPartialOscillatorVolume(track: PresetTrackData, partials: number[]): number {
+      return normalizePartialGenerator(track.partialGenerator).type === 'tonewheel'
+        ? 0 : Tone.gainToDb(getPartialSpectrumGain(partials));
+    },
     getTonewheelPartials(track: PresetTrackData, timeSeconds = 0, noteStartSeconds = 0): number[] {
       // Noise waveforms never use the additive oscillator path.
       if (this.isNoiseWaveform(track.waveform)) {
@@ -2401,6 +2406,7 @@ export default defineComponent({
               count: track.unisonVoices,
               spread: track.unisonDetune,
               partials,
+              volume: this.getPartialOscillatorVolume(track, partials),
             } as unknown as Tone.PolySynthOptions<Tone.Synth<Tone.SynthOptions>>['options']['oscillator'];
             const voiceOptions = {
               envelope,
@@ -2575,6 +2581,7 @@ export default defineComponent({
         count: track.unisonVoices,
         spread: track.unisonDetune,
         partials,
+        volume: this.getPartialOscillatorVolume(track, partials),
       };
       if (chain.synth instanceof MonoGlideSynth) {
         chain.synth.set({ oscillator } as unknown as Parameters<PitchEnvelopeSynth['set']>[0]);
