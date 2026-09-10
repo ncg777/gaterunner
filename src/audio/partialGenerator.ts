@@ -16,11 +16,24 @@ interface ProceduralSettings {
   tilt: number;
 }
 
+interface WaveformSettings {
+  harmonicCount: number;
+  tilt: number;
+  contrast: number;
+  oddEvenBalance: number;
+  mask: PartialMask;
+  normalize: boolean;
+}
+
 export type PartialGenerator =
   | { type: 'tonewheel' }
-  | { type: 'waveform' }
+  | (Partial<WaveformSettings> & { type: 'waveform' })
   | (ProceduralSettings & { type: 'sequence'; sequence: PartialSequence })
   | (ProceduralSettings & { type: 'binary'; mode: PartialBinaryMode; bit: number });
+
+export type NormalizedPartialGenerator =
+  | Exclude<PartialGenerator, { type: 'waveform' }>
+  | (WaveformSettings & { type: 'waveform' });
 
 export const MAX_PROCEDURAL_AMPLITUDE = Number.MAX_SAFE_INTEGER;
 
@@ -34,9 +47,17 @@ function choice<T extends string>(value: unknown, choices: readonly T[], fallbac
   return choices.includes(value as T) ? value as T : fallback;
 }
 
-export function normalizePartialGenerator(value: unknown): PartialGenerator {
+export function normalizePartialGenerator(value: unknown): NormalizedPartialGenerator {
   const raw = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>;
-  if (raw.type === 'waveform') return { type: 'waveform' };
+  if (raw.type === 'waveform') return {
+    type: 'waveform',
+    harmonicCount: Math.round(boundedNumber(raw.harmonicCount, 64, 1, 64)),
+    tilt: boundedNumber(raw.tilt, 0, -24, 24),
+    contrast: boundedNumber(raw.contrast, 1, 0.25, 4),
+    oddEvenBalance: boundedNumber(raw.oddEvenBalance, 0, -24, 24),
+    mask: choice(raw.mask, ['none', 'odd', 'even', 'prime', 'fibonacci', 'power-of-two'], 'none'),
+    normalize: typeof raw.normalize === 'boolean' ? raw.normalize : false,
+  };
   if (raw.type !== 'sequence' && raw.type !== 'binary') {
     return { type: 'tonewheel' };
   }
@@ -64,10 +85,10 @@ export function isNoiseWaveform(waveform: string): boolean {
 }
 
 /** Only legacy noise tracks without an explicit source need source migration. */
-export function normalizeTrackPartialGenerator(value: unknown, waveform: string): PartialGenerator {
+export function normalizeTrackPartialGenerator(value: unknown, waveform: string): NormalizedPartialGenerator {
   const raw = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>;
   if (!['tonewheel', 'waveform', 'sequence', 'binary'].includes(raw.type as string) && isNoiseWaveform(waveform)) {
-    return { type: 'waveform' };
+    return normalizePartialGenerator({ type: 'waveform' });
   }
   return normalizePartialGenerator(value);
 }
@@ -153,6 +174,21 @@ export function generateProceduralAmplitudes(value: unknown): number[] {
     : amplitudes.map((weight) => Math.min(MAX_PROCEDURAL_AMPLITUDE, weight));
 }
 
+function generateWaveformAmplitudes(generator: WaveformSettings, waveform: string): number[] {
+  const amplitudes = Array.from({ length: generator.harmonicCount }, (_, index) => {
+    const harmonic = index + 1;
+    const amplitude = getWaveformPartialAmplitude(waveform, harmonic);
+    if (amplitude === 0 || !passesMask(harmonic, generator.mask)) return 0;
+    // Positive balance attenuates odd harmonics; negative balance attenuates even ones.
+    const balanceDb = harmonic % 2 === 1
+      ? -Math.max(0, generator.oddEvenBalance) : Math.min(0, generator.oddEvenBalance);
+    const gain = 10 ** ((generator.tilt * Math.log2(harmonic) + balanceDb) / 20);
+    return Math.sign(amplitude) * Math.abs(amplitude) ** generator.contrast * gain;
+  });
+  const peak = Math.max(...amplitudes.map(Math.abs));
+  return generator.normalize && peak > 0 ? amplitudes.map(amplitude => amplitude / peak) : amplitudes;
+}
+
 /** Source-local spectrum on the half-musical-fundamental basis. */
 export function generatePartialSpectrum(
   generator: unknown,
@@ -163,7 +199,7 @@ export function generatePartialSpectrum(
   if (normalized.type === 'tonewheel') return getTonewheelSpectrum(drawbars, 'sine');
   if (normalized.type === 'waveform' && isNoiseWaveform(waveform)) return [];
   const amplitudes = normalized.type === 'waveform'
-    ? Array.from({ length: 64 }, (_, index) => getWaveformPartialAmplitude(waveform, index + 1))
+    ? generateWaveformAmplitudes(normalized, waveform)
     : generateProceduralAmplitudes(normalized);
   const spectrum = Array.from({ length: amplitudes.length * 2 }, () => 0);
   amplitudes.forEach((weight, index) => {

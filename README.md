@@ -57,6 +57,34 @@ Each melodic track uses one bounded-cost tonewheel engine.
 - Imported presets that contain retired FM or virtual-analog fields remain loadable.
   Those fields are silently discarded and the track keeps its tonewheel-compatible settings.
 
+### Waveform Spectral Transforms
+
+Select **Waveform** as the **Partial source** in a melodic track's **Generator** tab.
+Its harmonic spectrum can be reshaped before envelopes, filters, and effects:
+
+- **Harmonic count** (1–64) limits the highest musical harmonic.
+- **Harmonic mask** keeps all, odd, even, prime, Fibonacci, or power-of-two harmonics.
+- **Spectral tilt** (−24 to +24 dB/octave) darkens or brightens the spectrum relative
+  to the fundamental.
+- **Spectral contrast** (0.25–4) raises each partial's magnitude to that power.
+  Below 1 flattens magnitude differences; above 1 emphasizes stronger partials.
+  Coefficient signs and zero amplitudes are preserved.
+- **Odd/even balance** (−24 to +24 dB) favors odd harmonics at negative values
+  and even harmonics at positive values by attenuating the opposite group.
+- **Peak normalization** optionally scales the largest absolute partial to 1
+  after all transforms. This is spectral normalization, not a loudness limiter;
+  strong positive tilt without normalization can substantially increase level.
+
+The order is harmonic limit/mask → contrast → tilt and balance → normalization.
+The live spectrum preview, browser playback/WAV export, and CLI WAV generation
+use the same transformed coefficients. MIDI is unchanged. Pink and brown noise
+are broadband sources, so these controls are hidden and bypassed for noise.
+
+Defaults (64 harmonics, no mask, 0 dB tilt/balance, contrast 1, normalization off)
+preserve existing waveform sounds. Settings persist with presets, copies, JSON
+export/import, and shared URLs inside `partialGenerator` using `harmonicCount`,
+`mask`, `tilt`, `contrast`, `oddEvenBalance`, and `normalize`.
+
 ### Waveshaper And Tanh Drive
 
 The **Drive** tab has an optional waveshaper for each melodic or rhythmic track,
