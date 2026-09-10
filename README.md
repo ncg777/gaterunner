@@ -1,8 +1,152 @@
 # GateRunner
 
-A browser-based MIDI step sequencer with a lightweight tonewheel-based melodic engine that produces MIDI and WAV files from binary-encoded note sequences using Forte number pitch-class sets.
+GateRunner turns short sequences of integers into playable, evolving harmony. Each
+integer is a bitmask over a Forte-number pitch-class set, so one compact value can
+describe a note or an entire chord. Build multitrack patterns in the browser, shape
+them with the built-in tonewheel synth and effects, then export the result as MIDI,
+WAV, a reusable preset, or a shareable URL.
 
-**Live app:** [https://ncg777.github.io/gaterunner/](https://ncg777.github.io/gaterunner/)
+**[Open the live app](https://ncg777.github.io/gaterunner/)**
+
+**Read next:** [Quick Start](#quick-start) | [Examples](#examples) |
+[Encoding](#how-the-encoding-works) | [Feature Guide](#feature-guide) |
+[CLI](#cli-and-automation) | [Developer Guide](#developer-guide) |
+[Contributing](#contributing)
+
+## Why GateRunner?
+
+Algorithmic composition often means choosing between writing custom music code and
+manually programming a DAW. GateRunner provides a smaller feedback loop: type a
+numeric pattern, immediately hear how it maps onto a pitch-class set, change its
+rhythm or sound, and export the useful result.
+
+It is useful for:
+
+- Sketching chord progressions and arpeggios from compact numeric sequences.
+- Exploring Forte pitch-class sets without calculating every voicing by hand.
+- Building polymetric melodic and rhythmic loops with independent track timing.
+- Creating deterministic MIDI or WAV fixtures from the command line.
+- Designing animated tonewheel and spectral sounds directly in the browser.
+
+## Key Features
+
+- **Bitmask sequencing:** encode notes and chords as nonnegative integers against a
+  selected Forte pitch-class set.
+- **Multitrack arrangement:** combine melodic and drum tracks with per-track meter,
+  delay, phase, repeats, padding, fades, time warp, mute, and solo.
+- **Song-level gating:** use the `B` sequence to switch tracks on and off across
+  equal sections of the loop.
+- **Integrated synthesis:** use tonewheel drawbars, sparse multidimensional
+  wavetables, spectral transforms, vector LFOs, unison, glide, filters, and effects.
+- **Browser and CLI export:** generate MIDI for a DAW or render deterministic WAV
+  files; CLI rendering supports reusable workers and parallel tracks.
+- **Portable projects:** save named presets locally, import or export JSON libraries,
+  and share a working draft through its URL.
+- **Installable web app:** use the hosted PWA or run the Vue application locally.
+
+## Quick Start
+
+### Try It in the Browser
+
+1. Open the [live app](https://ncg777.github.io/gaterunner/).
+2. Select the Forte set `7-35.11`, whose positions begin C, D, E, F, G, A, B.
+3. In a melodic track, enter `1 2 4 8 3 5 7` as the sequence.
+4. Press **Play**. The powers of two produce single notes; `3`, `5`, and `7`
+   produce increasingly dense chords.
+5. Change the track's timing or open **Generator** to shape the sound.
+6. Use the transport actions to export MIDI or WAV, or use **Save As** to keep the
+   pattern as a named preset.
+
+The sequence is interpreted one integer at a time. With `7-35.11`, the first few
+values are:
+
+| Value | Binary | Active positions | Result |
+| ---: | :---: | :--- | :--- |
+| `1` | `0001` | 0 | C |
+| `2` | `0010` | 1 | D |
+| `3` | `0011` | 0, 1 | C + D |
+| `5` | `0101` | 0, 2 | C + E |
+| `7` | `0111` | 0, 1, 2 | C + D + E |
+
+Binary is shown in conventional most-significant-bit-first notation. GateRunner
+numbers positions from the least significant bit, so bit 0 is the rightmost digit.
+
+### Run It Locally
+
+Prerequisites are a current Node.js LTS release and Corepack. The repository pins
+Yarn `4.17.0` in `package.json`.
+
+```sh
+git clone https://github.com/ncg777/gaterunner.git
+cd gaterunner
+corepack enable
+yarn install
+yarn dev
+```
+
+Open the local URL printed by Vite. The development server defaults to port `3000`.
+
+For a production build:
+
+```sh
+yarn build
+```
+
+The build runs the Vue/TypeScript type check and writes the deployable site to
+`docs/`.
+
+## Examples
+
+### Build a Progression from Set Relationships
+
+Start with `1 2 4 8` to hear adjacent positions of the selected set separately.
+Then replace it with `3 6 12` to hear overlapping two-position shapes, or with
+`7 14 28` to move a three-position shape through the set. Changing the Forte set
+remaps the same bit relationships to different pitch material without rewriting the
+sequence.
+
+### Arrange Two Tracks with `B`
+
+Create two tracks and enter `1 2 3 0` in **Track Activation (B)**. Across the four
+equal sections of the full loop, GateRunner plays:
+
+| Section | Mask | Active tracks |
+| ---: | ---: | :--- |
+| 1 | `1` | Track 1 |
+| 2 | `2` | Track 2 |
+| 3 | `3` | Tracks 1 and 2 |
+| 4 | `0` | Silence |
+
+This is a compact way to audition call-and-response, layer entrances, and whole-loop
+arrangements without duplicating notes.
+
+### Move a Sketch into a DAW
+
+Build and audition the loop in the browser, choose **Export Preset** to preserve the
+source settings, and export MIDI for editing or orchestration in a DAW. Export WAV
+when the GateRunner synth sound is part of the result. The same exported preset can
+also drive repeatable CLI generation:
+
+```sh
+yarn cli --format midi --output sketch.mid --preset preset.json
+yarn cli --format wav --output sketch.wav --preset preset.json
+```
+
+## How the Encoding Works
+
+For each sequence value, GateRunner:
+
+1. Reads the value as a nonnegative integer bitmask.
+2. Maps each set bit to that position in the selected pitch-class set.
+3. Continues the set octavewise through the available MIDI range.
+4. Plays all active positions together as a chord.
+
+For example, `5` is binary `101`, so positions 0 and 2 are active. In a set whose
+first positions are C, D, and E, the result is C + E. The value `7` is binary `111`,
+so it produces C + D + E. Powers of two contain one set bit and therefore produce
+single notes.
+
+## Feature Guide
 
 ### Presets
 
@@ -178,7 +322,12 @@ GateRunner can optionally gate tracks across the full song loop with a song-leve
 - The track strip darkens inactive chunks so the schedule stays visible.
 - URL sharing accepts `?b=1+2+3+0` (or space-encoded values). The CLI accepts the same syntax via `--b "1 2 3 0"`.
 
-### CLI WAV Export
+## CLI and Automation
+
+Build the TypeScript CLI with `yarn build:cli`, or run it directly through `tsx`
+with `yarn cli`. Run `yarn cli --help` for the complete option list.
+
+### WAV Export
 
 Build or run the TypeScript CLI directly:
 
@@ -258,41 +407,75 @@ await checks.runOfflineRenderChecks();
 await checks.runModulationChecks(document.querySelector('#app').__vue_app__._instance.proxy);
 ```
 
----
+## Developer Guide
 
-### How Notes Are Computed in the Encoding Scheme
+### Project Layout
 
-This application uses a binary-based encoding system to determine which notes are played from numerical values. Here's how it works:
+| Path | Responsibility |
+| :--- | :--- |
+| `src/App.vue` | Application state, live transport scheduling, and browser audio graph wiring |
+| `src/components/` | Vue and Vuetify controls, editors, dialogs, and track views |
+| `src/audio/` | Synthesis, effects, modulation, rendering, and WAV utilities |
+| `src/domain/` | Music-domain behavior shared by UI features |
+| `src/presets.ts` | Preset defaults, cloning, normalization, migration, and URL state |
+| `cli/` | MIDI/WAV command-line entry points, native renderer, workers, and benchmarks |
+| `src/__tests__/`, `cli/*.test.ts` | Browser-engine and CLI behavior tests |
+| `docs/` | Production web build used by GitHub Pages |
 
-1. **Binary Representation of Numbers:**
+The browser uses Vue 3, Vuetify, Tone.js, and `@tonejs/midi`. The CLI is TypeScript
+executed with `tsx` during development and compiled with `tsc` for distribution.
+Shared scheduling, distortion, activation, and synthesis definitions should remain
+the source of truth when behavior must match between browser and CLI output.
 
-   - Each number is converted into binary, with bit 0 at position 0, bit 1 at position 1, and so on. For example:
-     - The number `5` becomes `1010`.
-     - The number `10` becomes `0101`.
+### Common Commands
 
-2. **Pitch Class Assignment:**
+| Command | Purpose |
+| :--- | :--- |
+| `yarn dev` | Start the Vite development server on port 3000 |
+| `yarn type-check` | Run `vue-tsc` across the application |
+| `yarn node --import tsx --test cli/*.test.ts src/__tests__/*.test.ts` | Run Node-compatible tests |
+| `yarn build` | Type-check and create the production browser build |
+| `yarn build:cli` | Compile the CLI to `dist-cli/` |
+| `yarn bench:wav` | Run the WAV renderer benchmark |
 
-   - Each binary digit corresponds to a position in the selected pitch class set going up octavewise to the maximal midi pitch. For example, for 7-35.11:
-     - Position 0 = C
-     - Position 1 = D
-     - Position 2 = E
-     - Position 3 = F
-     - Position 4 = G
-     - Position 5 = A
-     - Position 6 = B
-     - Position 7 = C
-     - ...
+### Browser Audio Checks
 
-3. **Chords:**
+Some offline-render checks require browser Web Audio APIs. Start `yarn dev`, open
+the local application, and run the browser-check snippet from the
+[Browser WAV Export](#browser-wav-export) section in DevTools. These checks cover
+clock equivalence, modulation, voice filtering, and audio-context restoration.
 
-   - If multiple `1`s are present, the corresponding notes form a chord.
-     - Example: The number `7` (`111`) maps to C, D, and E.
+## Contributing
 
-### Summary
+Contributions should keep browser playback, browser export, and CLI output aligned
+where they share a documented behavior.
 
-To compute notes:
+1. Fork the repository, create a focused branch, and install dependencies with
+  `corepack enable` followed by `yarn install`.
+2. Make the smallest change that solves the issue. Reuse the shared modules in
+  `src/audio/`, `src/domain/`, and `src/trackActivation.ts` when behavior crosses
+  browser and CLI boundaries.
+3. Add or update a nearby test. Use `src/__tests__/` for shared/browser-engine logic
+  and `cli/*.test.ts` for native CLI behavior.
+4. Update this README when a user-facing control, preset field, CLI option, export
+  contract, or compatibility guarantee changes.
+5. Run the checks below before opening a pull request.
 
-- Convert the number to binary (bit 0 = position 0).
-- Map `1`s to their pitch classes.
-- Apply an octave offset for final pitches.
-- Combine active notes into a chord.
+```sh
+yarn type-check
+yarn node --import tsx --test cli/*.test.ts src/__tests__/*.test.ts
+yarn build
+```
+
+For audio-rendering changes, also run the applicable browser audio checks. If a CLI
+WAV change is intentional, capture a benchmark reference with
+`yarn bench:wav --write-reference .wav-reference` and describe the expected audio or
+hash difference in the pull request.
+
+A useful pull request includes the problem being solved, the observable behavior
+before and after the change, the checks that were run, and any preset, MIDI, WAV, or
+backward-compatibility impact.
+
+## License
+
+See [LICENSE](LICENSE) for the project's license terms.
