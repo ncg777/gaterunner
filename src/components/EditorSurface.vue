@@ -469,26 +469,24 @@
           </v-row>
           <figure class="partial-spectrum">
             <figcaption class="text-subtitle-2">Static harmonic spectrum preview</figcaption>
-            <template>
-              <svg viewBox="0 0 640 150" role="img" :aria-label="partialSpectrumDescription">
-                <title>Static harmonic spectrum</title>
-                <desc>{{ partialSpectrumDescription }}</desc>
-                <g v-for="tick in spectrumTicks" :key="tick.db">
-                  <line x1="48" :y1="tick.y" x2="624" :y2="tick.y" class="spectrum-grid" />
-                  <text x="42" :y="tick.y + 4" text-anchor="end">{{ tick.db }}</text>
-                </g>
-                <line x1="48" y1="120" x2="624" y2="120" class="spectrum-axis" />
-                <line x1="48" y1="12" x2="48" y2="120" class="spectrum-axis" />
-                <line v-for="bar in partialSpectrumBars" :key="bar.harmonic" :x1="bar.x" :x2="bar.x" :y1="bar.y" y2="120" class="spectrum-bar">
-                  <title>{{ bar.harmonic }}× fundamental: {{ bar.amplitude.toPrecision(3) }} ({{ bar.decibels.toFixed(1) }} dB relative to peak)</title>
-                </line>
-                <text x="48" y="140">0</text>
-                <text x="328" y="140" text-anchor="middle">Frequency / musical fundamental</text>
-                <text x="624" y="140" text-anchor="end">{{ partialSpectrum.length / 2 }}×</text>
-              </svg>
-              <p v-if="partialSpectrumPeak === 0" class="text-caption" role="status">Silent spectrum: all partial amplitudes are zero. Adjust the source settings to generate sound.</p>
-              <p class="text-caption text-medium-emphasis">Magnitude in dB relative to peak ({{ partialSpectrumPeak.toPrecision(3) }}); partials below −60 dB are hidden. Static base morph position only, without LFO motion, breath noise, envelopes, effects, or pitch-dependent band limiting.</p>
-            </template>
+            <svg viewBox="0 0 640 150" role="img" :aria-label="partialSpectrumDescription">
+              <title>Static harmonic spectrum</title>
+              <desc>{{ partialSpectrumDescription }}</desc>
+              <g v-for="tick in spectrumTicks" :key="tick.db">
+                <line x1="48" :y1="tick.y" x2="624" :y2="tick.y" class="spectrum-grid" />
+                <text x="42" :y="tick.y + 4" text-anchor="end">{{ tick.db }}</text>
+              </g>
+              <line x1="48" y1="120" x2="624" y2="120" class="spectrum-axis" />
+              <line x1="48" y1="12" x2="48" y2="120" class="spectrum-axis" />
+              <line v-for="bar in partialSpectrumBars" :key="bar.harmonic" :x1="bar.x" :x2="bar.x" :y1="bar.y" y2="120" class="spectrum-bar">
+                <title>{{ bar.harmonic }}× fundamental: {{ bar.amplitude.toPrecision(3) }} ({{ bar.decibels.toFixed(1) }} dB relative to peak)</title>
+              </line>
+              <text x="48" y="140">0</text>
+              <text x="328" y="140" text-anchor="middle">Frequency / musical fundamental</text>
+              <text x="624" y="140" text-anchor="end">{{ partialSpectrum.length / 2 }}×</text>
+            </svg>
+            <p v-if="partialSpectrumPeak === 0" class="text-caption" role="status">Silent spectrum: all partial amplitudes are zero. Adjust the source settings to generate sound.</p>
+            <p class="text-caption text-medium-emphasis">Magnitude in dB relative to peak ({{ partialSpectrumPeak.toPrecision(3) }}); partials below −60 dB are hidden. Static base morph position only, without LFO motion, breath noise, envelopes, effects, or pitch-dependent band limiting.</p>
           </figure>
           <v-row class="compact-row">
             <v-col cols="12" md="4">

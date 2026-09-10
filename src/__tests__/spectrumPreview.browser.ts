@@ -16,6 +16,7 @@ export async function runSpectrumPreviewChecks(editor: InstanceType<typeof Edito
   const hasWaveformSelector = () => [...root.querySelectorAll('label')].some((label) => label.textContent === 'Waveform');
   try {
     editor.activeControlTab = 'generator';
+    editor.draftTrack.tonewheelWavetable.enabled = false;
     editor.draftTrack.partialGenerator = normalizePartialGenerator({ type: 'sequence', harmonicCount: 8 });
     for (const waveform of ['sine', 'square', 'choir-ah', 'pink-noise']) {
       editor.draftTrack.waveform = waveform;
