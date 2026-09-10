@@ -32,9 +32,18 @@ export async function runSpectrumPreviewChecks(editor: InstanceType<typeof Edito
     editor.draftTrack.waveform = 'square';
     await nextTick();
     check(hasWaveformSelector() && bars().length === 32, 'Waveform source exposes its selector and Fourier partials');
+    check(root.textContent!.includes('Spectral contrast'), 'Waveform exposes spectral transform controls');
+    editor.updatePartialGenerator({ harmonicCount: 8, tilt: -6, contrast: 0.5, oddEvenBalance: 6, normalize: true });
+    await nextTick();
+    check(bars().length === 4 && editor.partialSpectrum.length === 16, 'Editing waveform transforms updates the spectrum preview');
+    check(editor.partialSpectrumPeak === 1, 'Waveform preview reflects peak normalization');
+    editor.updatePartialGenerator({ mask: 'even' });
+    await nextTick();
+    check(bars().length === 0 && root.textContent!.includes('Silent spectrum:'), 'Waveform masks can silence missing harmonics without filling zeros');
     editor.draftTrack.waveform = 'brown-noise';
     await nextTick();
     check(!root.querySelector('.partial-spectrum svg') && root.textContent!.includes('Noise is broadband'), 'Noise has an explicit broadband explanation instead of an empty plot');
+    check(!root.textContent!.includes('Spectral contrast'), 'Noise hides inapplicable spectral transform controls');
     editor.draftTrack.partialGenerator = { type: 'tonewheel' };
     editor.draftTrack.tonewheelWavetable.enabled = false;
     editor.draftTrack.tonewheelDrawbars = [0, 0, 8, 0, 0, 0, 0, 0, 0];

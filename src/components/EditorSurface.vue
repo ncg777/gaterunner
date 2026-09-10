@@ -417,9 +417,32 @@
               />
             </v-col>
           </v-row>
+          <template v-if="partialGenerator.type === 'waveform' && !isNoiseWaveform">
+            <v-row>
+              <v-col cols="12" md="6">
+                <EditableSlider :model-value="partialGenerator.harmonicCount" :label="`Harmonic count (${partialGenerator.harmonicCount})`" :min="1" :max="64" :step="1" @update:modelValue="updatePartialGenerator({ harmonicCount: $event })" />
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-select :model-value="partialGenerator.mask" label="Harmonic mask" :items="partialMaskOptions" density="comfortable" variant="outlined" hide-details @update:modelValue="updatePartialGenerator({ mask: $event })" />
+              </v-col>
+              <v-col cols="12" md="6">
+                <EditableSlider :model-value="partialGenerator.tilt" :label="`Spectral tilt (${partialGenerator.tilt.toFixed(1)} dB/oct)`" :min="-24" :max="24" :step="0.5" @update:modelValue="updatePartialGenerator({ tilt: $event })" />
+              </v-col>
+              <v-col cols="12" md="6">
+                <EditableSlider :model-value="partialGenerator.contrast" :label="`Spectral contrast (${partialGenerator.contrast.toFixed(2)})`" :min="0.25" :max="4" :step="0.05" @update:modelValue="updatePartialGenerator({ contrast: $event })" />
+              </v-col>
+              <v-col cols="12" md="8">
+                <EditableSlider :model-value="partialGenerator.oddEvenBalance" :label="`Odd/even balance (${partialGenerator.oddEvenBalance.toFixed(1)} dB; + favors even)`" :min="-24" :max="24" :step="0.5" @update:modelValue="updatePartialGenerator({ oddEvenBalance: $event })" />
+              </v-col>
+              <v-col cols="12" md="4">
+                <v-switch :model-value="partialGenerator.normalize" label="Peak normalization" density="compact" hide-details @update:modelValue="updatePartialGenerator({ normalize: Boolean($event) })" />
+              </v-col>
+            </v-row>
+            <p class="text-caption text-medium-emphasis mt-2">Harmonic limit/mask → contrast → tilt and odd/even balance → optional peak normalization. Contrast below 1 flattens magnitudes; above 1 emphasizes strong partials. Signs and silent harmonics are preserved. Positive tilt brightens; negative tilt darkens. Strong boosts can increase level; normalization sets the largest partial magnitude to 1, not the output loudness.</p>
+          </template>
           <figure class="partial-spectrum">
             <figcaption class="text-subtitle-2">Static harmonic spectrum preview</figcaption>
-            <p v-if="isNoiseWaveform" class="text-caption">Noise is broadband, not a harmonic spectrum. No discrete partials are shown.</p>
+            <p v-if="isNoiseWaveform" class="text-caption">Noise is broadband, not a harmonic spectrum. Spectral transforms do not apply and no discrete partials are shown.</p>
             <template v-else>
               <svg viewBox="0 0 640 150" role="img" :aria-label="partialSpectrumDescription">
                 <title>Static harmonic spectrum</title>
@@ -1030,7 +1053,7 @@ import RhythmTrackControls from './RhythmTrackControls.vue';
 import RhythmSoundControls from './RhythmSoundControls.vue';
 import TimeWarpPreview from './TimeWarpPreview.vue';
 import WaveshaperControls from './WaveshaperControls.vue';
-import { generatePartialSpectrum, normalizePartialGenerator, type PartialGenerator } from '../audio/partialGenerator';
+import { generatePartialSpectrum, normalizePartialGenerator, type NormalizedPartialGenerator } from '../audio/partialGenerator';
 import {
   interpolateTonewheelDrawbars,
   MAX_WAVETABLE_CONFIGURATIONS,
@@ -1171,7 +1194,7 @@ export default defineComponent({
     };
   },
   computed: {
-    partialGenerator(): PartialGenerator {
+    partialGenerator(): NormalizedPartialGenerator {
       return normalizePartialGenerator(this.draftTrack.partialGenerator);
     },
     isNoiseWaveform(): boolean {
@@ -1246,7 +1269,7 @@ export default defineComponent({
     },
   },
   methods: {
-    setPartialSource(type: PartialGenerator['type']) {
+    setPartialSource(type: NormalizedPartialGenerator['type']) {
       this.updatePartialGenerator({ type });
     },
     updatePartialGenerator(change: Record<string, unknown>) {

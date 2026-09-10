@@ -9,6 +9,7 @@ import { preparePartialOscillator } from './partialOscillator.js';
 test('CLI oscillators sample the shared browser spectrum at the musical fundamental', () => {
   const configs = [
     { type: 'waveform' },
+    { type: 'waveform', contrast: 0.5, oddEvenBalance: 12, normalize: true },
     ...['natural', 'fibonacci', 'primes', 'powers-of-two', 'thue-morse'].map(sequence => ({
       type: 'sequence', sequence,
     })),
@@ -90,6 +91,23 @@ test('procedural WAV output changes deterministically without changing MIDI', as
   assert.notDeepEqual(rendered, legacy);
   assert.deepEqual(await generateWav(proceduralOptions), rendered);
   assert.deepEqual(await generateMidi(proceduralOptions), await generateMidi(legacyOptions));
+});
+
+test('waveform transforms survive CLI preset conversion and change WAV but not MIDI', async () => {
+  const data = normalizePresetData({ tracks: [{
+    ...track, sequenceInput: '1 2', partialGenerator: {
+      type: 'waveform', harmonicCount: 12, tilt: -6, contrast: 0.5,
+      oddEvenBalance: 9, mask: 'prime', normalize: true,
+    },
+  }] });
+  const input = presetDataToGeneratorInput(data);
+  assert.deepEqual(input.tracks[0].partialGenerator, data.tracks[0].partialGenerator);
+  const transformed = { ...options, tracks: input.tracks };
+  const neutral = { ...options, tracks: [{ ...input.tracks[0], partialGenerator: { type: 'waveform' } as const }] };
+  const rendered = await generateWav(transformed);
+  assert.notDeepEqual(rendered, await generateWav(neutral));
+  assert.deepEqual(rendered, await generateWav(transformed));
+  assert.deepEqual(await generateMidi(transformed), await generateMidi(neutral));
 });
 
 test('inactive tonewheel settings do not alter waveform or procedural rendering', async () => {

@@ -7,7 +7,7 @@ import {
   normalizePartialGenerator,
 } from '../audio/partialGenerator.js';
 import {
-  FLUTE_HARMONICS, PULSE_DUTY, REED_HARMONICS, getWaveformPartialAmplitude,
+  FLUTE_HARMONICS, PULSE_DUTY, REED_HARMONICS, getWaveformPartialAmplitude, isPulseWaveform,
 } from '../audio/spectra.js';
 import { getTonewheelSpectrum } from '../audio/tonewheelSpectrum.js';
 import {
@@ -22,6 +22,10 @@ const sequence = (name: string, extra: Record<string, unknown> = {}) => ({
 const binary = (mode: string, extra: Record<string, unknown> = {}) => ({
   type: 'binary', mode, harmonicCount: 8, normalize: false, ...extra,
 });
+const waveformDefaults = {
+  type: 'waveform', harmonicCount: 64, tilt: 0, contrast: 1,
+  oddEvenBalance: 0, mask: 'none', normalize: false,
+};
 
 test('each sequence has the documented starting index', () => {
   const examples = {
@@ -281,14 +285,15 @@ test('procedural configs clone independently, round-trip version 2, and particip
 });
 
 test('waveform source preserves signed Fourier coefficients for 64 musical harmonics', () => {
-  assert.deepEqual(normalizePartialGenerator({ type: 'waveform', waveform: 'triangle', harmonicCount: 3 }), { type: 'waveform' });
+  assert.deepEqual(normalizePartialGenerator({ type: 'waveform', waveform: 'triangle' }), waveformDefaults);
   for (const waveform of ['sine', 'triangle', 'sawtooth', 'square', 'flute', ...Object.keys(REED_HARMONICS),
     ...Object.keys(PULSE_DUTY), 'choir-ah', 'choir-oh', 'helmholtz', 'formant', 'duct', 'aeolian', 'stochastic-bandpass']) {
     const spectrum = generatePartialSpectrum({ type: 'waveform' }, waveform);
     assert.equal(spectrum.length, 128);
     for (let harmonic = 1; harmonic <= 64; harmonic += 1) {
       assert.equal(spectrum[2 * harmonic - 2], 0);
-      assert.equal(spectrum[2 * harmonic - 1], legacyWaveform(waveform, harmonic));
+      const pulseNull = isPulseWaveform(waveform) && Number.isInteger(harmonic * PULSE_DUTY[waveform]);
+      assert.equal(spectrum[2 * harmonic - 1], pulseNull ? 0 : legacyWaveform(waveform, harmonic));
     }
     assert.deepEqual(spectrum, generatePartialSpectrum({ type: 'waveform' }, waveform, Array(9).fill(0)));
   }
@@ -304,18 +309,134 @@ test('waveform selections round trip, and only unspecified or unknown legacy noi
     if (imported.kind === 'single-preset') {
       assert.equal(arePresetDataEqual(data, imported.preset.data), true);
       assert.equal(imported.preset.data.tracks[0].waveform, waveform);
-      assert.deepEqual(imported.preset.data.tracks[0].partialGenerator, { type: 'waveform' });
+      assert.deepEqual(imported.preset.data.tracks[0].partialGenerator, waveformDefaults);
     }
   }
   for (const waveform of ['pink-noise', 'brown-noise']) {
     for (const partialGenerator of [undefined, null, { type: 'unknown' }]) {
       const track = normalizePresetTrackData({ waveform, partialGenerator });
-      assert.deepEqual(track.partialGenerator, { type: 'waveform' });
-      assert.deepEqual(clonePresetTrackData(track).partialGenerator, { type: 'waveform' });
+      assert.deepEqual(track.partialGenerator, waveformDefaults);
+      assert.deepEqual(clonePresetTrackData(track).partialGenerator, waveformDefaults);
     }
     for (const type of ['tonewheel', 'sequence', 'binary']) {
       assert.equal(normalizePresetTrackData({ waveform, partialGenerator: { type } }).partialGenerator?.type, type);
     }
-    assert.deepEqual(normalizePresetData({ waveform }).tracks[0].partialGenerator, { type: 'waveform' });
+    assert.deepEqual(normalizePresetData({ waveform }).tracks[0].partialGenerator, waveformDefaults);
+  }
+});
+
+test('waveform settings have neutral defaults and clamp malformed input', () => {
+  assert.deepEqual(normalizePartialGenerator({
+    type: 'waveform', harmonicCount: NaN, tilt: Infinity, contrast: null,
+    oddEvenBalance: '12', mask: 'invalid', normalize: 'true',
+  }), waveformDefaults);
+  assert.deepEqual(normalizePartialGenerator({
+    type: 'waveform', harmonicCount: 100, tilt: 100, contrast: 100, oddEvenBalance: -100,
+  }), { ...waveformDefaults, tilt: 24, contrast: 4, oddEvenBalance: -24 });
+  assert.deepEqual(normalizePartialGenerator({
+    type: 'waveform', harmonicCount: -1, tilt: -100, contrast: -1, oddEvenBalance: 100,
+  }), { ...waveformDefaults, harmonicCount: 1, tilt: -24, contrast: 0.25, oddEvenBalance: 24 });
+  assert.equal(normalizePartialGenerator({ type: 'waveform', harmonicCount: 3.7 }).type, 'waveform');
+  assert.equal(generatePartialSpectrum({ type: 'waveform', harmonicCount: 3.7 }).length, 8);
+});
+
+test('waveform tilt uses musical octaves and contrast preserves coefficient signs and zeros', () => {
+  for (const tilt of [-6, 6]) {
+    const spectrum = generatePartialSpectrum({ type: 'waveform', tilt, harmonicCount: 4 }, 'sawtooth');
+    assert.equal(spectrum[1], -1);
+    assert.equal(spectrum[3], -0.5 * 10 ** (tilt / 20));
+    assert.equal(spectrum[7], -0.25 * 10 ** (2 * tilt / 20));
+  }
+  for (const contrast of [0.25, 0.5, 2, 4]) {
+    const spectrum = generatePartialSpectrum({ type: 'waveform', contrast, harmonicCount: 4 }, 'triangle');
+    assert.deepEqual(spectrum, [0, 1, 0, 0, 0, -((1 / 9) ** contrast), 0, 0]);
+  }
+});
+
+test('waveform balance attenuates the opposite parity and masks select musical harmonics', () => {
+  const even = generatePartialSpectrum({ type: 'waveform', oddEvenBalance: 12 }, 'sawtooth');
+  assert.equal(even[1], -(10 ** (-12 / 20)));
+  assert.equal(even[3], -0.5);
+  const odd = generatePartialSpectrum({ type: 'waveform', oddEvenBalance: -12 }, 'sawtooth');
+  assert.equal(odd[1], -1);
+  assert.equal(odd[3], -0.5 * 10 ** (-12 / 20));
+  for (const [mask, selected] of Object.entries({
+    none: [1, 2, 3, 4, 5, 6, 7, 8], odd: [1, 3, 5, 7], even: [2, 4, 6, 8],
+    prime: [2, 3, 5, 7], fibonacci: [1, 2, 3, 5, 8], 'power-of-two': [1, 2, 4, 8],
+  })) {
+    const spectrum = generatePartialSpectrum({ type: 'waveform', harmonicCount: 8, mask }, 'sawtooth');
+    assert.deepEqual(spectrum.flatMap((amplitude, bin) => amplitude ? [(bin + 1) / 2] : []), selected);
+  }
+});
+
+test('waveform transforms compose before absolute peak normalization and stay finite at extremes', () => {
+  const config = { type: 'waveform', harmonicCount: 8, mask: 'even', contrast: 2, tilt: 6, oddEvenBalance: -12 };
+  const before = { ...config };
+  const raw = generatePartialSpectrum(config, 'sawtooth');
+  assert.equal(raw[3], -(0.5 ** 2) * 10 ** ((6 - 12) / 20));
+  assert.equal(raw[7], -(0.25 ** 2));
+  const peak = Math.max(...raw.map(Math.abs));
+  const normalized = generatePartialSpectrum({ ...config, normalize: true }, 'sawtooth');
+  assert.deepEqual(normalized, raw.map(amplitude => amplitude / peak));
+  assert.equal(Math.max(...normalized.map(Math.abs)), 1);
+  assert.deepEqual(config, before);
+  assert.deepEqual(generatePartialSpectrum({ ...config, normalize: true }, 'sine'), Array(16).fill(0));
+  for (const tilt of [-24, 24]) {
+    for (const contrast of [0.25, 4]) {
+      for (const oddEvenBalance of [-24, 24]) {
+        for (const normalize of [false, true]) {
+          const extreme = { type: 'waveform', tilt, contrast, oddEvenBalance, normalize };
+          for (const waveform of ['triangle', 'sawtooth', 'helmholtz', 'stochastic-bandpass']) {
+            const spectrum = generatePartialSpectrum(extreme, waveform);
+            assert.ok(spectrum.every(Number.isFinite));
+            assert.deepEqual(spectrum, generatePartialSpectrum(extreme, waveform));
+            if (normalize) assert.equal(Math.max(...spectrum.map(Math.abs)), 1);
+          }
+          assert.deepEqual(generatePartialSpectrum(extreme, 'pink-noise'), []);
+          assert.deepEqual(generatePartialSpectrum(extreme, 'brown-noise'), []);
+        }
+      }
+    }
+  }
+});
+
+test('waveform transforms clone independently, round trip, and each field affects preset equality', () => {
+  const legacy = clonePresetData(DEFAULT_PRESET_DATA);
+  legacy.tracks[0].partialGenerator = { type: 'waveform' };
+  assert.equal(arePresetDataEqual(legacy, normalizePresetData(legacy)), true);
+  const fields = { harmonicCount: 12, tilt: -6, contrast: 0.5, oddEvenBalance: 9, mask: 'prime', normalize: true };
+  const data = normalizePresetData({ tracks: [{ waveform: 'triangle', partialGenerator: { type: 'waveform', ...fields } }] });
+  const clone = clonePresetData(data);
+  assert.notEqual(clone.tracks[0].partialGenerator, data.tracks[0].partialGenerator);
+  assert.notEqual(clonePresetTrackData(data.tracks[0]).partialGenerator, data.tracks[0].partialGenerator);
+  const imported = parsePresetImportPayload(JSON.stringify(buildSinglePresetExport(createNamedPreset('Transformed', data))));
+  assert.equal(imported.kind, 'single-preset');
+  if (imported.kind === 'single-preset') assert.equal(arePresetDataEqual(imported.preset.data, data), true);
+  for (const [field, value] of Object.entries(fields)) {
+    const changed = clonePresetData(legacy);
+    changed.tracks[0].partialGenerator = normalizePartialGenerator({ type: 'waveform', [field]: value });
+    assert.equal(arePresetDataEqual(legacy, changed), false, field);
+  }
+  if (clone.tracks[0].partialGenerator?.type === 'waveform') clone.tracks[0].partialGenerator.tilt = 12;
+  assert.equal(arePresetDataEqual(data, clone), false);
+});
+
+test('waveform transforms never amplify floating-point residue at analytical pulse nulls', () => {
+  for (const waveform of ['pulse-25', 'pulse-12'] as const) {
+    for (const settings of [
+      {}, { contrast: 0.25, tilt: 24, normalize: true, mask: 'power-of-two' },
+    ]) {
+      const spectrum = generatePartialSpectrum({ type: 'waveform', ...settings }, waveform);
+      for (let harmonic = 1; harmonic <= 64; harmonic += 1) {
+        if (Number.isInteger(harmonic * PULSE_DUTY[waveform])) {
+          assert.equal(spectrum[2 * harmonic - 1], 0, `${waveform} harmonic ${harmonic}`);
+        }
+      }
+    }
+    const spectrum = generatePartialSpectrum({
+      type: 'waveform', contrast: 0.25, tilt: 24, normalize: true, mask: 'power-of-two',
+    }, waveform);
+    const highestNonzero = (1 / PULSE_DUTY[waveform]) / 2;
+    assert.equal(spectrum[2 * highestNonzero - 1], 1);
   }
 });
