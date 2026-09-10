@@ -225,6 +225,7 @@
           @toggle-soloed="toggleTrackSoloed"
           @duplicate-track="duplicateTrack"
           @remove-track="removeTrack"
+          @reorder-tracks="reorderTracks"
           @bitmask-sequence-input="handleBitmaskSequenceInput"
         />
       </section>
@@ -816,6 +817,19 @@ export default defineComponent({
         [duplicatedTrack.id]: { muted: false, soloed: false },
       };
       this.selectedTrackId = duplicatedTrack.id;
+      this.handleDraftChange();
+    },
+    reorderTracks(sourceTrackId: string, targetTrackId: string) {
+      const sourceIndex = this.tracks.findIndex((track) => track.id === sourceTrackId);
+      const targetIndex = this.tracks.findIndex((track) => track.id === targetTrackId);
+      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) {
+        return;
+      }
+
+      const reorderedTracks = [...this.tracks];
+      const [movedTrack] = reorderedTracks.splice(sourceIndex, 1);
+      reorderedTracks.splice(targetIndex, 0, movedTrack);
+      this.tracks = reorderedTracks;
       this.handleDraftChange();
     },
     handleTrackNameInput(trackId: string, nextName: string) {

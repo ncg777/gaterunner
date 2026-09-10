@@ -37,10 +37,20 @@
         role="button"
         tabindex="0"
         class="track-timeline-row"
-        :class="{ selected: entry.track.id === selectedTrackId }"
+        :class="{
+          selected: entry.track.id === selectedTrackId,
+          dragging: entry.track.id === draggedTrackId,
+          'drop-target': entry.track.id === dropTargetTrackId,
+        }"
+        draggable="true"
         @click="$emit('select-track', entry.track.id)"
         @keydown.enter.prevent="$emit('select-track', entry.track.id)"
         @keydown.space.prevent="$emit('select-track', entry.track.id)"
+        @dragstart="onDragStart(entry.track.id, $event)"
+        @dragover.prevent="onDragOver(entry.track.id)"
+        @dragleave="onDragLeave(entry.track.id)"
+        @drop.prevent="onDrop(entry.track.id)"
+        @dragend="onDragEnd"
       >
         <div class="track-timeline-meta">
           <input
@@ -223,11 +233,14 @@ export default defineComponent({
     'toggle-soloed',
     'duplicate-track',
     'remove-track',
+    'reorder-tracks',
     'bitmask-sequence-input',
   ],
   data() {
     return {
       activationExpanded: false,
+      draggedTrackId: null as string | null,
+      dropTargetTrackId: null as string | null,
     };
   },
   computed: {
@@ -317,6 +330,34 @@ export default defineComponent({
     onBitmaskSequenceInput(value: string | number | null) {
       this.$emit('bitmask-sequence-input', value == null ? '' : String(value));
     },
+    onDragStart(trackId: string, event: DragEvent) {
+      this.draggedTrackId = trackId;
+      this.dropTargetTrackId = null;
+      event.dataTransfer?.setData('text/plain', trackId);
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+      }
+    },
+    onDragOver(trackId: string) {
+      if (trackId !== this.draggedTrackId) {
+        this.dropTargetTrackId = trackId;
+      }
+    },
+    onDragLeave(trackId: string) {
+      if (this.dropTargetTrackId === trackId) {
+        this.dropTargetTrackId = null;
+      }
+    },
+    onDrop(trackId: string) {
+      if (this.draggedTrackId && this.draggedTrackId !== trackId) {
+        this.$emit('reorder-tracks', this.draggedTrackId, trackId);
+      }
+      this.onDragEnd();
+    },
+    onDragEnd() {
+      this.draggedTrackId = null;
+      this.dropTargetTrackId = null;
+    },
     chunkTooltip(entry: TrackTimingEntry, chunkIndex: number, active: boolean): string {
       const mask = this.activationMasks[chunkIndex];
       const maskText = mask === undefined ? '?' : mask.toString(10);
@@ -403,6 +444,15 @@ export default defineComponent({
     linear-gradient(90deg, rgba(242, 184, 75, 0.24), rgba(93, 166, 154, 0.14)),
     #292b21;
   box-shadow: inset 4px 0 var(--indicator-amber), 0 0 14px rgba(242, 184, 75, 0.16);
+}
+
+.track-timeline-row.dragging {
+  opacity: 0.45;
+}
+
+.track-timeline-row.drop-target {
+  border-color: var(--indicator-amber);
+  box-shadow: inset 4px 0 var(--indicator-amber), 0 0 12px rgba(242, 184, 75, 0.2);
 }
 
 .track-timeline-row.selected .track-name-input {
