@@ -354,7 +354,8 @@ import { claimVoices, getSynthVoiceCount, prewarmVoicePool, retainVoicePool, typ
 import { createDrumInstrument, type DrumInstrument } from './audio/drumKit';
 import { interpolateModulatedTonewheelDrawbars } from './audio/tonewheelWavetable';
 import { generatePartialSpectrum, getEffectiveWaveform, normalizePartialGenerator } from './audio/partialGenerator';
-import { getPartialSpectrumGain } from './audio/partialSpectrumGain';
+import { getPartialSpectrumGain, getRealtimePartialSpectrumGain } from './audio/partialSpectrumGain';
+import { blendModulatedPartialWavetableSpectra } from './audio/partialWavetable';
 import {
   BREATH_FILTER_Q,
 } from './audio/spectra';
@@ -475,7 +476,6 @@ const FILTER_LFO_STATE = createSkewLfoState();
 const partialSpectrumCache = new Map<string, number[]>();
 const PARTIAL_SPECTRUM_CACHE_LIMIT = 1024;
 
-type NoiseWaveform = 'pink-noise' | 'brown-noise';
 type ChoirWaveform = keyof typeof CHOIR_FORMANT_BANDS;
 
 export interface TrackMixState {
@@ -1967,16 +1967,14 @@ export default defineComponent({
       }
     },
     getEffectiveTrackWaveform(track: PresetTrackData): string {
+      if (track.tonewheelWavetable.enabled
+        && track.tonewheelWavetable.configurations.some((configuration) => configuration.source)) {
+        return 'sine';
+      }
       return getEffectiveWaveform(track.partialGenerator, track.waveform);
     },
     isChoirWaveform(waveform: string): waveform is ChoirWaveform {
       return waveform === 'choir-ah' || waveform === 'choir-oh';
-    },
-    isNoiseWaveform(waveform: string): waveform is NoiseWaveform {
-      return waveform === 'pink-noise' || waveform === 'brown-noise';
-    },
-    getNoiseType(waveform: string): 'pink' | 'brown' {
-      return waveform === 'brown-noise' ? 'brown' : 'pink';
     },
     getChoirFormantBands(waveform: string): readonly FormantBand[] {
       return this.isChoirWaveform(waveform) ? CHOIR_FORMANT_BANDS[waveform] : [];
@@ -2005,21 +2003,29 @@ export default defineComponent({
       return track.unisonVoices > 1 ? 'fatcustom' : 'custom';
     },
     getPartialOscillatorVolume(track: PresetTrackData, partials: number[]): number {
-      return normalizePartialGenerator(track.partialGenerator).type === 'tonewheel'
-        ? 0 : Tone.gainToDb(getPartialSpectrumGain(partials));
+      const hasGenericWavetable = track.tonewheelWavetable.enabled
+        && track.tonewheelWavetable.configurations.some((configuration) => configuration.source);
+      return normalizePartialGenerator(track.partialGenerator).type === 'tonewheel' && !hasGenericWavetable
+        ? 0 : Tone.gainToDb(hasGenericWavetable
+          ? getRealtimePartialSpectrumGain(partials)
+          : getPartialSpectrumGain(partials));
     },
     getTonewheelPartials(track: PresetTrackData, timeSeconds = 0, noteStartSeconds = 0): number[] {
-      // Noise waveforms never use the additive oscillator path.
-      if (this.isNoiseWaveform(this.getEffectiveTrackWaveform(track))) {
-        return [];
-      }
-
       const generator = normalizePartialGenerator(track.partialGenerator);
-      const animated = generator.type === 'tonewheel' && track.tonewheelWavetable.enabled
+      const hasGenericWavetable = track.tonewheelWavetable.enabled
+        && track.tonewheelWavetable.configurations.some((configuration) => configuration.source);
+      const wavetableActive = track.tonewheelWavetable.enabled
+        && (generator.type === 'tonewheel' || hasGenericWavetable);
+      const animated = wavetableActive
         && track.tonewheelWavetable.lfos.some((lfo) => (
           lfo.enabled && lfo.depth !== 0 && lfo.routes.some((route) => route !== 0)
         ));
-      const drawbars = generator.type === 'tonewheel' ? interpolateModulatedTonewheelDrawbars(
+      const fallbackSource = {
+        partialGenerator: generator,
+        waveform: track.waveform,
+        tonewheelDrawbars: track.tonewheelDrawbars,
+      };
+      const drawbars = generator.type === 'tonewheel' && !hasGenericWavetable ? interpolateModulatedTonewheelDrawbars(
         track.tonewheelWavetable,
         track.tonewheelDrawbars,
         {
@@ -2028,13 +2034,24 @@ export default defineComponent({
           bpm: this.bpm,
         },
       ) : undefined;
-      const key = `${this.getEffectiveTrackWaveform(track)}|${JSON.stringify(generator)}|${drawbars?.join(',') ?? ''}`;
+      const key = [
+        this.getEffectiveTrackWaveform(track),
+        JSON.stringify(generator),
+        drawbars?.join(',') ?? '',
+        hasGenericWavetable ? JSON.stringify(track.tonewheelWavetable) : '',
+      ].join('|');
       const cached = animated ? undefined : partialSpectrumCache.get(key);
       if (cached) {
         return cached;
       }
 
-      const partials = generatePartialSpectrum(generator, track.waveform, drawbars);
+      const partials = hasGenericWavetable
+        ? blendModulatedPartialWavetableSpectra(track.tonewheelWavetable, fallbackSource, {
+          timeSeconds,
+          noteStartSeconds,
+          bpm: this.bpm,
+        })
+        : generatePartialSpectrum(generator, track.waveform, drawbars);
       // Trailing silent partials only make the periodic wave more expensive to build.
       let length = partials.length;
       while (length > 1 && partials[length - 1] === 0) {
@@ -2058,11 +2075,6 @@ export default defineComponent({
       velocity: number,
       modulationTimeSeconds?: number,
     ) {
-      if (this.isNoiseWaveform(this.getEffectiveTrackWaveform(track))) {
-        this.ensureTrackNoiseSynth(chain).triggerAttackRelease(duration, when, velocity);
-        return;
-      }
-
       const frequencies = this.getTrackPlaybackFrequencies(track, notes);
       const synth = this.ensureTrackSynth(chain, track);
       const modulationTime = modulationTimeSeconds ?? Tone.getTransport().getSecondsAtTime(when);
@@ -2141,8 +2153,7 @@ export default defineComponent({
         return;
       }
 
-      const isNoise = this.isNoiseWaveform(this.getEffectiveTrackWaveform(track));
-      if (track.trackKind !== 'rhythmic' && !isNoise) {
+      if (track.trackKind !== 'rhythmic') {
         return;
       }
 
@@ -2262,7 +2273,6 @@ export default defineComponent({
       setReverbOutputEnabled(chain, this.reverbEnabled);
     },
     routeTrackAudioChain(track: PresetTrackData, chain: TrackAudioChain) {
-      const isNoise = this.isNoiseWaveform(this.getEffectiveTrackWaveform(track));
       const isChoir = this.isChoirWaveform(this.getEffectiveTrackWaveform(track));
 
       chain.synth?.disconnect();
@@ -2303,8 +2313,6 @@ export default defineComponent({
         Object.values(chain.drumInstruments).forEach((instrument) => {
           this.routeDrumInstrument(track, chain, instrument);
         });
-      } else if (isNoise) {
-        this.ensureTrackNoiseSynth(chain).connect(chain.sourceBus);
       } else {
         const synth = this.ensureTrackSynth(chain, track);
         const synthGain = chain.synthGain!;
@@ -2328,7 +2336,7 @@ export default defineComponent({
       } else {
         chain.sourceBus.connect(chain.limiterGain);
       }
-      if (track.vibratoEnabled && !isNoise) {
+      if (track.vibratoEnabled) {
         signalChain.push(this.ensureTrackVibrato(chain, track));
       }
       if (track.tremoloEnabled) {
@@ -2346,7 +2354,7 @@ export default defineComponent({
       if (track.echoEnabled && track.trackKind !== 'rhythmic') {
         signalChain.push(this.ensureTrackEcho(chain));
       }
-      if (track.filterEnabled && (track.trackKind === 'rhythmic' || isNoise)) {
+      if (track.filterEnabled && track.trackKind === 'rhythmic') {
         signalChain.push(this.ensureTrackFilter(chain));
       }
       signalChain.push(chain.fadeGain, chain.mixGain);
@@ -2372,7 +2380,6 @@ export default defineComponent({
       this.rebuildDrumInstruments(track, chain);
       this.syncTrackChainNodeOptions(track, chain);
       const routingSignature = this.getTrackRoutingSignature(track);
-      const isNoise = this.isNoiseWaveform(this.getEffectiveTrackWaveform(track));
       const envelope = {
         attackCurve: 'exponential' as const,
         attack: Math.max(track.attack, ENVELOPE_SMOOTHING_SECONDS),
@@ -2390,35 +2397,32 @@ export default defineComponent({
         const voiceSignature = this.getTrackVoiceSignature(track);
         if (voiceSignature !== chain.voiceSignature) {
           chain.voiceSignature = voiceSignature;
-          if (isNoise || track.breathEnabled) {
+          if (track.breathEnabled) {
             this.ensureTrackNoiseSynth(chain).set({
               envelope,
-              noise: {
-                type: isNoise ? this.getNoiseType(this.getEffectiveTrackWaveform(track)) : 'pink',
-              },
+              noise: { type: 'pink' },
             });
           }
-          if (!isNoise) {
-            const partials = this.getTonewheelPartials(track);
-            const oscillatorOptions = {
-              type: this.getOscillatorType(track) as Tone.ToneOscillatorType,
-              count: track.unisonVoices,
-              spread: track.unisonDetune,
-              partials,
-              volume: this.getPartialOscillatorVolume(track, partials),
-            } as unknown as Tone.PolySynthOptions<Tone.Synth<Tone.SynthOptions>>['options']['oscillator'];
-            const voiceOptions = {
-              envelope,
-              oscillator: oscillatorOptions,
-              pitchEnvelope: {
-                attack: Math.max(track.pitchEnvelopeAttack, ENVELOPE_SMOOTHING_SECONDS),
-                decay: Math.max(track.pitchEnvelopeDecay, ENVELOPE_SMOOTHING_SECONDS),
-                sustain: track.pitchEnvelopeSustain,
-                release: Math.max(track.pitchEnvelopeRelease, ENVELOPE_SMOOTHING_SECONDS),
-              },
-              pitchEnvelopeAmount: track.pitchEnvelopeAmount,
-              pitchEnvelopeShape: track.pitchEnvelopeShape,
-              voiceFilter: {
+          const partials = this.getTonewheelPartials(track);
+          const oscillatorOptions = {
+            type: this.getOscillatorType(track) as Tone.ToneOscillatorType,
+            count: track.unisonVoices,
+            spread: track.unisonDetune,
+            partials,
+            volume: this.getPartialOscillatorVolume(track, partials),
+          } as unknown as Tone.PolySynthOptions<Tone.Synth<Tone.SynthOptions>>['options']['oscillator'];
+          const voiceOptions = {
+            envelope,
+            oscillator: oscillatorOptions,
+            pitchEnvelope: {
+              attack: Math.max(track.pitchEnvelopeAttack, ENVELOPE_SMOOTHING_SECONDS),
+              decay: Math.max(track.pitchEnvelopeDecay, ENVELOPE_SMOOTHING_SECONDS),
+              sustain: track.pitchEnvelopeSustain,
+              release: Math.max(track.pitchEnvelopeRelease, ENVELOPE_SMOOTHING_SECONDS),
+            },
+            pitchEnvelopeAmount: track.pitchEnvelopeAmount,
+            pitchEnvelopeShape: track.pitchEnvelopeShape,
+            voiceFilter: {
                 enabled: track.filterEnabled,
                 type: track.filterType as BiquadFilterType,
                 frequencyMidi: track.filterFrequency,
@@ -2441,26 +2445,25 @@ export default defineComponent({
                 lfoAmount: track.filterLfoAmount,
                 lfoWaveform: track.filterLfoWaveform as LfoWaveform,
                 lfoInitPhase: track.filterLfoInitPhase,
-              },
-            } as Parameters<PitchEnvelopeSynth['set']>[0];
-            // PolySynth.set typings only expose base SynthOptions; PitchEnvelopeSynth accepts the extras.
-            const synth = this.ensureTrackSynth(chain, track);
-            if (synth instanceof MonoGlideSynth) {
-              synth.set(voiceOptions);
-              synth.setGlide({
-                time: track.glideTime,
-                mode: track.glideMode as GlideMode,
-                constantRate: track.glideConstantRate,
-                curve: track.glideCurve as GlideCurve,
-                legato: track.monoLegato,
-              });
-            } else {
-              (synth as TonewheelPolySynth).set(voiceOptions as Parameters<TonewheelPolySynth['set']>[0]);
-            }
-            chain.lastAppliedPartials = partials;
-            if (this.isChoirWaveform(this.getEffectiveTrackWaveform(track))) {
-              this.updateChoirFormantBank(this.getEffectiveTrackWaveform(track), this.ensureTrackChoirBank(chain).formants);
-            }
+            },
+          } as Parameters<PitchEnvelopeSynth['set']>[0];
+          // PolySynth.set typings only expose base SynthOptions; PitchEnvelopeSynth accepts the extras.
+          const synth = this.ensureTrackSynth(chain, track);
+          if (synth instanceof MonoGlideSynth) {
+            synth.set(voiceOptions);
+            synth.setGlide({
+              time: track.glideTime,
+              mode: track.glideMode as GlideMode,
+              constantRate: track.glideConstantRate,
+              curve: track.glideCurve as GlideCurve,
+              legato: track.monoLegato,
+            });
+          } else {
+            (synth as TonewheelPolySynth).set(voiceOptions as Parameters<TonewheelPolySynth['set']>[0]);
+          }
+          chain.lastAppliedPartials = partials;
+          if (this.isChoirWaveform(this.getEffectiveTrackWaveform(track))) {
+            this.updateChoirFormantBank(this.getEffectiveTrackWaveform(track), this.ensureTrackChoirBank(chain).formants);
           }
           if (track.breathEnabled) {
             this.ensureTrackBreathGain(chain).gain.value = this.dbToGain(track.breathLevel);
@@ -2474,7 +2477,7 @@ export default defineComponent({
       }
       this.syncTonewheelModulationLoop(track, chain);
 
-      if (track.filterEnabled && (track.trackKind === 'rhythmic' || isNoise)) {
+      if (track.filterEnabled && track.trackKind === 'rhythmic') {
         this.ensureTrackFilter(chain).set({
           type: track.filterType as BiquadFilterType,
           frequency: this.midiToFrequency(track.filterFrequency),
@@ -2493,7 +2496,7 @@ export default defineComponent({
         });
         setTremoloSpread(tremolo, track.tremoloSpread);
       }
-      if (track.vibratoEnabled && !isNoise) {
+      if (track.vibratoEnabled) {
         this.ensureTrackVibrato(chain, track).set({
           frequency: track.vibratoFrequency,
           depth: this.clampNormalRange(track.vibratoDepth),
@@ -2564,11 +2567,13 @@ export default defineComponent({
      */
     getTrackVoiceSignature(track: PresetTrackData): string {
       const generator = normalizePartialGenerator(track.partialGenerator);
+      const hasGenericWavetable = track.tonewheelWavetable.enabled
+        && track.tonewheelWavetable.configurations.some((configuration) => configuration.source);
       return [
         this.getEffectiveTrackWaveform(track),
         JSON.stringify(generator),
         generator.type === 'tonewheel' ? track.tonewheelDrawbars : '',
-        generator.type === 'tonewheel' ? JSON.stringify(track.tonewheelWavetable) : '',
+        generator.type === 'tonewheel' || hasGenericWavetable ? JSON.stringify(track.tonewheelWavetable) : '',
         track.breathEnabled,
         track.breathLevel,
         track.breathHarmonic,
@@ -2613,7 +2618,7 @@ export default defineComponent({
       ].join('|');
     },
     applyTonewheelModulation(track: PresetTrackData, chain: TrackAudioChain, timeSeconds: number) {
-      if (!chain.synth || this.isNoiseWaveform(this.getEffectiveTrackWaveform(track))) {
+      if (!chain.synth) {
         return;
       }
       const partials = this.getTonewheelPartials(track, timeSeconds, chain.modulationNoteStartSeconds);
@@ -2635,12 +2640,14 @@ export default defineComponent({
       chain.lastAppliedPartials = partials;
     },
     syncTonewheelModulationLoop(track: PresetTrackData, chain: TrackAudioChain) {
-      const hasActiveRoutes = normalizePartialGenerator(track.partialGenerator).type === 'tonewheel'
-        && track.tonewheelWavetable.enabled
+      const generator = normalizePartialGenerator(track.partialGenerator);
+      const hasGenericWavetable = track.tonewheelWavetable.configurations.some((configuration) => configuration.source);
+      const hasActiveRoutes = track.tonewheelWavetable.enabled
+        && (generator.type === 'tonewheel' || hasGenericWavetable)
         && (track.tonewheelWavetable.lfos ?? []).some((lfo) => (
           lfo.enabled && lfo.depth > 0 && lfo.routes.some((amount) => amount !== 0)
         ));
-      if (!hasActiveRoutes || track.trackKind === 'rhythmic' || this.isNoiseWaveform(this.getEffectiveTrackWaveform(track))) {
+      if (!hasActiveRoutes || track.trackKind === 'rhythmic') {
         chain.wavetableLfoLoop?.dispose();
         chain.wavetableLfoLoop = null;
         return;

@@ -49,6 +49,12 @@ export function pseudoNoise(harmonic: number): number {
 
 export function getWaveformPartialAmplitude(waveform: string, harmonic: number): number {
   const noisyTail = pseudoNoise(harmonic) / Math.sqrt(harmonic);
+  if (waveform === 'pink-noise') {
+    return noisyTail;
+  }
+  if (waveform === 'brown-noise') {
+    return pseudoNoise(harmonic) / harmonic;
+  }
   if (waveform === 'triangle') {
     if (harmonic % 2 === 0) {
       return 0;

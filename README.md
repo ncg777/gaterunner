@@ -77,8 +77,10 @@ Its harmonic spectrum can be reshaped before envelopes, filters, and effects:
 
 The order is harmonic limit/mask → contrast → tilt and balance → normalization.
 The live spectrum preview, browser playback/WAV export, and CLI WAV generation
-use the same transformed coefficients. MIDI is unchanged. Pink and brown noise
-are broadband sources, so these controls are hidden and bypassed for noise.
+use the same transformed coefficients. MIDI is unchanged. Pink and brown spectrum
+waveforms use deterministic signed coefficients with $1/\sqrt{h}$ and $1/h$
+amplitude envelopes. They are periodic, follow note pitch, and support the same
+transforms, unison, preview, and multidimensional wavetable crossfades.
 
 Defaults (64 harmonics, no mask, 0 dB tilt/balance, contrast 1, normalization off)
 preserve existing waveform sounds. Settings persist with presets, copies, JSON

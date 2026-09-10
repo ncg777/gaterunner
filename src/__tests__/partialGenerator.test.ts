@@ -185,7 +185,10 @@ function legacyWaveform(waveform: string, harmonic: number): number {
     return Math.exp(-((h - center) ** 2) / (2 * safeWidth * safeWidth));
   };
   const raw = Math.sin(harmonic * 12.9898 + 78.233) * 43758.5453123;
-  const noisyTail = (((raw - Math.floor(raw)) * 2) - 1) / Math.sqrt(harmonic);
+  const noise = ((raw - Math.floor(raw)) * 2) - 1;
+  const noisyTail = noise / Math.sqrt(harmonic);
+  if (waveform === 'pink-noise') return noisyTail;
+  if (waveform === 'brown-noise') return noise / harmonic;
   if (waveform === 'triangle') {
     if (harmonic % 2 === 0) return 0;
     return (Math.floor(harmonic / 2) % 2 === 0 ? 1 : -1) / (harmonic * harmonic);
@@ -287,7 +290,8 @@ test('procedural configs clone independently, round-trip version 2, and particip
 test('waveform source preserves signed Fourier coefficients for 64 musical harmonics', () => {
   assert.deepEqual(normalizePartialGenerator({ type: 'waveform', waveform: 'triangle' }), waveformDefaults);
   for (const waveform of ['sine', 'triangle', 'sawtooth', 'square', 'flute', ...Object.keys(REED_HARMONICS),
-    ...Object.keys(PULSE_DUTY), 'choir-ah', 'choir-oh', 'helmholtz', 'formant', 'duct', 'aeolian', 'stochastic-bandpass']) {
+    ...Object.keys(PULSE_DUTY), 'choir-ah', 'choir-oh', 'helmholtz', 'formant', 'duct', 'aeolian', 'stochastic-bandpass',
+    'pink-noise', 'brown-noise']) {
     const spectrum = generatePartialSpectrum({ type: 'waveform' }, waveform);
     assert.equal(spectrum.length, 128);
     for (let harmonic = 1; harmonic <= 64; harmonic += 1) {
@@ -297,8 +301,6 @@ test('waveform source preserves signed Fourier coefficients for 64 musical harmo
     }
     assert.deepEqual(spectrum, generatePartialSpectrum({ type: 'waveform' }, waveform, Array(9).fill(0)));
   }
-  assert.deepEqual(generatePartialSpectrum({ type: 'waveform' }, 'pink-noise'), []);
-  assert.deepEqual(generatePartialSpectrum({ type: 'waveform' }, 'brown-noise'), []);
 });
 
 test('waveform selections round trip, and only unspecified or unknown legacy noise sources migrate', () => {
@@ -386,14 +388,14 @@ test('waveform transforms compose before absolute peak normalization and stay fi
       for (const oddEvenBalance of [-24, 24]) {
         for (const normalize of [false, true]) {
           const extreme = { type: 'waveform', tilt, contrast, oddEvenBalance, normalize };
-          for (const waveform of ['triangle', 'sawtooth', 'helmholtz', 'stochastic-bandpass']) {
+          for (const waveform of [
+            'triangle', 'sawtooth', 'helmholtz', 'stochastic-bandpass', 'pink-noise', 'brown-noise',
+          ]) {
             const spectrum = generatePartialSpectrum(extreme, waveform);
             assert.ok(spectrum.every(Number.isFinite));
             assert.deepEqual(spectrum, generatePartialSpectrum(extreme, waveform));
             if (normalize) assert.equal(Math.max(...spectrum.map(Math.abs)), 1);
           }
-          assert.deepEqual(generatePartialSpectrum(extreme, 'pink-noise'), []);
-          assert.deepEqual(generatePartialSpectrum(extreme, 'brown-noise'), []);
         }
       }
     }

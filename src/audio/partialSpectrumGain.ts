@@ -20,3 +20,17 @@ export function getPartialSpectrumGain(spectrum: number[]): number {
   gains.set(spectrum, peak);
   return peak;
 }
+
+/** Bounded-cost gain recovery for spectra that change at modulation rate. */
+export function getRealtimePartialSpectrumGain(spectrum: readonly number[]): number {
+  const size = 4099;
+  let peak = 0;
+  for (let sample = 0; sample < size; sample += 1) {
+    let value = 0;
+    for (let index = 0; index < spectrum.length; index += 1) {
+      value += spectrum[index] * Math.sin(2 * Math.PI * (index + 1) * sample / size);
+    }
+    peak = Math.max(peak, Math.abs(value));
+  }
+  return peak;
+}

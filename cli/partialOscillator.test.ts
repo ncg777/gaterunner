@@ -4,7 +4,7 @@ import { generatePartialSpectrum, normalizePartialGenerator } from '../src/audio
 import { normalizePresetData } from '../src/presets.js';
 import { presetDataToGeneratorInput } from './cli.js';
 import { generateMidi, generateWav, type GenerateTrackOptions } from './generate.js';
-import { preparePartialOscillator } from './partialOscillator.js';
+import { preparePartialOscillator, preparePartialSpectrumOscillator } from './partialOscillator.js';
 
 test('CLI oscillators sample the shared browser spectrum at the musical fundamental', () => {
   const configs = [
@@ -56,6 +56,17 @@ test('CLI excludes harmonics at and above Nyquist, including changing pitch and 
   }
 });
 
+test('CLI samples arbitrary half-fundamental spectra on their shared basis', () => {
+  const spectrum = [0.5, 0, -0.25, 0.125];
+  const sample = preparePartialSpectrumOscillator(spectrum, 'arbitrary-test');
+  for (const phase of [0, 0.03125, 0.13371, 0.713, 0.99999, 1]) {
+    const expected = spectrum.reduce((sum, amplitude, index) => (
+      sum + amplitude * Math.sin(2 * Math.PI * (index + 1) * phase)
+    ), 0);
+    assert.ok(Math.abs(sample(phase) - expected) < 1e-5);
+  }
+});
+
 const track: GenerateTrackOptions = {
   sequence: '1 2', denominator: 16, waveform: 'sawtooth',
   attack: 0, decay: 0, sustain: 1, release: 0.01, gain: -18,
@@ -79,6 +90,32 @@ test('CLI legacy, explicit tonewheel, and invalid generator render byte-identica
       ...options, tracks: [{ ...track, partialGenerator: partialGenerator as GenerateTrackOptions['partialGenerator'] }],
     });
     assert.deepEqual(rendered, legacy);
+  }
+});
+
+test('generic tonewheel endpoints match standalone tonewheel rendering', async () => {
+  for (const drawbars of [
+    [8, 0, 0, 0, 0, 0, 0, 0, 0],
+    [8, 8, 8, 8, 8, 8, 8, 8, 8],
+  ]) {
+    const standalone = { ...track, partialGenerator: { type: 'tonewheel' } as const, tonewheelDrawbars: drawbars };
+    const generic = {
+      ...standalone,
+      tonewheelWavetable: {
+        enabled: true,
+        dimensions: [{ name: 'Source', value: 0 }],
+        configurations: [{
+          name: 'Tonewheel',
+          position: [0],
+          drawbars,
+          source: { partialGenerator: { type: 'tonewheel' } as const, waveform: 'sine', tonewheelDrawbars: drawbars },
+        }],
+        lfos: [],
+      },
+    };
+
+    assert.deepEqual(await generateWav({ ...options, tracks: [generic] }),
+      await generateWav({ ...options, tracks: [standalone] }));
   }
 });
 
@@ -134,6 +171,57 @@ test('inactive tonewheel settings do not alter waveform or procedural rendering'
   }
 });
 
+test('mixed-source wavetable renders deterministic static and animated WAV without changing MIDI', async () => {
+  const data = normalizePresetData({ tracks: [{
+    ...track,
+    sequenceInput: '1 2',
+    tonewheelWavetable: {
+      enabled: true,
+      dimensions: [{ name: 'Source', value: 0.5 }],
+      configurations: [
+        {
+          name: 'Tonewheel', position: [0], drawbars: [8, 0, 0, 0, 0, 0, 0, 0, 0],
+          source: {
+            partialGenerator: { type: 'tonewheel' }, waveform: 'sine',
+            tonewheelDrawbars: [8, 0, 0, 0, 0, 0, 0, 0, 0],
+          },
+        },
+        {
+          name: 'Sequence', position: [1], drawbars: Array(9).fill(0),
+          source: {
+            partialGenerator: {
+              type: 'sequence', sequence: 'primes', harmonicCount: 8, normalize: true,
+              mapping: 'inverse', exponent: 1, mask: 'none', tilt: -3,
+            },
+            waveform: 'sine', tonewheelDrawbars: Array(9).fill(0),
+          },
+        },
+      ],
+      lfos: [{
+        enabled: true, name: 'Source sweep', waveform: 'sine', sync: false, rateHz: 2,
+        syncRate: '1/4', phase: 0, depth: 0.5, polarity: 'bipolar', retrigger: 'note',
+        smoothing: 0, fmSource: -1, fmAmount: 0, routes: [1],
+      }],
+    },
+  }] });
+  const input = { ...options, tracks: presetDataToGeneratorInput(data).tracks };
+  const rendered = await generateWav(input);
+
+  assert.deepEqual(await generateWav(input), rendered);
+  assert.notDeepEqual(rendered, await generateWav({ ...options, tracks: [track] }));
+  for (const waveform of ['sine', 'choir-ah', 'pink-noise', 'brown-noise']) {
+    assert.deepEqual(await generateWav({
+      ...options,
+      tracks: [{ ...input.tracks[0], waveform }],
+    }), rendered, `generic wavetable ignores inactive top-level ${waveform}`);
+  }
+  const wavetableDisabled = {
+    ...input.tracks[0],
+    tonewheelWavetable: { ...input.tracks[0].tonewheelWavetable, enabled: false },
+  };
+  assert.deepEqual(await generateMidi(input), await generateMidi({ ...options, tracks: [wavetableDisabled] }));
+});
+
 test('inactive waveform selections cannot change tonewheel, sequence, or binary WAV and MIDI', async () => {
   for (const type of ['tonewheel', 'sequence', 'binary']) {
     const partialGenerator = normalizePartialGenerator({ type });
@@ -148,7 +236,7 @@ test('inactive waveform selections cannot change tonewheel, sequence, or binary 
   }
 });
 
-test('waveform source renders distinct deterministic signals and actual nonperiodic noise without drawbars', async () => {
+test('waveform source renders distinct deterministic spectra without drawbars', async () => {
   let previous: Uint8Array | undefined;
   const midi = await generateMidi({ ...options, tracks: [track] });
   for (const waveform of ['sine', 'square', 'choir-ah', 'choir-oh', 'pink-noise', 'brown-noise']) {
@@ -163,7 +251,8 @@ test('waveform source renders distinct deterministic signals and actual nonperio
     previous = wav;
     if (waveform.endsWith('-noise')) {
       assert.deepEqual(await generateWav({ ...options, tracks: [{ ...source, partialGenerator: undefined }] }), wav);
-      assert.deepEqual(await generateWav({ ...options, tracks: [{ ...source, unisonVoices: 4, unisonDetune: 80 }] }), wav);
+      assert.notDeepEqual(await generateWav({ ...options, tracks: [{ ...source, unisonVoices: 4, unisonDetune: 80 }] }), wav);
+      assert.notDeepEqual(await generateWav({ ...options, tracks: [{ ...source, octave: 5 }] }), wav);
       assert.notDeepEqual(wav, await generateWav({ ...options, tracks: [{ ...source, waveform: 'sine' }] }));
     }
   }

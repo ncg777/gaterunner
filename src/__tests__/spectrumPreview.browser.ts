@@ -42,8 +42,9 @@ export async function runSpectrumPreviewChecks(editor: InstanceType<typeof Edito
     check(bars().length === 0 && root.textContent!.includes('Silent spectrum:'), 'Waveform masks can silence missing harmonics without filling zeros');
     editor.draftTrack.waveform = 'brown-noise';
     await nextTick();
-    check(!root.querySelector('.partial-spectrum svg') && root.textContent!.includes('Noise is broadband'), 'Noise has an explicit broadband explanation instead of an empty plot');
-    check(!root.textContent!.includes('Spectral contrast'), 'Noise hides inapplicable spectral transform controls');
+    check(Boolean(root.querySelector('.partial-spectrum svg')) && bars().length === 4,
+      'Brown spectrum displays its deterministic masked harmonics');
+    check(root.textContent!.includes('Spectral contrast'), 'Brown spectrum exposes waveform transforms');
     editor.draftTrack.partialGenerator = { type: 'tonewheel' };
     editor.draftTrack.tonewheelWavetable.enabled = false;
     editor.draftTrack.tonewheelDrawbars = [0, 0, 8, 0, 0, 0, 0, 0, 0];

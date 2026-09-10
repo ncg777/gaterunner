@@ -51,10 +51,15 @@ import {
   BREATH_FILTER_Q,
 } from '../src/audio/spectra.js';
 import { encodeWavFromChannelsSync } from '../src/audio/wav.js';
-import { prepareTonewheel, sampleTonewheel } from './tonewheelOscillator.js';
-import { getEffectiveWaveform, isNoiseWaveform, normalizePartialGenerator, normalizeTrackPartialGenerator, type PartialGenerator } from '../src/audio/partialGenerator.js';
+import { getEffectiveWaveform, normalizePartialGenerator, normalizeTrackPartialGenerator, type PartialGenerator } from '../src/audio/partialGenerator.js';
 import { CHOIR_FORMANT_BANDS, getChoirFormantBandGainLinear } from '../src/audio/choir.js';
-import { preparePartialOscillator } from './partialOscillator.js';
+import {
+  getModulatedPartialWavetablePosition,
+  getPartialWavetableWeights,
+  resolvePartialSourceSpectrum,
+  resolvePartialWavetableConfigurationSource,
+} from '../src/audio/partialWavetable.js';
+import { preparePartialOscillator, preparePartialSpectrumOscillator } from './partialOscillator.js';
 
 export interface GenerateTrackOptions {
   /** Optional display name for the track. */
@@ -816,18 +821,6 @@ function nextPinkNoise(state: BreathRenderState): number {
   return clamp((state.pink[0] + state.pink[1] + state.pink[2] + white * 0.1848) * 0.11, -1, 1);
 }
 
-function createSourceNoiseSampler(waveform: string, seed: number): () => number {
-  const state: BreathRenderState = { seed: (seed >>> 0) || 1, pink: [0, 0, 0], x1: 0, x2: 0, y1: 0, y2: 0 };
-  let brown = 0;
-  return () => {
-    const pink = nextPinkNoise(state);
-    if (waveform !== 'brown-noise') return pink;
-    const white = (state.seed / 0xFFFFFFFF) * 2 - 1;
-    brown = (brown + 0.02 * white) / 1.02;
-    return brown * 3.5;
-  };
-}
-
 function createChoirProcessor(waveform: string, sampleRate: number): (input: number) => number {
   if (waveform !== 'choir-ah' && waveform !== 'choir-oh') return input => input;
   const filters = CHOIR_FORMANT_BANDS[waveform].map(band => {
@@ -1263,16 +1256,46 @@ export async function renderWavChannels(
     const drumReverbLeft = isDrumTrack && hasReverbSend && entry.track.reverbWet > -96 ? new Float32Array(frameCount) : null;
     const drumReverbRight = drumReverbLeft ? new Float32Array(frameCount) : null;
     const partialGenerator = normalizePartialGenerator(entry.track.partialGenerator);
-    const staticTonewheel = partialGenerator.type === 'tonewheel'
-      ? prepareTonewheel(interpolateTonewheelDrawbars(entry.track.tonewheelWavetable, entry.track.tonewheelDrawbars))
+    const fallbackSource = {
+      partialGenerator,
+      waveform: entry.track.waveform,
+      tonewheelDrawbars: entry.track.tonewheelDrawbars,
+    };
+    const hasGenericWavetable = entry.track.tonewheelWavetable.enabled
+      && entry.track.tonewheelWavetable.configurations.some((configuration) => configuration.source);
+    const genericWavetableOscillators = hasGenericWavetable
+      ? entry.track.tonewheelWavetable.configurations.map((configuration) => {
+        const source = resolvePartialWavetableConfigurationSource(configuration, fallbackSource);
+        return preparePartialSpectrumOscillator(resolvePartialSourceSpectrum(source), JSON.stringify(source));
+      })
       : [];
-    const waveform = getEffectiveWaveform(partialGenerator, entry.track.waveform);
-    const isNoise = isNoiseWaveform(waveform);
-    const partialOscillator = !isDrumTrack && !isNoise && partialGenerator.type !== 'tonewheel'
+    const staticWavetableWeights = hasGenericWavetable
+      ? getPartialWavetableWeights(entry.track.tonewheelWavetable)
+      : [];
+    const staticTonewheelDrawbars = partialGenerator.type === 'tonewheel' && !hasGenericWavetable
+      ? interpolateTonewheelDrawbars(entry.track.tonewheelWavetable, entry.track.tonewheelDrawbars)
+      : [];
+    const prepareTonewheelSpectrumOscillator = (drawbars: number[]) => preparePartialSpectrumOscillator(
+      resolvePartialSourceSpectrum({
+        partialGenerator: { type: 'tonewheel' },
+        waveform: 'sine',
+        tonewheelDrawbars: drawbars,
+      }),
+      `tonewheel|${drawbars.join(',')}`,
+    );
+    const staticTonewheelOscillator = partialGenerator.type === 'tonewheel' && !hasGenericWavetable
+      ? prepareTonewheelSpectrumOscillator(staticTonewheelDrawbars)
+      : null;
+    const waveform = hasGenericWavetable ? 'sine' : getEffectiveWaveform(partialGenerator, entry.track.waveform);
+    const partialOscillator = !isDrumTrack && partialGenerator.type !== 'tonewheel' && !hasGenericWavetable
       ? preparePartialOscillator(partialGenerator, waveform)
       : null;
-    const hasTonewheelModulation = partialGenerator.type === 'tonewheel'
+    const hasTonewheelModulation = partialGenerator.type === 'tonewheel' && !hasGenericWavetable
       && entry.track.tonewheelWavetable.enabled
+      && entry.track.tonewheelWavetable.lfos.some((lfo) => (
+        lfo.enabled && lfo.depth !== 0 && lfo.routes.some((route) => route !== 0)
+      ));
+    const hasGenericWavetableModulation = hasGenericWavetable
       && entry.track.tonewheelWavetable.lfos.some((lfo) => (
         lfo.enabled && lfo.depth !== 0 && lfo.routes.some((route) => route !== 0)
       ));
@@ -1348,16 +1371,6 @@ export async function renderWavChannels(
       const voiceRelease = entry.track.release;
       const endFrame = Math.min(frameCount, Math.ceil((start + duration + voiceRelease) * sampleRate));
       const voicedNotes = limitPolyphony(notes, entry.track.polyphony);
-      if (isNoise) {
-        const noise = createSourceNoiseSampler(waveform, 0x9E3779B9 ^ event.order ^ (trackIndex << 12));
-        for (let frame = startFrame; frame < endFrame; frame += 1) {
-          const sample = noise() * noteAmplitude * Math.SQRT1_2
-            * getAdsrLevel((frame - startFrame) / sampleRate, duration, entry.track);
-          trackLeft[frame] += sample;
-          trackRight[frame] += sample;
-        }
-        continue;
-      }
       // High-note priority already picked the winner, so the glide follows a single pitch.
       const glidePlan: GlidePlan | null = isMonoTrack && voicedNotes.length > 0
         ? planMonoGlide(
@@ -1381,26 +1394,40 @@ export async function renderWavChannels(
           for (let voice = 0; voice < voiceCount; voice += 1) {
             const detuneOffset = voiceCount === 1 ? 0 : ((voice / (voiceCount - 1)) - 0.5) * entry.track.unisonDetune;
             const frequency = midiToFrequency(midiNote + detuneOffset / 100, prepared.a4);
-            const phaseIncrement = frequency / sampleRate;
+            const usesHalfFundamentalSpectrum = hasGenericWavetable || partialGenerator.type === 'tonewheel';
+            const phaseIncrement = frequency / sampleRate / (usesHalfFundamentalSpectrum ? 2 : 1);
             const voicePan = voiceCount === 1 ? 0.5 : voice / (voiceCount - 1);
             const voiceGain = noteAmplitude / Math.sqrt(voiceCount);
             const leftPan = Math.cos(voicePan * Math.PI / 2);
             const rightPan = Math.sin(voicePan * Math.PI / 2);
             let phase = 0;
-            let tonewheel = staticTonewheel;
+            let tonewheelOscillator = staticTonewheelOscillator;
+            let wavetableWeights = staticWavetableWeights;
             const choir = createChoirProcessor(waveform, sampleRate);
             for (let frame = startFrame; frame < endFrame; frame += 1) {
               const t = (frame - startFrame) / sampleRate;
               if (hasTonewheelModulation && (frame - startFrame) % 64 === 0) {
-                tonewheel = prepareTonewheel(interpolateModulatedTonewheelDrawbars(
+                tonewheelOscillator = prepareTonewheelSpectrumOscillator(
+                  interpolateModulatedTonewheelDrawbars(
+                    entry.track.tonewheelWavetable,
+                    entry.track.tonewheelDrawbars,
+                    {
+                      timeSeconds: frame / sampleRate,
+                      noteStartSeconds: start,
+                      bpm: prepared.bpm,
+                    },
+                  ),
+                );
+              }
+              if (hasGenericWavetableModulation && (frame - startFrame) % 64 === 0) {
+                wavetableWeights = getPartialWavetableWeights(
                   entry.track.tonewheelWavetable,
-                  entry.track.tonewheelDrawbars,
-                  {
+                  getModulatedPartialWavetablePosition(entry.track.tonewheelWavetable, {
                     timeSeconds: frame / sampleRate,
                     noteStartSeconds: start,
                     bpm: prepared.bpm,
-                  },
-                ));
+                  }),
+                );
               }
               const releaseTime = duration - t;
 
@@ -1433,11 +1460,16 @@ export async function renderWavChannels(
                   getPitchEnvelopeMidiOffset(entry.track, getPitchEnvelopeLevel(entry.track, t, duration)) / 12,
                 )
                 : 1;
-              const oscillatorSample = partialOscillator
-                ? partialOscillator(phase, frequency * vibrato * pitchEnvelopeRatio * (
+              const playbackFrequency = frequency * vibrato * pitchEnvelopeRatio * (
                   glidePlan && glidePlan.seconds > 0 ? getGlideFrequency(glidePlan, t) / glidePlan.toFrequency : 1
-                ), sampleRate)
-                : sampleTonewheel(phase, 'sine', tonewheel);
+                );
+              const oscillatorSample = genericWavetableOscillators.length > 0
+                ? genericWavetableOscillators.reduce((sum, oscillator, configurationIndex) => (
+                  sum + oscillator(phase, playbackFrequency / 2, sampleRate) * (wavetableWeights[configurationIndex] ?? 0)
+                ), 0)
+                : partialOscillator
+                  ? partialOscillator(phase, playbackFrequency, sampleRate)
+                  : tonewheelOscillator?.(phase, playbackFrequency / 2, sampleRate) ?? 0;
               const sample = choir(oscillatorSample * voiceGain * env);
               trackLeft[frame] += sample * leftPan;
               trackRight[frame] += sample * rightPan;

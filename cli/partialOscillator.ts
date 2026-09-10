@@ -8,6 +8,43 @@ const TABLE_SIZE = 65536;
 const CACHE_LIMIT = 32;
 const tables = new Map<string, Float64Array>();
 
+/** Sample any shared half-fundamental spectrum with phase/frequency on that same basis. */
+export function preparePartialSpectrumOscillator(
+  spectrum: readonly number[],
+  cacheKey: string,
+): (phase: number, frequency?: number, sampleRate?: number) => number {
+  let lastPartialCount = -1;
+  let samples: Float64Array;
+  return (phase: number, frequency = 0, sampleRate = 48000) => {
+    const partialLimit = frequency > 0
+      ? Math.max(0, Math.ceil(sampleRate / (2 * frequency)) - 1) : spectrum.length;
+    const partialCount = Math.min(spectrum.length, partialLimit);
+    if (partialCount === 0) return 0;
+    if (partialCount !== lastPartialCount) {
+      const bandKey = `spectrum|${cacheKey}|${partialCount}`;
+      let table = tables.get(bandKey);
+      if (!table) {
+        table = new Float64Array(TABLE_SIZE + 1);
+        for (let partial = 1; partial <= partialCount; partial += 1) {
+          const amplitude = spectrum[partial - 1];
+          if (amplitude === 0) continue;
+          for (let index = 0; index < TABLE_SIZE; index += 1) {
+            table[index] += amplitude * Math.sin(2 * Math.PI * partial * index / TABLE_SIZE);
+          }
+        }
+        table[TABLE_SIZE] = table[0];
+        if (tables.size >= CACHE_LIMIT) tables.delete(tables.keys().next().value!);
+        tables.set(bandKey, table);
+      }
+      samples = table;
+      lastPartialCount = partialCount;
+    }
+    const position = (phase - Math.floor(phase)) * TABLE_SIZE;
+    const index = Math.floor(position);
+    return samples[index] + (samples[index + 1] - samples[index]) * (position - index);
+  };
+}
+
 /** Waveform and procedural sources use the same half-fundamental spectrum as the browser. */
 export function preparePartialOscillator(
   generator: Exclude<PartialGenerator, { type: 'tonewheel' }>,

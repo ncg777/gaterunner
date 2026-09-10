@@ -5,6 +5,7 @@ import {
   type LfoSyncRateValue,
   type LfoWaveform,
 } from './lfo.js';
+import type { PartialSourceSnapshot } from './partialWavetable.js';
 
 export const MAX_WAVETABLE_DIMENSIONS = 16;
 export const MAX_WAVETABLE_CONFIGURATIONS = 64;
@@ -39,6 +40,7 @@ export interface TonewheelConfiguration {
   name: string;
   position: number[];
   drawbars: number[];
+  source?: PartialSourceSnapshot;
 }
 
 export interface TonewheelWavetable {
@@ -133,7 +135,7 @@ function sampleSmoothedLfo(
 
 /** Resolve the animated point in N-dimensional wavetable space at an absolute transport time. */
 export function getModulatedTonewheelPosition(
-  wavetable: TonewheelWavetable,
+  wavetable: Pick<TonewheelWavetable, 'enabled' | 'dimensions' | 'lfos'>,
   timing: TonewheelModulationTime,
 ): number[] {
   const position = wavetable.dimensions.map((dimension) => clampUnit(dimension.value));

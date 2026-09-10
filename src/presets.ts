@@ -40,6 +40,7 @@ import {
   type TonewheelWavetableDimension,
   type TonewheelWavetableLfo,
 } from './audio/tonewheelWavetable.js';
+import { normalizePartialSourceSnapshot, type PartialSourceSnapshot } from './audio/partialWavetable.js';
 import {
   LFO_FREE_RATE_MAX_HZ,
   LFO_FREE_RATE_MIN_HZ,
@@ -264,8 +265,8 @@ export const WAVEFORM_OPTIONS = [
   { title: 'Pulse 12.5%', value: 'pulse-12' },
   { title: 'Choir Ah', value: 'choir-ah' },
   { title: 'Choir Oh', value: 'choir-oh' },
-  { title: 'Pink Noise', value: 'pink-noise' },
-  { title: 'Brown Noise', value: 'brown-noise' },
+  { title: 'Pink Spectrum', value: 'pink-noise' },
+  { title: 'Brown Spectrum', value: 'brown-noise' },
   { title: 'Helmholtz Resonator', value: 'helmholtz' },
   { title: 'Formant Resonance', value: 'formant' },
   { title: 'Duct Resonance', value: 'duct' },
@@ -637,10 +638,20 @@ function normalizeTonewheelWavetable(value: unknown): TonewheelWavetable {
       const configuration = (typeof value === 'object' && value !== null ? value : {}) as Partial<TonewheelConfiguration>;
       const name = typeof configuration.name === 'string' ? configuration.name.trim().slice(0, 40) : '';
       const rawPosition = Array.isArray(configuration.position) ? configuration.position : [];
+      const drawbars = normalizeTonewheelDrawbars(configuration.drawbars);
+      const source = typeof configuration.source === 'object' && configuration.source !== null
+        ? normalizePartialSourceSnapshot({
+          partialGenerator: configuration.source.partialGenerator,
+          waveform: typeof configuration.source.waveform === 'string' ? configuration.source.waveform : 'sine',
+          tonewheelDrawbars: Array.isArray(configuration.source.tonewheelDrawbars)
+            ? configuration.source.tonewheelDrawbars : drawbars,
+        } as PartialSourceSnapshot)
+        : undefined;
       return {
         name: name || `Configuration ${index + 1}`,
         position: dimensions.map((_, dimensionIndex) => clamp(parseNumber(rawPosition[dimensionIndex], 0), 0, 1)),
-        drawbars: normalizeTonewheelDrawbars(configuration.drawbars),
+        drawbars,
+        ...(source ? { source } : {}),
       };
     });
   const rawLfos = Array.isArray(raw.lfos) ? raw.lfos : [];
@@ -883,6 +894,13 @@ export function clonePresetTrackData(track: PresetTrackData): PresetTrackData {
         name: configuration.name,
         position: configuration.position.slice(),
         drawbars: configuration.drawbars.slice(),
+        ...(configuration.source ? {
+          source: {
+            partialGenerator: { ...configuration.source.partialGenerator },
+            waveform: configuration.source.waveform,
+            tonewheelDrawbars: configuration.source.tonewheelDrawbars.slice(),
+          },
+        } : {}),
       })),
       lfos: (track.tonewheelWavetable.lfos ?? []).map((lfo) => ({
         ...lfo,
@@ -1239,6 +1257,7 @@ export function arePresetDataEqual(left: PresetData, right: PresetData): boolean
       || leftTrack.unisonVoices !== rightTrack.unisonVoices
       || leftTrack.unisonDetune !== rightTrack.unisonDetune
       || leftTrack.tonewheelDrawbars.some((drawbar, drawbarIndex) => drawbar !== rightTrack.tonewheelDrawbars[drawbarIndex])
+      || JSON.stringify(leftTrack.tonewheelWavetable) !== JSON.stringify(rightTrack.tonewheelWavetable)
       || leftTrack.breathEnabled !== rightTrack.breathEnabled
       || leftTrack.breathLevel !== rightTrack.breathLevel
       || leftTrack.breathHarmonic !== rightTrack.breathHarmonic

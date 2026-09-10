@@ -357,6 +357,28 @@
         </v-window-item>
 
         <v-window-item v-if="draftTrack.trackKind !== 'rhythmic'" value="generator" class="control-tab-panel">
+          <v-row class="compact-row">
+            <v-col cols="12">
+              <v-switch
+                :model-value="draftTrack.tonewheelWavetable.enabled"
+                label="Multidimensional wavetable"
+                hint="Crossfade cached spectra from tonewheel, waveform, sequence, or binary configurations."
+                persistent-hint
+                density="compact"
+                @update:modelValue="setTonewheelWavetableEnabled(Boolean($event))"
+              />
+            </v-col>
+            <v-col v-if="draftTrack.tonewheelWavetable.enabled && selectedTonewheelConfiguration" cols="12">
+              <v-select
+                v-model="selectedTonewheelConfigurationIndex"
+                label="Configuration to edit"
+                :items="tonewheelConfigurationOptions"
+                density="comfortable"
+                variant="outlined"
+                hide-details
+              />
+            </v-col>
+          </v-row>
           <v-row>
             <v-col cols="12">
               <v-select
@@ -407,17 +429,17 @@
           <v-row v-if="partialGenerator.type === 'waveform'">
             <v-col cols="12">
               <v-select
-                v-model="draftTrack.waveform"
+                :model-value="partialWaveform"
                 label="Waveform"
-                :items="waveformOptions"
+                :items="availableWaveformOptions"
                 hide-details="auto"
                 density="comfortable"
                 variant="outlined"
-                @update:modelValue="handleTrackDraftChange"
+                @update:modelValue="updatePartialWaveform"
               />
             </v-col>
           </v-row>
-          <template v-if="partialGenerator.type === 'waveform' && !isNoiseWaveform">
+          <template v-if="partialGenerator.type === 'waveform'">
             <v-row>
               <v-col cols="12" md="6">
                 <EditableSlider :model-value="partialGenerator.harmonicCount" :label="`Harmonic count (${partialGenerator.harmonicCount})`" :min="1" :max="64" :step="1" @update:modelValue="updatePartialGenerator({ harmonicCount: $event })" />
@@ -440,10 +462,14 @@
             </v-row>
             <p class="text-caption text-medium-emphasis mt-2">Harmonic limit/mask → contrast → tilt and odd/even balance → optional peak normalization. Contrast below 1 flattens magnitudes; above 1 emphasizes strong partials. Signs and silent harmonics are preserved. Positive tilt brightens; negative tilt darkens. Strong boosts can increase level; normalization sets the largest partial magnitude to 1, not the output loudness.</p>
           </template>
+          <v-row v-if="partialGenerator.type === 'tonewheel'" class="compact-row">
+            <v-col v-for="(label, index) in tonewheelDrawbarLabels" :key="label" cols="12" sm="6" md="4">
+              <EditableSlider :label="label + ' Drawbar (' + editableTonewheelDrawbars[index] + ')'" :min="0" :max="8" :step="1" v-model="editableTonewheelDrawbars[index]" @update:modelValue="handleWavetableMorphChange" />
+            </v-col>
+          </v-row>
           <figure class="partial-spectrum">
             <figcaption class="text-subtitle-2">Static harmonic spectrum preview</figcaption>
-            <p v-if="isNoiseWaveform" class="text-caption">Noise is broadband, not a harmonic spectrum. Spectral transforms do not apply and no discrete partials are shown.</p>
-            <template v-else>
+            <template>
               <svg viewBox="0 0 640 150" role="img" :aria-label="partialSpectrumDescription">
                 <title>Static harmonic spectrum</title>
                 <desc>{{ partialSpectrumDescription }}</desc>
@@ -475,19 +501,7 @@
               <EditableSlider v-model="draftTrack.breathHarmonic" :label="`Breath harmonic (${Number(draftTrack.breathHarmonic).toFixed(1)}x)`" :min="0.5" :max="8" :step="0.5" :disabled="!draftTrack.breathEnabled" @update:modelValue="handleTrackDraftChange" />
             </v-col>
           </v-row>
-          <v-row v-if="partialGenerator.type === 'tonewheel'" class="compact-row">
-            <v-col cols="12">
-              <v-switch
-                :model-value="draftTrack.tonewheelWavetable.enabled"
-                label="Multidimensional wavetable"
-                hint="Morph between any number of tonewheel configurations across independent axes."
-                persistent-hint
-                density="compact"
-                @update:modelValue="setTonewheelWavetableEnabled(Boolean($event))"
-              />
-            </v-col>
-          </v-row>
-          <template v-if="partialGenerator.type === 'tonewheel' && draftTrack.tonewheelWavetable.enabled">
+          <template v-if="draftTrack.tonewheelWavetable.enabled">
             <v-row v-for="(dimension, dimensionIndex) in draftTrack.tonewheelWavetable.dimensions" :key="dimensionIndex" class="compact-row">
               <v-col cols="12" md="4">
                 <v-text-field v-model="dimension.name" :label="`Axis ${dimensionIndex + 1}`" density="compact" variant="outlined" hide-details @change="handleTrackDraftChange" />
@@ -508,17 +522,7 @@
               </v-col>
             </v-row>
             <v-row v-if="selectedTonewheelConfiguration">
-              <v-col cols="12" md="8">
-                <v-select
-                  v-model="selectedTonewheelConfigurationIndex"
-                  label="Configuration to edit"
-                  :items="tonewheelConfigurationOptions"
-                  density="comfortable"
-                  variant="outlined"
-                  hide-details
-                />
-              </v-col>
-              <v-col cols="12" md="4">
+              <v-col cols="12">
                 <v-btn prepend-icon="mdi-delete-outline" variant="outlined" block :disabled="draftTrack.tonewheelWavetable.configurations.length <= 1" @click="removeSelectedWavetableConfiguration">Remove</v-btn>
               </v-col>
               <v-col cols="12">
@@ -533,9 +537,6 @@
                   v-model="selectedTonewheelConfiguration.position[dimensionIndex]"
                   @update:modelValue="handleWavetableMorphChange"
                 />
-              </v-col>
-              <v-col v-for="(label, index) in tonewheelDrawbarLabels" :key="label" cols="12" sm="6" md="4">
-                <EditableSlider :label="`${label} Drawbar (${Number(selectedTonewheelConfiguration.drawbars[index]).toFixed(1)})`" :min="0" :max="8" :step="0.1" v-model="selectedTonewheelConfiguration.drawbars[index]" @update:modelValue="handleWavetableMorphChange" />
               </v-col>
             </v-row>
             <v-divider class="my-4" />
@@ -606,11 +607,6 @@
               </v-row>
             </v-card>
           </template>
-          <v-row v-else-if="partialGenerator.type === 'tonewheel'" class="compact-row">
-            <v-col v-for="(label, index) in tonewheelDrawbarLabels" :key="label" cols="12" sm="6" md="4">
-              <EditableSlider :label="label + ' Drawbar (' + draftTrack.tonewheelDrawbars[index] + ')'" :min="0" :max="8" :step="1" v-model="draftTrack.tonewheelDrawbars[index]" @update:modelValue="handleTrackDraftChange" />
-            </v-col>
-          </v-row>
         </v-window-item>
 
         <v-window-item v-if="draftTrack.trackKind !== 'rhythmic'" value="envelopes" class="control-tab-panel">
@@ -1062,6 +1058,7 @@ import {
   type TonewheelConfiguration,
   type TonewheelWavetableLfo,
 } from '../audio/tonewheelWavetable';
+import { blendPartialWavetableSpectra, type PartialSourceSnapshot } from '../audio/partialWavetable';
 import { LFO_SYNC_RATE_OPTIONS, LFO_WAVEFORM_OPTIONS } from '../audio/lfo';
 import { getSpectrumPreview } from '../audio/spectrumPreview';
 import {
@@ -1122,7 +1119,7 @@ export default defineComponent({
       waveformOptions: WAVEFORM_OPTIONS,
       partialSourceOptions: [
         { title: 'Tonewheel (drawbars)', value: 'tonewheel' },
-        { title: 'Waveform (Fourier spectrum / noise)', value: 'waveform' },
+        { title: 'Waveform (Fourier / frozen spectrum)', value: 'waveform' },
         { title: 'Sequence', value: 'sequence' },
         { title: 'Binary', value: 'binary' },
       ],
@@ -1195,18 +1192,38 @@ export default defineComponent({
   },
   computed: {
     partialGenerator(): NormalizedPartialGenerator {
-      return normalizePartialGenerator(this.draftTrack.partialGenerator);
+      const selectedSource = this.draftTrack.tonewheelWavetable.enabled
+        ? this.draftTrack.tonewheelWavetable.configurations[this.selectedTonewheelConfigurationIndex]?.source
+        : undefined;
+      return normalizePartialGenerator(selectedSource?.partialGenerator ?? this.draftTrack.partialGenerator);
     },
-    isNoiseWaveform(): boolean {
-      return this.partialGenerator.type === 'waveform'
-        && (this.draftTrack.waveform === 'pink-noise' || this.draftTrack.waveform === 'brown-noise');
+    partialWaveform(): string {
+      const selectedSource = this.draftTrack.tonewheelWavetable.enabled
+        ? this.draftTrack.tonewheelWavetable.configurations[this.selectedTonewheelConfigurationIndex]?.source
+        : undefined;
+      return selectedSource?.waveform ?? this.draftTrack.waveform;
+    },
+    editableTonewheelDrawbars(): number[] {
+      if (!this.draftTrack.tonewheelWavetable.enabled) return this.draftTrack.tonewheelDrawbars;
+      const configuration = this.draftTrack.tonewheelWavetable.configurations[this.selectedTonewheelConfigurationIndex];
+      return configuration?.source?.tonewheelDrawbars ?? configuration?.drawbars ?? this.draftTrack.tonewheelDrawbars;
+    },
+    availableWaveformOptions(): ReadonlyArray<(typeof WAVEFORM_OPTIONS)[number]> {
+      return WAVEFORM_OPTIONS;
     },
     partialSpectrum(): number[] {
-      if (this.isNoiseWaveform) return [];
+      if (this.draftTrack.tonewheelWavetable.enabled
+        && this.draftTrack.tonewheelWavetable.configurations.some((configuration) => configuration.source)) {
+        return blendPartialWavetableSpectra(this.draftTrack.tonewheelWavetable, {
+          partialGenerator: this.draftTrack.partialGenerator ?? { type: 'tonewheel' },
+          waveform: this.draftTrack.waveform,
+          tonewheelDrawbars: this.draftTrack.tonewheelDrawbars,
+        });
+      }
       const drawbars = this.partialGenerator.type === 'tonewheel'
         ? interpolateTonewheelDrawbars(this.draftTrack.tonewheelWavetable, this.draftTrack.tonewheelDrawbars)
         : this.draftTrack.tonewheelDrawbars;
-      return generatePartialSpectrum(this.partialGenerator, this.draftTrack.waveform, drawbars);
+      return generatePartialSpectrum(this.partialGenerator, this.partialWaveform, drawbars);
     },
     partialSpectrumPreview() {
       return getSpectrumPreview(this.partialSpectrum);
@@ -1218,7 +1235,7 @@ export default defineComponent({
       return this.partialSpectrumPreview.bars;
     },
     partialSpectrumDescription(): string {
-      const source = this.partialGenerator.type === 'waveform' ? this.draftTrack.waveform : this.partialGenerator.type;
+      const source = this.partialGenerator.type === 'waveform' ? this.partialWaveform : this.partialGenerator.type;
       return `Static ${source} spectrum. ${this.partialSpectrumBars.length} visible partials; peak amplitude ${this.partialSpectrumPeak.toPrecision(3)}. Magnitude from 0 to -60 dB relative to peak. Frequencies are multiples of the musical fundamental.`;
     },
     selectedTrackSequenceLength(): number {
@@ -1273,7 +1290,27 @@ export default defineComponent({
       this.updatePartialGenerator({ type });
     },
     updatePartialGenerator(change: Record<string, unknown>) {
-      this.draftTrack.partialGenerator = normalizePartialGenerator({ ...this.partialGenerator, ...change });
+      const partialGenerator = normalizePartialGenerator({ ...this.partialGenerator, ...change });
+      const configuration = this.draftTrack.tonewheelWavetable.enabled
+        ? this.draftTrack.tonewheelWavetable.configurations[this.selectedTonewheelConfigurationIndex]
+        : undefined;
+      if (configuration) {
+        configuration.source = {
+          partialGenerator,
+          waveform: configuration.source?.waveform ?? this.draftTrack.waveform,
+          tonewheelDrawbars: (configuration.source?.tonewheelDrawbars ?? configuration.drawbars).slice(),
+        };
+      } else {
+        this.draftTrack.partialGenerator = partialGenerator;
+      }
+      this.handleTrackDraftChange();
+    },
+    updatePartialWaveform(waveform: string) {
+      const configuration = this.draftTrack.tonewheelWavetable.enabled
+        ? this.draftTrack.tonewheelWavetable.configurations[this.selectedTonewheelConfigurationIndex]
+        : undefined;
+      if (configuration?.source) configuration.source.waveform = waveform;
+      else this.draftTrack.waveform = waveform;
       this.handleTrackDraftChange();
     },
     /** Shows the tempo-synced LFO cycle length translated into Hz at the current tempo. */
@@ -1300,11 +1337,34 @@ export default defineComponent({
     setTonewheelWavetableEnabled(enabled: boolean) {
       const wavetable = this.draftTrack.tonewheelWavetable;
       if (enabled && wavetable.dimensions.length === 0) {
+        const source: PartialSourceSnapshot = {
+          partialGenerator: this.partialGenerator,
+          waveform: this.partialWaveform,
+          tonewheelDrawbars: this.draftTrack.tonewheelDrawbars.slice(),
+        };
         wavetable.dimensions = [{ name: 'Brightness', value: 0 }];
         wavetable.configurations = [
-          { name: 'Original', position: [0], drawbars: this.draftTrack.tonewheelDrawbars.slice() },
-          { name: 'Bright', position: [1], drawbars: [0, 0, 8, 8, 6, 5, 3, 2, 1] },
+          { name: 'Configuration 1', position: [0], drawbars: source.tonewheelDrawbars.slice(), source },
+          { name: 'Configuration 2', position: [1], drawbars: source.tonewheelDrawbars.slice(), source: {
+            ...source,
+            partialGenerator: { ...source.partialGenerator },
+            tonewheelDrawbars: source.tonewheelDrawbars.slice(),
+          } },
         ];
+      } else if (enabled && this.partialGenerator.type !== 'tonewheel'
+        && !wavetable.configurations.some((configuration) => configuration.source)) {
+        const source: PartialSourceSnapshot = {
+          partialGenerator: { ...this.partialGenerator },
+          waveform: this.partialWaveform,
+          tonewheelDrawbars: this.draftTrack.tonewheelDrawbars.slice(),
+        };
+        wavetable.configurations.forEach((configuration) => {
+          configuration.source = {
+            ...source,
+            partialGenerator: { ...source.partialGenerator },
+            tonewheelDrawbars: source.tonewheelDrawbars.slice(),
+          };
+        });
       }
       wavetable.enabled = enabled;
       this.selectedTonewheelConfigurationIndex = 0;
@@ -1336,11 +1396,21 @@ export default defineComponent({
       if (wavetable.configurations.length >= MAX_WAVETABLE_CONFIGURATIONS) {
         return;
       }
-      const drawbars = interpolateTonewheelDrawbars(wavetable, this.draftTrack.tonewheelDrawbars);
+      const selected = wavetable.configurations[this.selectedTonewheelConfigurationIndex];
+      const source: PartialSourceSnapshot = selected?.source ? {
+        partialGenerator: { ...selected.source.partialGenerator },
+        waveform: selected.source.waveform,
+        tonewheelDrawbars: selected.source.tonewheelDrawbars.slice(),
+      } : {
+        partialGenerator: { type: 'tonewheel' },
+        waveform: 'sine',
+        tonewheelDrawbars: (selected?.drawbars ?? this.draftTrack.tonewheelDrawbars).slice(),
+      };
       wavetable.configurations.push({
         name: `Configuration ${wavetable.configurations.length + 1}`,
         position: wavetable.dimensions.map((dimension) => dimension.value),
-        drawbars,
+        drawbars: source.tonewheelDrawbars.slice(),
+        source,
       });
       this.selectedTonewheelConfigurationIndex = wavetable.configurations.length - 1;
       this.handleTrackDraftChange();
@@ -1401,10 +1471,12 @@ export default defineComponent({
       ];
     },
     handleWavetableMorphChange() {
-      this.draftTrack.tonewheelDrawbars = interpolateTonewheelDrawbars(
-        this.draftTrack.tonewheelWavetable,
-        this.draftTrack.tonewheelDrawbars,
-      );
+      if (!this.draftTrack.tonewheelWavetable.configurations.some((configuration) => configuration.source)) {
+        this.draftTrack.tonewheelDrawbars = interpolateTonewheelDrawbars(
+          this.draftTrack.tonewheelWavetable,
+          this.draftTrack.tonewheelDrawbars,
+        );
+      }
       this.handleTrackDraftChange();
     },
     handleReverbDraftChange() {

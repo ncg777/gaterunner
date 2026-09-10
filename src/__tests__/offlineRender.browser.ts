@@ -14,6 +14,7 @@ import { DEFAULT_PRESET_TRACK_DATA } from '../presets';
 import { normalizePresetTrackData } from '../presets';
 import { generatePartialSpectrum, normalizePartialGenerator } from '../audio/partialGenerator';
 import { interpolateModulatedTonewheelDrawbars } from '../audio/tonewheelWavetable';
+import { blendPartialWavetableSpectra } from '../audio/partialWavetable';
 import { PitchEnvelopeSynth } from '../audio/pitchEnvelopeSynth';
 import { prewarmVoicePool } from '../audio/voicePool';
 import type App from '../App.vue';
@@ -90,7 +91,9 @@ export async function runPartialGeneratorChecks(app: InstanceType<typeof App>) {
   track.waveform = 'square';
   check(triangle !== app.getTonewheelPartials(track), 'Active waveform changes invalidate cached spectrum');
   track.waveform = 'pink-noise';
-  check(app.getTonewheelPartials(track).length === 0, 'Waveform noise bypasses harmonic generation');
+  check(JSON.stringify(app.getTonewheelPartials(track)) === JSON.stringify(trim(
+    generatePartialSpectrum(track.partialGenerator, track.waveform),
+  )), 'Pink spectrum uses shared harmonic generation');
 
   const animated = normalizePresetTrackData({
     waveform: 'sine',
@@ -118,6 +121,61 @@ export async function runPartialGeneratorChecks(app: InstanceType<typeof App>) {
   animated.tonewheelWavetable.enabled = false;
   check(proceduralSignature === app.getTrackVoiceSignature(animated),
     'Inactive drawbars and wavetable leave procedural voice settings unchanged');
+
+  const mixed = normalizePresetTrackData({
+    partialGenerator: { type: 'sequence', sequence: 'natural' },
+    tonewheelWavetable: {
+      enabled: true,
+      dimensions: [{ name: 'Source', value: 0 }],
+      configurations: [
+        {
+          name: 'Tonewheel', position: [0], drawbars: [8, 0, 0, 0, 0, 0, 0, 0, 0],
+          source: {
+            partialGenerator: { type: 'tonewheel' }, waveform: 'sine',
+            tonewheelDrawbars: [8, 0, 0, 0, 0, 0, 0, 0, 0],
+          },
+        },
+        {
+          name: 'Sequence', position: [1], drawbars: Array(9).fill(0),
+          source: {
+            partialGenerator: {
+              type: 'sequence', sequence: 'natural', harmonicCount: 1, normalize: true,
+              mapping: 'linear', exponent: 1, mask: 'none', tilt: 0,
+            },
+            waveform: 'sine', tonewheelDrawbars: Array(9).fill(0),
+          },
+        },
+      ],
+      lfos: [],
+    },
+  });
+  const fallbackSource = {
+    partialGenerator: mixed.partialGenerator ?? { type: 'tonewheel' as const },
+    waveform: mixed.waveform,
+    tonewheelDrawbars: mixed.tonewheelDrawbars,
+  };
+  const endpoint = app.getTonewheelPartials(mixed);
+  check(JSON.stringify(endpoint) === JSON.stringify(trim(
+    blendPartialWavetableSpectra(mixed.tonewheelWavetable, fallbackSource),
+  )),
+    'Browser resolves exact mixed-wavetable endpoints');
+  check(endpoint === app.getTonewheelPartials(mixed, 10, 5), 'Static mixed wavetable reuses its blended spectrum');
+  for (const waveform of ['choir-ah', 'choir-oh', 'pink-noise', 'brown-noise']) {
+    mixed.waveform = waveform;
+    check(app.getEffectiveTrackWaveform(mixed) === 'sine', `Mixed wavetable ignores inactive ${waveform} routing`);
+    check(app.getTonewheelPartials(mixed).length > 0, `Mixed wavetable remains harmonic with inactive ${waveform}`);
+  }
+  mixed.waveform = 'sine';
+  mixed.tonewheelWavetable.dimensions[0].value = 0.5;
+  const midpoint = app.getTonewheelPartials(mixed);
+  check(midpoint[0] === 0.5 && midpoint[1] === 0.5, 'Browser crossfades mixed spectra at the midpoint');
+  mixed.tonewheelWavetable.lfos = [{
+    enabled: true, name: 'Source sweep', waveform: 'sine', sync: false, rateHz: 1,
+    syncRate: '1/4', phase: 0, depth: 0.5, polarity: 'bipolar', retrigger: 'note',
+    smoothing: 0, fmSource: -1, fmAmount: 0, routes: [1],
+  }];
+  check(JSON.stringify(app.getTonewheelPartials(mixed, 0, 0)) !== JSON.stringify(app.getTonewheelPartials(mixed, 0.25, 0)),
+    'Browser animates mixed spectra through the shared LFO position');
 
   track.waveform = 'square';
   for (const partialGenerator of [
@@ -171,8 +229,7 @@ export async function runPartialGeneratorChecks(app: InstanceType<typeof App>) {
           reverb = app.getOrCreateReverbChain();
           chain = app.createTrackAudioChain();
           app.updateTrackChainSettings(source, chain);
-          const activeNoise = type === 'waveform' && waveform.endsWith('-noise');
-          check(Boolean(chain.noiseSynth) === activeNoise, `${type}/${waveform} uses only its active noise routing`);
+          check(!chain.noiseSynth, `${type}/${waveform} does not allocate source noise without breath`);
           check(Boolean(chain.choir) === (type === 'waveform' && waveform.startsWith('choir-')),
             `${type}/${waveform} uses only its active choir routing`);
           chain.mixGain.gain.value = 1;

@@ -37,6 +37,12 @@ export type NormalizedPartialGenerator =
 
 export const MAX_PROCEDURAL_AMPLITUDE = Number.MAX_SAFE_INTEGER;
 
+const SUPPORTED_WAVEFORMS = new Set([
+  'sine', 'square', 'triangle', 'sawtooth', 'flute', 'oboe', 'clarinet', 'saxophone',
+  'pulse-25', 'pulse-12', 'choir-ah', 'choir-oh', 'pink-noise', 'brown-noise',
+  'helmholtz', 'formant', 'duct', 'aeolian', 'stochastic-bandpass',
+]);
+
 function boundedNumber(value: unknown, fallback: number, minimum: number, maximum: number): number {
   return typeof value === 'number' && Number.isFinite(value)
     ? Math.max(minimum, Math.min(maximum, value))
@@ -82,6 +88,10 @@ export function normalizePartialGenerator(value: unknown): NormalizedPartialGene
 
 export function isNoiseWaveform(waveform: string): boolean {
   return waveform === 'pink-noise' || waveform === 'brown-noise';
+}
+
+export function normalizePartialWaveform(value: unknown): string {
+  return typeof value === 'string' && SUPPORTED_WAVEFORMS.has(value) ? value : 'sine';
 }
 
 /** Only legacy noise tracks without an explicit source need source migration. */
@@ -199,7 +209,6 @@ export function generatePartialSpectrum(
 ): PartialSpectrum {
   const normalized = normalizePartialGenerator(generator);
   if (normalized.type === 'tonewheel') return getTonewheelSpectrum(drawbars, 'sine');
-  if (normalized.type === 'waveform' && isNoiseWaveform(waveform)) return [];
   const amplitudes = normalized.type === 'waveform'
     ? generateWaveformAmplitudes(normalized, waveform)
     : generateProceduralAmplitudes(normalized);
