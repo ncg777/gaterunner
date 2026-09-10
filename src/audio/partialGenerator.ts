@@ -1,4 +1,4 @@
-import { getWaveformPartialAmplitude } from './spectra.js';
+import { getWaveformPartialAmplitude, isPulseWaveform, PULSE_DUTY } from './spectra.js';
 import { DEFAULT_TONEWHEEL_DRAWBARS, getTonewheelSpectrum } from './tonewheelSpectrum.js';
 
 export type PartialSpectrum = number[];
@@ -177,6 +177,8 @@ export function generateProceduralAmplitudes(value: unknown): number[] {
 function generateWaveformAmplitudes(generator: WaveformSettings, waveform: string): number[] {
   const amplitudes = Array.from({ length: generator.harmonicCount }, (_, index) => {
     const harmonic = index + 1;
+    // Keep analytical pulse nulls silent instead of amplifying Math.sin rounding residue.
+    if (isPulseWaveform(waveform) && Number.isInteger(harmonic * PULSE_DUTY[waveform])) return 0;
     const amplitude = getWaveformPartialAmplitude(waveform, harmonic);
     if (amplitude === 0 || !passesMask(harmonic, generator.mask)) return 0;
     // Positive balance attenuates odd harmonics; negative balance attenuates even ones.

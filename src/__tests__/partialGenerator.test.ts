@@ -7,7 +7,7 @@ import {
   normalizePartialGenerator,
 } from '../audio/partialGenerator.js';
 import {
-  FLUTE_HARMONICS, PULSE_DUTY, REED_HARMONICS, getWaveformPartialAmplitude,
+  FLUTE_HARMONICS, PULSE_DUTY, REED_HARMONICS, getWaveformPartialAmplitude, isPulseWaveform,
 } from '../audio/spectra.js';
 import { getTonewheelSpectrum } from '../audio/tonewheelSpectrum.js';
 import {
@@ -292,7 +292,8 @@ test('waveform source preserves signed Fourier coefficients for 64 musical harmo
     assert.equal(spectrum.length, 128);
     for (let harmonic = 1; harmonic <= 64; harmonic += 1) {
       assert.equal(spectrum[2 * harmonic - 2], 0);
-      assert.equal(spectrum[2 * harmonic - 1], legacyWaveform(waveform, harmonic));
+      const pulseNull = isPulseWaveform(waveform) && Number.isInteger(harmonic * PULSE_DUTY[waveform]);
+      assert.equal(spectrum[2 * harmonic - 1], pulseNull ? 0 : legacyWaveform(waveform, harmonic));
     }
     assert.deepEqual(spectrum, generatePartialSpectrum({ type: 'waveform' }, waveform, Array(9).fill(0)));
   }
@@ -418,4 +419,24 @@ test('waveform transforms clone independently, round trip, and each field affect
   }
   if (clone.tracks[0].partialGenerator?.type === 'waveform') clone.tracks[0].partialGenerator.tilt = 12;
   assert.equal(arePresetDataEqual(data, clone), false);
+});
+
+test('waveform transforms never amplify floating-point residue at analytical pulse nulls', () => {
+  for (const waveform of ['pulse-25', 'pulse-12'] as const) {
+    for (const settings of [
+      {}, { contrast: 0.25, tilt: 24, normalize: true, mask: 'power-of-two' },
+    ]) {
+      const spectrum = generatePartialSpectrum({ type: 'waveform', ...settings }, waveform);
+      for (let harmonic = 1; harmonic <= 64; harmonic += 1) {
+        if (Number.isInteger(harmonic * PULSE_DUTY[waveform])) {
+          assert.equal(spectrum[2 * harmonic - 1], 0, `${waveform} harmonic ${harmonic}`);
+        }
+      }
+    }
+    const spectrum = generatePartialSpectrum({
+      type: 'waveform', contrast: 0.25, tilt: 24, normalize: true, mask: 'power-of-two',
+    }, waveform);
+    const highestNonzero = (1 / PULSE_DUTY[waveform]) / 2;
+    assert.equal(spectrum[2 * highestNonzero - 1], 1);
+  }
 });
