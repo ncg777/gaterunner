@@ -52,6 +52,7 @@ import {
 } from '../src/audio/spectra.js';
 import { encodeWavFromChannelsSync } from '../src/audio/wav.js';
 import { prepareTonewheel, sampleTonewheel } from './tonewheelOscillator.js';
+import { generatePartialSpectrum, normalizePartialGenerator, type PartialGenerator } from '../src/audio/partialGenerator.js';
 
 export interface GenerateTrackOptions {
   /** Optional display name for the track. */
@@ -142,6 +143,8 @@ export interface GenerateTrackOptions {
   unisonDetune?: number;
   /** Nine Hammond-style drawbar levels (0-8) used by the tonewheel waveform. */
   tonewheelDrawbars?: number[];
+  /** Generalized partial weighting layer; omitted values retain tonewheel behavior. */
+  partialGenerator?: PartialGenerator;
   /** Sparse multidimensional tonewheel configurations and current morph position. */
   tonewheelWavetable?: TonewheelWavetable;
   tremoloEnabled?: boolean;
@@ -566,6 +569,7 @@ function normalizeTracks(options: GenerateOptions): NormalizedTrack[] {
     unisonVoices: 1,
     unisonDetune: 12,
     tonewheelDrawbars: DEFAULT_TONEWHEEL_DRAWBARS.slice(),
+    partialGenerator: { type: 'tonewheel' },
     tonewheelWavetable: {
       enabled: false,
       dimensions: [],
@@ -655,6 +659,7 @@ function normalizeTracks(options: GenerateOptions): NormalizedTrack[] {
     unisonVoices: clamp(track.unisonVoices ?? fallbackTrack.unisonVoices, 1, 8),
     unisonDetune: clamp(track.unisonDetune ?? fallbackTrack.unisonDetune, 0, 100),
     tonewheelDrawbars: normalizeTonewheelDrawbars(track.tonewheelDrawbars),
+    partialGenerator: normalizePartialGenerator(track.partialGenerator),
     tonewheelWavetable: track.tonewheelWavetable ?? fallbackTrack.tonewheelWavetable,
     tremoloEnabled: Boolean(track.tremoloEnabled ?? fallbackTrack.tremoloEnabled),
     tremoloFrequency: clamp(track.tremoloFrequency ?? fallbackTrack.tremoloFrequency, 0.01, 40),
@@ -1220,10 +1225,19 @@ export async function renderWavChannels(
     const drumEchoRight = drumEchoLeft ? new Float32Array(frameCount) : null;
     const drumReverbLeft = isDrumTrack && hasReverbSend && entry.track.reverbWet > -96 ? new Float32Array(frameCount) : null;
     const drumReverbRight = drumReverbLeft ? new Float32Array(frameCount) : null;
-    const staticTonewheel = prepareTonewheel(interpolateTonewheelDrawbars(
+    const staticDrawbars = interpolateTonewheelDrawbars(
       entry.track.tonewheelWavetable,
       entry.track.tonewheelDrawbars,
-    ));
+    );
+    const staticSpectrum = entry.track.partialGenerator.type === 'tonewheel'
+      ? null
+      : generatePartialSpectrum(entry.track.partialGenerator, 64);
+    const staticTonewheel = entry.track.partialGenerator.type === 'tonewheel'
+      ? prepareTonewheel(staticDrawbars)
+      : (staticSpectrum?.ratios ?? []).map((ratio, index) => ({
+        ratio,
+        amplitude: staticSpectrum?.amplitudes[index] ?? 0,
+      }));
     const hasTonewheelModulation = entry.track.tonewheelWavetable.enabled
       && entry.track.tonewheelWavetable.lfos.some((lfo) => (
         lfo.enabled && lfo.depth !== 0 && lfo.routes.some((route) => route !== 0)
@@ -1333,15 +1347,17 @@ export async function renderWavChannels(
             for (let frame = startFrame; frame < endFrame; frame += 1) {
               const t = (frame - startFrame) / sampleRate;
               if (hasTonewheelModulation && (frame - startFrame) % 64 === 0) {
-                tonewheel = prepareTonewheel(interpolateModulatedTonewheelDrawbars(
-                  entry.track.tonewheelWavetable,
-                  entry.track.tonewheelDrawbars,
-                  {
-                    timeSeconds: frame / sampleRate,
-                    noteStartSeconds: start,
-                    bpm: prepared.bpm,
-                  },
-                ));
+                if (entry.track.partialGenerator.type === 'tonewheel') {
+                  tonewheel = prepareTonewheel(interpolateModulatedTonewheelDrawbars(
+                    entry.track.tonewheelWavetable,
+                    entry.track.tonewheelDrawbars,
+                    {
+                      timeSeconds: frame / sampleRate,
+                      noteStartSeconds: start,
+                      bpm: prepared.bpm,
+                    },
+                  ));
+                }
               }
               const releaseTime = duration - t;
 

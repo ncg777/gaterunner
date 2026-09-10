@@ -352,6 +352,7 @@ import { isMonophonic, limitPolyphony, type GlideCurve, type GlideMode } from '.
 import { claimVoices, getSynthVoiceCount, prewarmVoicePool, retainVoicePool, type SoundingNote } from './audio/voicePool';
 import { createDrumInstrument, type DrumInstrument } from './audio/drumKit';
 import { interpolateModulatedTonewheelDrawbars } from './audio/tonewheelWavetable';
+import { generatePartialSpectrum } from './audio/partialGenerator';
 import {
   BREATH_FILTER_Q,
   PULSE_DUTY,
@@ -2088,9 +2089,9 @@ export default defineComponent({
         return [1];
       }
 
-      const partialIndices = [1, 3, 2, 4, 6, 8, 10, 12, 16];
       const maximumPartial = 64;
       const partials = Array.from({ length: maximumPartial }, () => 0);
+      const partialIndices = [1, 3, 2, 4, 6, 8, 10, 12, 16];
       const drawbars = interpolateModulatedTonewheelDrawbars(
         track.tonewheelWavetable,
         track.tonewheelDrawbars,
@@ -2111,9 +2112,19 @@ export default defineComponent({
         }
       };
 
-      partialIndices.forEach((partialIndex, drawbarIndex) => {
-        addWaveformHarmonics(partialIndex, drawbars[drawbarIndex] / 8);
-      });
+      if (track.partialGenerator.type === 'tonewheel') {
+        partialIndices.forEach((partialIndex, drawbarIndex) => {
+          addWaveformHarmonics(partialIndex, drawbars[drawbarIndex] / 8);
+        });
+      } else {
+        const spectrum = generatePartialSpectrum(track.partialGenerator, maximumPartial);
+        spectrum.ratios.forEach((ratio, index) => {
+          const partialIndex = Math.round(ratio);
+          if (partialIndex >= 1 && partialIndex <= maximumPartial) {
+            addWaveformHarmonics(partialIndex, spectrum.amplitudes[index] ?? 0);
+          }
+        });
+      }
 
       const normalizer = Math.max(1, Math.sqrt(partials.reduce((sum, amplitude) => sum + amplitude * amplitude, 0)));
       return partials.map((amplitude) => amplitude / normalizer);
@@ -2131,7 +2142,7 @@ export default defineComponent({
           bpm: this.bpm,
         },
       );
-      const key = `${track.waveform}|${drawbars.join(',')}`;
+      const key = `${track.waveform}|${JSON.stringify(track.partialGenerator)}|${drawbars.join(',')}`;
       const cached = tonewheelPartialCache.get(key);
       if (cached) {
         return cached;
@@ -2636,6 +2647,7 @@ export default defineComponent({
     getTrackVoiceSignature(track: PresetTrackData): string {
       return [
         track.waveform,
+        JSON.stringify(track.partialGenerator),
         track.tonewheelDrawbars,
         JSON.stringify(track.tonewheelWavetable),
         track.breathEnabled,

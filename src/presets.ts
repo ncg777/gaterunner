@@ -45,6 +45,10 @@ import {
   type LfoSyncRateValue,
   type LfoWaveform,
 } from './audio/lfo.js';
+import {
+  normalizePartialGenerator,
+  type PartialGenerator,
+} from './audio/partialGenerator.js';
 export type TrackKind = 'melodic' | 'rhythmic';
 
 /** Upper bound for per-track polyphony; 1 switches the track to the monophonic glide engine. */
@@ -120,6 +124,7 @@ export interface PresetTrackData {
   unisonDetune: number;
   tonewheelDrawbars: number[];
   tonewheelWavetable: TonewheelWavetable;
+  partialGenerator: PartialGenerator;
   breathEnabled: boolean;
   breathLevel: number;
   breathHarmonic: number;
@@ -430,6 +435,7 @@ export const DEFAULT_PRESET_TRACK_DATA: PresetTrackData = {
   unisonVoices: 1,
   unisonDetune: 0,
   tonewheelDrawbars: DEFAULT_TONEWHEEL_DRAWBARS.slice(),
+  partialGenerator: { type: 'tonewheel' },
   tonewheelWavetable: {
     enabled: false,
     dimensions: [],
@@ -871,6 +877,7 @@ export function clonePresetTrackData(track: PresetTrackData): PresetTrackData {
     unisonVoices: track.unisonVoices,
     unisonDetune: track.unisonDetune,
     tonewheelDrawbars: track.tonewheelDrawbars.slice(),
+    partialGenerator: JSON.parse(JSON.stringify(track.partialGenerator)) as PartialGenerator,
     tonewheelWavetable: {
       enabled: track.tonewheelWavetable.enabled,
       dimensions: track.tonewheelWavetable.dimensions.map((dimension) => ({ ...dimension })),
@@ -997,6 +1004,7 @@ export function normalizePresetTrackData(value: unknown, index = 0): PresetTrack
     unisonVoices: clamp(parseInteger(raw.unisonVoices?.toString(), DEFAULT_PRESET_TRACK_DATA.unisonVoices), 1, 8),
     unisonDetune: clamp(parseNumber(raw.unisonDetune, DEFAULT_PRESET_TRACK_DATA.unisonDetune), 0, 100),
     tonewheelDrawbars: normalizeTonewheelDrawbars(raw.tonewheelDrawbars),
+    partialGenerator: normalizePartialGenerator(raw.partialGenerator),
     tonewheelWavetable: normalizeTonewheelWavetable(raw.tonewheelWavetable),
     breathEnabled: Boolean(raw.breathEnabled ?? DEFAULT_PRESET_TRACK_DATA.breathEnabled),
     breathLevel: clamp(parseNumber(raw.breathLevel, DEFAULT_PRESET_TRACK_DATA.breathLevel), -60, 0),
