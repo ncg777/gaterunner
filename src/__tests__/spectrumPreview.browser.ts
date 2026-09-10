@@ -38,6 +38,33 @@ export async function runSpectrumPreviewChecks(editor: InstanceType<typeof Edito
     await nextTick();
     check(bars().length === 4 && editor.partialSpectrum.length === 16, 'Editing waveform transforms updates the spectrum preview');
     check(editor.partialSpectrumPeak === 1, 'Waveform preview reflects peak normalization');
+    const source = {
+      partialGenerator: normalizePartialGenerator({ type: 'waveform', harmonicCount: 8, normalize: true }),
+      waveform: 'square',
+      tonewheelDrawbars: editor.draftTrack.tonewheelDrawbars.slice(),
+    };
+    editor.draftTrack.tonewheelWavetable = {
+      enabled: true,
+      dimensions: [{ name: 'Morph', value: 0 }],
+      configurations: [
+        { name: 'Configuration 1', position: [0], drawbars: source.tonewheelDrawbars.slice(), source },
+        { name: 'Configuration 2', position: [1], drawbars: source.tonewheelDrawbars.slice(), source: {
+          ...source,
+          partialGenerator: { ...source.partialGenerator },
+          tonewheelDrawbars: source.tonewheelDrawbars.slice(),
+        } },
+      ],
+      lfos: [],
+    };
+    editor.selectedTonewheelConfigurationIndex = 1;
+    await nextTick();
+    const beforeTilt = bars().map((bar) => bar.getAttribute('y1'));
+    editor.updatePartialGenerator({ tilt: 12 });
+    await nextTick();
+    check(JSON.stringify(beforeTilt) !== JSON.stringify(bars().map((bar) => bar.getAttribute('y1'))),
+      'Selected configuration parameters update the preview even when its morph weight is zero');
+    check(root.textContent!.includes('Selected configuration only'), 'Wavetable preview identifies its selected-configuration scope');
+    editor.draftTrack.tonewheelWavetable.enabled = false;
     editor.updatePartialGenerator({ mask: 'even' });
     await nextTick();
     check(bars().length === 0 && root.textContent!.includes('Silent spectrum:'), 'Waveform masks can silence missing harmonics without filling zeros');

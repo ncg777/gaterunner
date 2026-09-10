@@ -486,7 +486,7 @@
               <text x="624" y="140" text-anchor="end">{{ partialSpectrum.length / 2 }}×</text>
             </svg>
             <p v-if="partialSpectrumPeak === 0" class="text-caption" role="status">Silent spectrum: all partial amplitudes are zero. Adjust the source settings to generate sound.</p>
-            <p class="text-caption text-medium-emphasis">Magnitude in dB relative to peak ({{ partialSpectrumPeak.toPrecision(3) }}); partials below −60 dB are hidden. Static base morph position only, without LFO motion, breath noise, envelopes, effects, or pitch-dependent band limiting.</p>
+            <p class="text-caption text-medium-emphasis">Magnitude in dB relative to peak ({{ partialSpectrumPeak.toPrecision(3) }}); partials below −60 dB are hidden. {{ draftTrack.tonewheelWavetable.enabled ? 'Selected configuration only, without morphing or LFO motion' : 'Static source only' }}, breath noise, envelopes, effects, and pitch-dependent band limiting are omitted.</p>
           </figure>
           <v-row class="compact-row">
             <v-col cols="12" md="4">
@@ -1056,7 +1056,7 @@ import {
   type TonewheelConfiguration,
   type TonewheelWavetableLfo,
 } from '../audio/tonewheelWavetable';
-import { blendPartialWavetableSpectra, type PartialSourceSnapshot } from '../audio/partialWavetable';
+import type { PartialSourceSnapshot } from '../audio/partialWavetable';
 import { LFO_SYNC_RATE_OPTIONS, LFO_WAVEFORM_OPTIONS } from '../audio/lfo';
 import { getSpectrumPreview } from '../audio/spectrumPreview';
 import {
@@ -1210,18 +1210,7 @@ export default defineComponent({
       return WAVEFORM_OPTIONS;
     },
     partialSpectrum(): number[] {
-      if (this.draftTrack.tonewheelWavetable.enabled
-        && this.draftTrack.tonewheelWavetable.configurations.some((configuration) => configuration.source)) {
-        return blendPartialWavetableSpectra(this.draftTrack.tonewheelWavetable, {
-          partialGenerator: this.draftTrack.partialGenerator ?? { type: 'tonewheel' },
-          waveform: this.draftTrack.waveform,
-          tonewheelDrawbars: this.draftTrack.tonewheelDrawbars,
-        });
-      }
-      const drawbars = this.partialGenerator.type === 'tonewheel'
-        ? interpolateTonewheelDrawbars(this.draftTrack.tonewheelWavetable, this.draftTrack.tonewheelDrawbars)
-        : this.draftTrack.tonewheelDrawbars;
-      return generatePartialSpectrum(this.partialGenerator, this.partialWaveform, drawbars);
+      return generatePartialSpectrum(this.partialGenerator, this.partialWaveform, this.editableTonewheelDrawbars);
     },
     partialSpectrumPreview() {
       return getSpectrumPreview(this.partialSpectrum);
