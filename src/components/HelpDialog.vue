@@ -33,7 +33,7 @@ const visible = defineModel<boolean>({ required: true });
           <li><strong>Rhythmic tracks</strong>: Add a rhythmic track to use a synthesized GM-oriented drum kit instead of the melodic pitch-class encoder. Its ordered lanes map to GM percussion notes, with lane 1 using the least-significant velocity bits. Each sequence value is a decimal BigInt mask; the selected 1-7 velocity bits per lane allow simultaneous hits and velocity variation. Assign an XOR group (1-8) to choke other members of that group so only one can be active; the default is no group. When two grouped voices fire on the same step, the later/higher lane wins. Rhythmic tracks default to MIDI channel 10, but the channel remains editable for hardware routing.</li>
           <li><strong>Numerator/Denominator</strong>: Set per-track rhythmic grid while all tracks share one tempo.</li>
           <li><strong>Tracks</strong>: Each preset can contain multiple tracks with their own MIDI channel, waveform, gain, sequence, octave shift, note length, amp/pitch envelopes, polyphony, modulation, waveshaper, tanh drive, chorus, flanger, phaser, filter, echo, and reverb send.</li>
-          <li><strong>Generator</strong>: Shape the tonewheel engine with classic oscillator waves, choir vowels, colored noise, resonant spectra, flute, oboe, clarinet, saxophone, fixed pulse spectra, drawbars, and optional breath noise.</li>
+          <li><strong>Generator</strong>: Choose tonewheel drawbars, sequence amplitudes, or binary amplitudes; shape them with classic oscillator waves, choir vowels, resonant and acoustic spectra, or use unchanged colored noise. Optional breath noise remains available.</li>
           <li><strong>Sequence</strong>: Input a sequence of numbers per track to generate notes based on their binary representation.</li>
           <li><strong>Octave Shift</strong>: Adjusts the octave of the notes played for the selected track.</li>
           <li><strong>Track Gain</strong>: Sets each track's audio level in dB. Use the velocity multiplier to control MIDI note velocity independently.</li>
@@ -54,13 +54,22 @@ const visible = defineModel<boolean>({ required: true });
         </ul>
 
         <h3 class="mt-4 mb-2">Melodic Sound Palette</h3>
-        <p>The <strong>Generator</strong> tab uses one tonewheel-based melodic engine. Choose a source shape, mix its nine drawbars, and optionally add breath noise before the track's shared envelope, filter, drive, modulation, and effects.</p>
+        <p>The <strong>Generator</strong> tab selects a partial source and waveform for the melodic engine. Tonewheel uses nine drawbars and optional multidimensional morphing; Sequence and Binary generate harmonic amplitudes instead. All share breath noise, envelopes, filters, drive, modulation, and effects.</p>
         <ul>
           <li><strong>Flute</strong>: Uses a compact, fundamental-led harmonic spectrum for a soft acoustic starting point.</li>
           <li><strong>Oboe, Clarinet, and Saxophone</strong>: Use distinct reed-inspired harmonic spectra: bright and nasal for oboe, hollow and odd-harmonic-led for clarinet, and full and buzzy for saxophone.</li>
           <li><strong>Pulse 25% and 12.5%</strong>: Use fixed narrow-duty spectra for brighter, leaner tones without a per-voice PWM graph.</li>
           <li><strong>Breath noise</strong>: Adds one pink-noise source per track event. Level sets its gain and Harmonic sets the pitch-relative center of its band-pass filter.</li>
           <li><strong>Legacy presets</strong>: Retired FM and virtual-analog fields are ignored during import, while compatible waveform, envelope, sequence, and effect settings are retained.</li>
+        </ul>
+
+        <h4 class="mt-3 mb-2">Procedural Partial Sources</h4>
+        <ul>
+          <li><strong>Sequence</strong>: Natural starts at n = 1 (1, 2, 3, …); Fibonacci starts 1, 1, 2, …; primes start 2, 3, 5, …; powers of two start 1, 2, 4, …; Thue–Morse starts at n = 0 (0, 1, 1, 0, …). Values set amplitudes, not pitches.</li>
+          <li><strong>Binary</strong>: At n = 0, 1, 2, …, use popcount (number of set bits), parity (popcount modulo 2), or a selected bit (0–5, with bit 0 least significant). The first value controls harmonic 1; the sequence starts with silence. High bit indices with a low harmonic count can make every partial silent.</li>
+          <li><strong>Transforms</strong>: Choose 1–64 harmonics, then apply linear, power (exponent 0.1–4), square-root, or inverse mapping → harmonic mask → tilt (−24 to +24 dB/octave) → optional peak normalization. Inverse maps nonzero values to reciprocals and keeps zeros zero. Masks keep odd, even, prime, Fibonacci, or power-of-two harmonic numbers, counted from harmonic 1.</li>
+          <li><strong>Waveform and preview</strong>: The chosen waveform multiplies the generated amplitudes after those transforms. Noise waveforms bypass partial generation and remain unchanged. The static preview shows absolute waveform-weighted amplitudes on a peak-scaled vertical axis, not loudness; tonewheel previews interpolate the base morph position without LFO animation, and neither preview includes breath noise, envelopes, effects, or pitch-dependent band limiting.</li>
+          <li><strong>Compatibility</strong>: Missing or unrecognized partial-source settings default to the legacy tonewheel sound. Drawbars and wavetable settings are retained when switching to a procedural source, but only affect Tonewheel. Note sequences, rhythm, and MIDI are unchanged.</li>
         </ul>
 
         <h3 class="mt-4 mb-2">Waveshaper and Tanh Drive</h3>
@@ -81,7 +90,7 @@ const visible = defineModel<boolean>({ required: true });
         </ul>
 
         <h3 class="mt-4 mb-2">Multidimensional Tonewheel Wavetable</h3>
-        <p>Open the <strong>Generator</strong> tab to turn a melodic track's nine drawbars into a morphable spectrum. Instead of keeping one fixed drawbar registration, you place named registrations at points in a space with up to 16 independent morph axes. GateRunner continuously interpolates the drawbars at the current position, so one axis could represent brightness, another body, and another harmonic complexity.</p>
+        <p>Open the <strong>Generator</strong> tab and choose the <strong>Tonewheel</strong> partial source to turn a melodic track's nine drawbars into a morphable spectrum. Instead of keeping one fixed drawbar registration, you place named registrations at points in a space with up to 16 independent morph axes. GateRunner continuously interpolates the drawbars at the current position, so one axis could represent brightness, another body, and another harmonic complexity.</p>
         <p>This feature affects the additive tonewheel spectrum used by melodic waveforms. Rhythmic tracks do not use it, and noise waveforms bypass the tonewheel drawbar spectrum.</p>
 
         <h4 class="mt-3 mb-2">Axes and Configurations</h4>

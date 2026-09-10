@@ -360,6 +360,53 @@
           <v-row>
             <v-col cols="12">
               <v-select
+                :model-value="partialGenerator.type"
+                label="Partial source"
+                :items="partialSourceOptions"
+                hide-details="auto"
+                density="comfortable"
+                variant="outlined"
+                @update:modelValue="setPartialSource"
+              />
+            </v-col>
+          </v-row>
+          <template v-if="partialGenerator.type !== 'tonewheel'">
+            <v-row>
+              <v-col v-if="partialGenerator.type === 'sequence'" cols="12" md="6">
+                <v-select :model-value="partialGenerator.sequence" label="Amplitude sequence" :items="partialSequenceOptions" density="comfortable" variant="outlined" hide-details @update:modelValue="updatePartialGenerator({ sequence: $event })" />
+              </v-col>
+              <v-col v-if="partialGenerator.type === 'binary'" cols="12" md="6">
+                <v-select :model-value="partialGenerator.mode" label="Binary mode" :items="partialBinaryModeOptions" density="comfortable" variant="outlined" hide-details @update:modelValue="updatePartialGenerator({ mode: $event })" />
+              </v-col>
+              <v-col cols="12" md="6">
+                <EditableSlider :model-value="partialGenerator.harmonicCount" :label="`Harmonic count (${partialGenerator.harmonicCount})`" :min="1" :max="64" :step="1" @update:modelValue="updatePartialGenerator({ harmonicCount: $event })" />
+              </v-col>
+              <v-col v-if="partialGenerator.type === 'binary' && partialGenerator.mode === 'bit'" cols="12">
+                <EditableSlider :model-value="partialGenerator.bit" :label="`Bit index (${partialGenerator.bit}; 0 = least significant)`" :min="0" :max="5" :step="1" @update:modelValue="updatePartialGenerator({ bit: $event })" />
+              </v-col>
+            </v-row>
+            <v-row>
+              <v-col cols="12" md="6">
+                <v-select :model-value="partialGenerator.mapping" label="Amplitude mapping" :items="partialMappingOptions" density="comfortable" variant="outlined" hide-details @update:modelValue="updatePartialGenerator({ mapping: $event })" />
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-select :model-value="partialGenerator.mask" label="Harmonic mask" :items="partialMaskOptions" density="comfortable" variant="outlined" hide-details @update:modelValue="updatePartialGenerator({ mask: $event })" />
+              </v-col>
+              <v-col v-if="partialGenerator.mapping === 'power'" cols="12">
+                <EditableSlider :model-value="partialGenerator.exponent" :label="`Power exponent (${partialGenerator.exponent.toFixed(2)})`" :min="0.1" :max="4" :step="0.05" @update:modelValue="updatePartialGenerator({ exponent: $event })" />
+              </v-col>
+              <v-col cols="12" md="8">
+                <EditableSlider :model-value="partialGenerator.tilt" :label="`Spectral tilt (${partialGenerator.tilt.toFixed(1)} dB/oct)`" :min="-24" :max="24" :step="0.5" @update:modelValue="updatePartialGenerator({ tilt: $event })" />
+              </v-col>
+              <v-col cols="12" md="4">
+                <v-switch :model-value="partialGenerator.normalize" label="Peak normalization" density="compact" hide-details @update:modelValue="updatePartialGenerator({ normalize: Boolean($event) })" />
+              </v-col>
+            </v-row>
+            <p class="text-caption text-medium-emphasis mt-2">Mapping → harmonic mask → tilt → optional peak normalization. Inverse keeps zeros silent. Binary and Thue–Morse start at n = 0.</p>
+          </template>
+          <v-row>
+            <v-col cols="12">
+              <v-select
                 v-model="draftTrack.waveform"
                 label="Waveform"
                 :items="waveformOptions"
@@ -370,6 +417,26 @@
               />
             </v-col>
           </v-row>
+          <figure class="partial-spectrum">
+            <figcaption class="text-subtitle-2">Static harmonic spectrum preview</figcaption>
+            <p v-if="isNoiseWaveform" class="text-caption">Noise waveforms bypass partial generation; their sound is unchanged. No harmonic spectrum is shown.</p>
+            <template v-else>
+              <svg viewBox="0 0 640 150" role="img" :aria-label="partialSpectrumDescription">
+                <title>Static harmonic spectrum</title>
+                <desc>{{ partialSpectrumDescription }}</desc>
+                <line x1="32" y1="120" x2="624" y2="120" class="spectrum-axis" />
+                <line x1="32" y1="12" x2="32" y2="120" class="spectrum-axis" />
+                <line v-for="bar in partialSpectrumBars" :key="bar.harmonic" :x1="bar.x" :x2="bar.x" :y1="bar.y" y2="120" class="spectrum-bar">
+                  <title>{{ bar.harmonic }}× fundamental: {{ bar.amplitude.toPrecision(3) }}</title>
+                </line>
+                <text x="32" y="140">0</text>
+                <text x="328" y="140" text-anchor="middle">Frequency / musical fundamental</text>
+                <text x="624" y="140" text-anchor="end">{{ partialSpectrum.length / 2 }}×</text>
+                <text x="36" y="22">Peak {{ partialSpectrumPeak.toPrecision(3) }}</text>
+              </svg>
+              <p class="text-caption text-medium-emphasis">Waveform-weighted amplitudes; vertical scale fits the peak. Static base morph position only, without LFO motion, breath noise, envelopes, effects, or pitch-dependent band limiting.</p>
+            </template>
+          </figure>
           <v-row class="compact-row">
             <v-col cols="12" md="4">
               <v-switch v-model="draftTrack.breathEnabled" label="Breath noise" hide-details density="compact" @update:modelValue="handleTrackDraftChange" />
@@ -381,7 +448,7 @@
               <EditableSlider v-model="draftTrack.breathHarmonic" :label="`Breath harmonic (${Number(draftTrack.breathHarmonic).toFixed(1)}x)`" :min="0.5" :max="8" :step="0.5" :disabled="!draftTrack.breathEnabled" @update:modelValue="handleTrackDraftChange" />
             </v-col>
           </v-row>
-          <v-row class="compact-row">
+          <v-row v-if="partialGenerator.type === 'tonewheel'" class="compact-row">
             <v-col cols="12">
               <v-switch
                 :model-value="draftTrack.tonewheelWavetable.enabled"
@@ -393,7 +460,7 @@
               />
             </v-col>
           </v-row>
-          <template v-if="draftTrack.tonewheelWavetable.enabled">
+          <template v-if="partialGenerator.type === 'tonewheel' && draftTrack.tonewheelWavetable.enabled">
             <v-row v-for="(dimension, dimensionIndex) in draftTrack.tonewheelWavetable.dimensions" :key="dimensionIndex" class="compact-row">
               <v-col cols="12" md="4">
                 <v-text-field v-model="dimension.name" :label="`Axis ${dimensionIndex + 1}`" density="compact" variant="outlined" hide-details @change="handleTrackDraftChange" />
@@ -512,7 +579,7 @@
               </v-row>
             </v-card>
           </template>
-          <v-row v-else class="compact-row">
+          <v-row v-else-if="partialGenerator.type === 'tonewheel'" class="compact-row">
             <v-col v-for="(label, index) in tonewheelDrawbarLabels" :key="label" cols="12" sm="6" md="4">
               <EditableSlider :label="label + ' Drawbar (' + draftTrack.tonewheelDrawbars[index] + ')'" :min="0" :max="8" :step="1" v-model="draftTrack.tonewheelDrawbars[index]" @update:modelValue="handleTrackDraftChange" />
             </v-col>
@@ -959,6 +1026,7 @@ import RhythmTrackControls from './RhythmTrackControls.vue';
 import RhythmSoundControls from './RhythmSoundControls.vue';
 import TimeWarpPreview from './TimeWarpPreview.vue';
 import WaveshaperControls from './WaveshaperControls.vue';
+import { generatePartialSpectrum, normalizePartialGenerator, type PartialGenerator } from '../audio/partialGenerator';
 import {
   interpolateTonewheelDrawbars,
   MAX_WAVETABLE_CONFIGURATIONS,
@@ -1024,6 +1092,37 @@ export default defineComponent({
       modulationRateOptions: MODULATION_RATE_OPTIONS,
       phaserStageOptions: [...PHASER_STAGE_OPTIONS] as number[],
       waveformOptions: WAVEFORM_OPTIONS,
+      partialSourceOptions: [
+        { title: 'Tonewheel (drawbars)', value: 'tonewheel' },
+        { title: 'Sequence', value: 'sequence' },
+        { title: 'Binary', value: 'binary' },
+      ],
+      partialSequenceOptions: [
+        { title: 'Natural (1, 2, 3, …)', value: 'natural' },
+        { title: 'Fibonacci (1, 1, 2, …)', value: 'fibonacci' },
+        { title: 'Primes (2, 3, 5, …)', value: 'primes' },
+        { title: 'Powers of two (1, 2, 4, …)', value: 'powers-of-two' },
+        { title: 'Thue–Morse (0, 1, 1, 0, …)', value: 'thue-morse' },
+      ],
+      partialBinaryModeOptions: [
+        { title: 'Popcount (number of set bits)', value: 'popcount' },
+        { title: 'Parity (popcount modulo 2)', value: 'parity' },
+        { title: 'Selected bit', value: 'bit' },
+      ],
+      partialMappingOptions: [
+        { title: 'Linear', value: 'linear' },
+        { title: 'Power', value: 'power' },
+        { title: 'Square root', value: 'sqrt' },
+        { title: 'Inverse (zeros stay zero)', value: 'inverse' },
+      ],
+      partialMaskOptions: [
+        { title: 'None', value: 'none' },
+        { title: 'Odd harmonics', value: 'odd' },
+        { title: 'Even harmonics', value: 'even' },
+        { title: 'Prime harmonics', value: 'prime' },
+        { title: 'Fibonacci harmonics', value: 'fibonacci' },
+        { title: 'Power-of-two harmonics', value: 'power-of-two' },
+      ],
       skewLfoWaveformOptions: SKEW_LFO_WAVEFORM_OPTIONS,
       wavetableLfoWaveformOptions: LFO_WAVEFORM_OPTIONS,
       wavetableLfoSyncRateOptions: LFO_SYNC_RATE_OPTIONS,
@@ -1065,6 +1164,34 @@ export default defineComponent({
     };
   },
   computed: {
+    partialGenerator(): PartialGenerator {
+      return normalizePartialGenerator(this.draftTrack.partialGenerator);
+    },
+    isNoiseWaveform(): boolean {
+      return this.draftTrack.waveform === 'pink-noise' || this.draftTrack.waveform === 'brown-noise';
+    },
+    partialSpectrum(): number[] {
+      if (this.isNoiseWaveform) return [];
+      const drawbars = this.partialGenerator.type === 'tonewheel'
+        ? interpolateTonewheelDrawbars(this.draftTrack.tonewheelWavetable, this.draftTrack.tonewheelDrawbars)
+        : this.draftTrack.tonewheelDrawbars;
+      return generatePartialSpectrum(this.partialGenerator, this.draftTrack.waveform, drawbars);
+    },
+    partialSpectrumPeak(): number {
+      return Math.max(0, ...this.partialSpectrum.map(Math.abs));
+    },
+    partialSpectrumBars(): Array<{ harmonic: number; amplitude: number; x: number; y: number }> {
+      const peak = this.partialSpectrumPeak || 1;
+      return this.partialSpectrum.map((amplitude, index) => ({
+        harmonic: (index + 1) / 2,
+        amplitude: Math.abs(amplitude),
+        x: 32 + (index + 1) / this.partialSpectrum.length * 592,
+        y: 120 - Math.abs(amplitude) / peak * 104,
+      })).filter((bar) => bar.amplitude > 0);
+    },
+    partialSpectrumDescription(): string {
+      return `Static ${this.partialGenerator.type} spectrum with ${this.draftTrack.waveform} waveform weighting. ${this.partialSpectrumBars.length} nonzero partials; peak amplitude ${this.partialSpectrumPeak.toPrecision(3)}. Frequencies are multiples of the musical fundamental.`;
+    },
     selectedTrackSequenceLength(): number {
       return this.parseSequence(this.draftTrack.sequenceInput).length;
     },
@@ -1113,6 +1240,13 @@ export default defineComponent({
     },
   },
   methods: {
+    setPartialSource(type: PartialGenerator['type']) {
+      this.updatePartialGenerator({ type });
+    },
+    updatePartialGenerator(change: Record<string, unknown>) {
+      this.draftTrack.partialGenerator = normalizePartialGenerator({ ...this.partialGenerator, ...change });
+      this.handleTrackDraftChange();
+    },
     /** Shows the tempo-synced LFO cycle length translated into Hz at the current tempo. */
     formatModulationRate(rate: string): string {
       const match = rate.match(/^(\d+)\/(\d+)([DT])?$/);
@@ -1252,6 +1386,34 @@ export default defineComponent({
 </script>
 
 <style scoped>
+.partial-spectrum {
+  margin: 16px 0;
+}
+
+.partial-spectrum svg {
+  display: block;
+  width: 100%;
+  max-height: 190px;
+  margin-block: 8px;
+  color: var(--instrument-muted);
+  background: var(--panel-deep);
+}
+
+.partial-spectrum text {
+  fill: currentColor;
+  font-size: 11px;
+}
+
+.spectrum-axis {
+  stroke: currentColor;
+  stroke-opacity: 0.5;
+}
+
+.spectrum-bar {
+  stroke: var(--indicator-amber);
+  stroke-width: 2;
+}
+
 .editor-surface {
   width: min(1120px, calc(100vw - 20px));
   background: var(--panel-deep);

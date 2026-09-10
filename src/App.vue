@@ -352,14 +352,10 @@ import { isMonophonic, limitPolyphony, type GlideCurve, type GlideMode } from '.
 import { claimVoices, getSynthVoiceCount, prewarmVoicePool, retainVoicePool, type SoundingNote } from './audio/voicePool';
 import { createDrumInstrument, type DrumInstrument } from './audio/drumKit';
 import { interpolateModulatedTonewheelDrawbars } from './audio/tonewheelWavetable';
+import { generatePartialSpectrum, normalizePartialGenerator } from './audio/partialGenerator';
+import { getPartialSpectrumGain } from './audio/partialSpectrumGain';
 import {
   BREATH_FILTER_Q,
-  PULSE_DUTY,
-  getFluteHarmonicAmplitude,
-  getPulseHarmonicAmplitude,
-  getReedHarmonicAmplitude,
-  isPulseWaveform,
-  isReedWaveform,
 } from './audio/spectra';
 import {
   quantizeNormalizedTime,
@@ -474,9 +470,9 @@ const WAV_EXPORT_SAMPLE_RATE = 48000;
 /** Deterministic S&H seed for the filter-cutoff LFO (sampled per note start). */
 const FILTER_LFO_STATE = createSkewLfoState();
 
-/** Reusable tonewheel spectra, keyed by waveform and drawbar registration. */
-const tonewheelPartialCache = new Map<string, number[]>();
-const TONEWHEEL_PARTIAL_CACHE_LIMIT = 1024;
+/** Reusable static spectra, keyed by waveform and normalized generator settings. */
+const partialSpectrumCache = new Map<string, number[]>();
+const PARTIAL_SPECTRUM_CACHE_LIMIT = 1024;
 
 interface FormantBand {
   frequency: number;
@@ -1979,14 +1975,6 @@ export default defineComponent({
         }
       }
     },
-    gaussian(harmonic: number, center: number, width: number): number {
-      const safeWidth = Math.max(0.001, width);
-      return Math.exp(-((harmonic - center) ** 2) / (2 * safeWidth * safeWidth));
-    },
-    pseudoNoise(harmonic: number): number {
-      const raw = Math.sin(harmonic * 12.9898 + 78.233) * 43758.5453123;
-      return ((raw - Math.floor(raw)) * 2) - 1;
-    },
     isChoirWaveform(waveform: string): waveform is ChoirWaveform {
       return waveform === 'choir-ah' || waveform === 'choir-oh';
     },
@@ -2019,79 +2007,25 @@ export default defineComponent({
         path.gain.gain.value = getChoirFormantBandGainLinear(band.gainDb);
       });
     },
-    getWaveformPartialAmplitude(waveform: string, harmonic: number): number {
-      const noisyTail = this.pseudoNoise(harmonic) / Math.sqrt(harmonic);
-      if (waveform === 'triangle') {
-        if (harmonic % 2 === 0) {
-          return 0;
-        }
-        return (Math.floor(harmonic / 2) % 2 === 0 ? 1 : -1) / (harmonic * harmonic);
-      }
-      if (waveform === 'sawtooth') {
-        return -1 / harmonic;
-      }
-      if (waveform === 'square') {
-        return harmonic % 2 === 0 ? 0 : 1 / harmonic;
-      }
-      if (waveform === 'flute') {
-        return getFluteHarmonicAmplitude(harmonic)
-          + (0.02 * noisyTail * this.gaussian(harmonic, 8, 3));
-      }
-      if (isReedWaveform(waveform)) {
-        return getReedHarmonicAmplitude(waveform, harmonic);
-      }
-      if (isPulseWaveform(waveform)) {
-        return getPulseHarmonicAmplitude(PULSE_DUTY[waveform], harmonic);
-      }
-      // Choir uses parallel fixed-frequency formants; keep a bright saw-like excitation here.
-      if (this.isChoirWaveform(waveform)) {
-        return (-1 / harmonic) + (0.035 * noisyTail);
-      }
-      if (waveform === 'helmholtz') {
-        return (harmonic === 1 ? 1.35 : 0)
-          + (0.78 * this.gaussian(harmonic, 4, 1.15))
-          + (0.22 * noisyTail * this.gaussian(harmonic, 10, 3.4));
-      }
-      if (waveform === 'formant') {
-        return (0.45 * this.gaussian(harmonic, 1.5, 0.8))
-          + (1.05 * this.gaussian(harmonic, 4.5, 1.3))
-          + (0.82 * this.gaussian(harmonic, 9.5, 2))
-          + (0.12 * noisyTail * this.gaussian(harmonic, 15, 4));
-      }
-      if (waveform === 'duct') {
-        return (0.6 * this.gaussian(harmonic, 2.2, 0.7))
-          + (0.95 * this.gaussian(harmonic, 6.2, 1.4))
-          + (0.55 * this.gaussian(harmonic, 12.4, 2.6))
-          + (0.18 * noisyTail);
-      }
-      if (waveform === 'aeolian') {
-        return (harmonic === 1 ? 0.55 : 0)
-          + (0.38 * Math.abs(noisyTail))
-          + (0.65 * this.gaussian(harmonic, 7.5, 3.2))
-          + (0.28 * noisyTail * this.gaussian(harmonic, 18, 5.5));
-      }
-      if (waveform === 'stochastic-bandpass') {
-        return (0.16 * noisyTail)
-          + (1.15 * this.gaussian(harmonic, 5.5, 1.1))
-          + (0.95 * this.gaussian(harmonic, 11.5, 2))
-          + (0.4 * Math.sign(noisyTail || 1) * this.gaussian(harmonic, 18, 3.2));
-      }
-      return harmonic === 1 ? 1 : 0;
-    },
     getOscillatorType(track: PresetTrackData): string {
       return track.unisonVoices > 1 ? 'fatcustom' : 'custom';
     },
-    /** Linear (unwarped) tonewheel spectrum used as the PD source shape. */
-    getLinearTonewheelPartials(track: PresetTrackData, timeSeconds = 0, noteStartSeconds = 0): number[] {
+    getPartialOscillatorVolume(track: PresetTrackData, partials: number[]): number {
+      return normalizePartialGenerator(track.partialGenerator).type === 'tonewheel'
+        ? 0 : Tone.gainToDb(getPartialSpectrumGain(partials));
+    },
+    getTonewheelPartials(track: PresetTrackData, timeSeconds = 0, noteStartSeconds = 0): number[] {
       // Noise waveforms never use the additive oscillator path.
       if (this.isNoiseWaveform(track.waveform)) {
         return [1];
       }
 
-      const partialIndices = [1, 3, 2, 4, 6, 8, 10, 12, 16];
-      const maximumPartial = 64;
-      const partials = Array.from({ length: maximumPartial }, () => 0);
-      const drawbars = interpolateModulatedTonewheelDrawbars(
+      const generator = normalizePartialGenerator(track.partialGenerator);
+      const animated = generator.type === 'tonewheel' && track.tonewheelWavetable.enabled
+        && track.tonewheelWavetable.lfos.some((lfo) => (
+          lfo.enabled && lfo.depth !== 0 && lfo.routes.some((route) => route !== 0)
+        ));
+      const drawbars = generator.type === 'tonewheel' ? interpolateModulatedTonewheelDrawbars(
         track.tonewheelWavetable,
         track.tonewheelDrawbars,
         {
@@ -2099,55 +2033,26 @@ export default defineComponent({
           noteStartSeconds,
           bpm: this.bpm,
         },
-      );
-
-      const addWaveformHarmonics = (basePartial: number, amplitude: number) => {
-        for (let harmonic = 1; basePartial * harmonic <= maximumPartial; harmonic += 1) {
-          const harmonicAmplitude = this.getWaveformPartialAmplitude(track.waveform, harmonic);
-          if (harmonicAmplitude === 0) {
-            continue;
-          }
-          partials[basePartial * harmonic - 1] += amplitude * harmonicAmplitude;
-        }
-      };
-
-      partialIndices.forEach((partialIndex, drawbarIndex) => {
-        addWaveformHarmonics(partialIndex, drawbars[drawbarIndex] / 8);
-      });
-
-      const normalizer = Math.max(1, Math.sqrt(partials.reduce((sum, amplitude) => sum + amplitude * amplitude, 0)));
-      return partials.map((amplitude) => amplitude / normalizer);
-    },
-    getTonewheelPartials(track: PresetTrackData, timeSeconds = 0, noteStartSeconds = 0): number[] {
-      // The spectrum only depends on the waveform and the drawbars, and Tone rescans its
-      // periodic-wave cache with a deep compare for every partial array it is handed, so
-      // the same array instance is reused for identical settings.
-      const drawbars = interpolateModulatedTonewheelDrawbars(
-        track.tonewheelWavetable,
-        track.tonewheelDrawbars,
-        {
-          timeSeconds,
-          noteStartSeconds,
-          bpm: this.bpm,
-        },
-      );
-      const key = `${track.waveform}|${drawbars.join(',')}`;
-      const cached = tonewheelPartialCache.get(key);
+      ) : undefined;
+      const key = `${track.waveform}|${JSON.stringify(generator)}|${drawbars?.join(',') ?? ''}`;
+      const cached = animated ? undefined : partialSpectrumCache.get(key);
       if (cached) {
         return cached;
       }
 
-      const partials = this.getLinearTonewheelPartials(track, timeSeconds, noteStartSeconds);
+      const partials = generatePartialSpectrum(generator, track.waveform, drawbars);
       // Trailing silent partials only make the periodic wave more expensive to build.
       let length = partials.length;
       while (length > 1 && partials[length - 1] === 0) {
         length -= 1;
       }
       const trimmed = length === partials.length ? partials : partials.slice(0, length);
-      if (tonewheelPartialCache.size > TONEWHEEL_PARTIAL_CACHE_LIMIT) {
-        tonewheelPartialCache.clear();
+      if (!animated) {
+        if (partialSpectrumCache.size >= PARTIAL_SPECTRUM_CACHE_LIMIT) {
+          partialSpectrumCache.clear();
+        }
+        partialSpectrumCache.set(key, trimmed);
       }
-      tonewheelPartialCache.set(key, trimmed);
       return trimmed;
     },
     triggerTrackVoice(
@@ -2501,6 +2406,7 @@ export default defineComponent({
               count: track.unisonVoices,
               spread: track.unisonDetune,
               partials,
+              volume: this.getPartialOscillatorVolume(track, partials),
             } as unknown as Tone.PolySynthOptions<Tone.Synth<Tone.SynthOptions>>['options']['oscillator'];
             const voiceOptions = {
               envelope,
@@ -2636,6 +2542,7 @@ export default defineComponent({
     getTrackVoiceSignature(track: PresetTrackData): string {
       return [
         track.waveform,
+        JSON.stringify(normalizePartialGenerator(track.partialGenerator)),
         track.tonewheelDrawbars,
         JSON.stringify(track.tonewheelWavetable),
         track.breathEnabled,
@@ -2674,6 +2581,7 @@ export default defineComponent({
         count: track.unisonVoices,
         spread: track.unisonDetune,
         partials,
+        volume: this.getPartialOscillatorVolume(track, partials),
       };
       if (chain.synth instanceof MonoGlideSynth) {
         chain.synth.set({ oscillator } as unknown as Parameters<PitchEnvelopeSynth['set']>[0]);
@@ -2683,7 +2591,8 @@ export default defineComponent({
       chain.lastAppliedPartials = partials;
     },
     syncTonewheelModulationLoop(track: PresetTrackData, chain: TrackAudioChain) {
-      const hasActiveRoutes = track.tonewheelWavetable.enabled
+      const hasActiveRoutes = normalizePartialGenerator(track.partialGenerator).type === 'tonewheel'
+        && track.tonewheelWavetable.enabled
         && (track.tonewheelWavetable.lfos ?? []).some((lfo) => (
           lfo.enabled && lfo.depth > 0 && lfo.routes.some((amount) => amount !== 0)
         ));
