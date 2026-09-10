@@ -210,7 +210,7 @@ program
   .option('--gain <number>', 'Legacy single-track audio gain in dB (-96 to +24)', '0')
   .option('--limiter-gain <number>', 'Legacy single-track tanh input gain in dB (-48 to +72)', '0')
   .option('--waveshaper <json>', 'Legacy single-track waveshaper settings JSON object', parseWaveshaperJson)
-  .option('--waveform <string>', 'Legacy single-track waveform metadata', 'sine')
+  .option('--waveform <string>', 'Legacy single-track waveform selection (noise selects waveform source; other missing sources default to tonewheel)', 'sine')
   .option('--delay <number>', 'Legacy single-track delay in bars (0-64)', '0')
   .option('--fade-in <number>', 'Legacy single-track fade-in duration in bars (0-64)', '0')
   .option('--fade-out <number>', 'Legacy single-track fade-out duration in bars (0-64)', '0')

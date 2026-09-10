@@ -93,11 +93,13 @@ test('tilt uses dB per octave, after mapping and masks, before peak normalizatio
   assert.deepEqual(generateProceduralAmplitudes(binary('bit', { bit: 5, normalize: true })), Array(8).fill(0));
 });
 
-test('procedural spectra use half-fundamental bins and signed waveform weighting without drawbars', () => {
+test('procedural spectra use direct amplitudes in half-fundamental bins without waveform or drawbars', () => {
   const config = sequence('natural', { harmonicCount: 4 });
-  assert.deepEqual(generatePartialSpectrum(config, 'sawtooth'), [0, -1, 0, -1, 0, -1, 0, -1]);
-  assert.deepEqual(generatePartialSpectrum(config), [0, 1, 0, 0, 0, 0, 0, 0]);
-  assert.deepEqual(generatePartialSpectrum(config, 'triangle'), [0, 1, 0, 0, 0, -1 / 3, 0, 0]);
+  for (const waveform of ['sine', 'sawtooth', 'triangle', 'square', 'choir-ah', 'choir-oh', 'pink-noise', 'brown-noise']) {
+    assert.deepEqual(generatePartialSpectrum(config, waveform), [0, 1, 0, 2, 0, 3, 0, 4]);
+    assert.deepEqual(generatePartialSpectrum(binary('parity'), waveform), generatePartialSpectrum(binary('parity')));
+    assert.deepEqual(generatePartialSpectrum({ type: 'tonewheel' }, waveform), getTonewheelSpectrum(DEFAULT_TONEWHEEL_DRAWBARS));
+  }
   assert.deepEqual(generatePartialSpectrum(config, 'sawtooth', Array(9).fill(0)),
     generatePartialSpectrum(config, 'sawtooth', Array(9).fill(8)));
   const masked = generatePartialSpectrum(binary('parity'), 'sawtooth');
@@ -147,9 +149,9 @@ test('unknown configs default to tonewheel and recognized sparse configs get saf
     mapping: 'linear', exponent: 0.1, mask: 'none', tilt: 24,
   });
   const clamped = normalizePartialGenerator({ type: 'sequence', harmonicCount: 100, exponent: 100, tilt: -100 });
-  assert.equal(clamped.type !== 'tonewheel' && clamped.harmonicCount, 64);
-  assert.equal(clamped.type !== 'tonewheel' && clamped.exponent, 4);
-  assert.equal(clamped.type !== 'tonewheel' && clamped.tilt, -24);
+  assert.equal(clamped.type === 'sequence' && clamped.harmonicCount, 64);
+  assert.equal(clamped.type === 'sequence' && clamped.exponent, 4);
+  assert.equal(clamped.type === 'sequence' && clamped.tilt, -24);
 });
 
 test('every generator and mapping stays deterministic, nonnegative and bounded at extremes', () => {
@@ -232,7 +234,7 @@ test('tonewheel extraction exactly matches literal browser math for all waveform
         expected = expected.map((amplitude) => amplitude / normalizer);
       }
       assert.deepEqual(getTonewheelSpectrum(drawbars, waveform), expected);
-      assert.deepEqual(generatePartialSpectrum({ type: 'tonewheel' }, waveform, drawbars), expected);
+      assert.deepEqual(generatePartialSpectrum({ type: 'tonewheel' }, waveform, drawbars), getTonewheelSpectrum(drawbars, 'sine'));
     }
   }
 });
@@ -271,9 +273,49 @@ test('procedural configs clone independently, round-trip version 2, and particip
     const imported = parsePresetImportPayload(JSON.stringify(exported));
     assert.equal(imported.kind, 'single-preset');
     if (imported.kind === 'single-preset') assert.equal(arePresetDataEqual(imported.preset.data, source), true);
-    if (clone.tracks[0].partialGenerator?.type !== 'tonewheel' && clone.tracks[0].partialGenerator) {
+    if (clone.tracks[0].partialGenerator?.type === 'sequence' || clone.tracks[0].partialGenerator?.type === 'binary') {
       clone.tracks[0].partialGenerator.tilt = 12;
     }
     assert.equal(arePresetDataEqual(source, clone), false);
+  }
+});
+
+test('waveform source preserves signed Fourier coefficients for 64 musical harmonics', () => {
+  assert.deepEqual(normalizePartialGenerator({ type: 'waveform', waveform: 'triangle', harmonicCount: 3 }), { type: 'waveform' });
+  for (const waveform of ['sine', 'triangle', 'sawtooth', 'square', 'flute', ...Object.keys(REED_HARMONICS),
+    ...Object.keys(PULSE_DUTY), 'choir-ah', 'choir-oh', 'helmholtz', 'formant', 'duct', 'aeolian', 'stochastic-bandpass']) {
+    const spectrum = generatePartialSpectrum({ type: 'waveform' }, waveform);
+    assert.equal(spectrum.length, 128);
+    for (let harmonic = 1; harmonic <= 64; harmonic += 1) {
+      assert.equal(spectrum[2 * harmonic - 2], 0);
+      assert.equal(spectrum[2 * harmonic - 1], legacyWaveform(waveform, harmonic));
+    }
+    assert.deepEqual(spectrum, generatePartialSpectrum({ type: 'waveform' }, waveform, Array(9).fill(0)));
+  }
+  assert.deepEqual(generatePartialSpectrum({ type: 'waveform' }, 'pink-noise'), []);
+  assert.deepEqual(generatePartialSpectrum({ type: 'waveform' }, 'brown-noise'), []);
+});
+
+test('waveform selections round trip, and only unspecified or unknown legacy noise sources migrate', () => {
+  for (const waveform of ['triangle', 'choir-ah', 'pink-noise', 'brown-noise']) {
+    const data = normalizePresetData({ tracks: [{ waveform, partialGenerator: { type: 'waveform' } }] });
+    const imported = parsePresetImportPayload(JSON.stringify(buildSinglePresetExport(createNamedPreset('Waveform', data))));
+    assert.equal(imported.kind, 'single-preset');
+    if (imported.kind === 'single-preset') {
+      assert.equal(arePresetDataEqual(data, imported.preset.data), true);
+      assert.equal(imported.preset.data.tracks[0].waveform, waveform);
+      assert.deepEqual(imported.preset.data.tracks[0].partialGenerator, { type: 'waveform' });
+    }
+  }
+  for (const waveform of ['pink-noise', 'brown-noise']) {
+    for (const partialGenerator of [undefined, null, { type: 'unknown' }]) {
+      const track = normalizePresetTrackData({ waveform, partialGenerator });
+      assert.deepEqual(track.partialGenerator, { type: 'waveform' });
+      assert.deepEqual(clonePresetTrackData(track).partialGenerator, { type: 'waveform' });
+    }
+    for (const type of ['tonewheel', 'sequence', 'binary']) {
+      assert.equal(normalizePresetTrackData({ waveform, partialGenerator: { type } }).partialGenerator?.type, type);
+    }
+    assert.deepEqual(normalizePresetData({ waveform }).tracks[0].partialGenerator, { type: 'waveform' });
   }
 });

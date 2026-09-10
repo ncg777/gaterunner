@@ -38,8 +38,23 @@ export async function runPartialGeneratorChecks(app: InstanceType<typeof App>) {
   check(first !== app.getTonewheelPartials(track), 'Generator changes invalidate cached spectrum');
   check(signature !== app.getTrackVoiceSignature(track), 'Generator changes update voice settings');
   const binary = app.getTonewheelPartials(track);
+  const binarySignature = app.getTrackVoiceSignature(track);
+  const routingSignature = app.getTrackRoutingSignature(track);
   track.waveform = 'square';
-  check(binary !== app.getTonewheelPartials(track), 'Waveform changes invalidate cached spectrum');
+  check(binary === app.getTonewheelPartials(track), 'Inactive waveform leaves cached spectrum unchanged');
+  for (const waveform of ['choir-ah', 'choir-oh', 'pink-noise', 'brown-noise']) {
+    track.waveform = waveform;
+    check(binary === app.getTonewheelPartials(track), `Binary ignores inactive ${waveform} spectrum`);
+    check(binarySignature === app.getTrackVoiceSignature(track), `Binary ignores inactive ${waveform} voice settings`);
+    check(routingSignature === app.getTrackRoutingSignature(track), `Binary ignores inactive ${waveform} routing`);
+  }
+  track.partialGenerator = { type: 'waveform' };
+  track.waveform = 'triangle';
+  const triangle = app.getTonewheelPartials(track);
+  track.waveform = 'square';
+  check(triangle !== app.getTonewheelPartials(track), 'Active waveform changes invalidate cached spectrum');
+  track.waveform = 'pink-noise';
+  check(app.getTonewheelPartials(track).length === 0, 'Waveform noise bypasses harmonic generation');
 
   const animated = normalizePresetTrackData({
     waveform: 'sine',
@@ -62,8 +77,15 @@ export async function runPartialGeneratorChecks(app: InstanceType<typeof App>) {
   animated.partialGenerator = normalizePartialGenerator({ type: 'sequence', sequence: 'natural' });
   check(app.getTonewheelPartials(animated, 0) === app.getTonewheelPartials(animated, 0.25),
     'Inactive wavetable modulation does not affect procedural cache');
+  const proceduralSignature = app.getTrackVoiceSignature(animated);
+  animated.tonewheelDrawbars.fill(0);
+  animated.tonewheelWavetable.enabled = false;
+  check(proceduralSignature === app.getTrackVoiceSignature(animated),
+    'Inactive drawbars and wavetable leave procedural voice settings unchanged');
 
+  track.waveform = 'square';
   for (const partialGenerator of [
+    normalizePartialGenerator({ type: 'waveform' }),
     normalizePartialGenerator({ type: 'sequence' }),
     normalizePartialGenerator({ type: 'binary', mode: 'bit', bit: 5, harmonicCount: 1 }),
   ]) {
@@ -92,10 +114,45 @@ export async function runPartialGeneratorChecks(app: InstanceType<typeof App>) {
     peaks.push(Math.max(...buffer.getChannelData(0).map(Math.abs)));
     buffer.dispose();
   }
-  check(Math.abs(peaks[0] - 1 / 16) < 0.001 && Math.abs(peaks[1] - 1) < 0.001,
+  check(peaks[0] > 0 && Math.abs(peaks[1] / peaks[0] - 16) < 0.001,
     'Browser oscillator preserves procedural peak normalization levels');
   check(app.getPartialOscillatorVolume(normalizePresetTrackData({}), [0.125]) === 0,
     'Legacy tonewheel oscillator gain is unchanged');
+  for (const type of ['tonewheel', 'sequence', 'binary', 'waveform'] as const) {
+    for (const waveform of ['choir-ah', 'choir-oh', 'pink-noise', 'brown-noise']) {
+      const source = normalizePresetTrackData({
+        partialGenerator: { type }, waveform, polyphony: 1,
+        attack: 0.001, decay: 0, sustain: 1, release: 0.005,
+        breathEnabled: false, reverbWet: -96,
+      });
+      const savedReverb = app.reverbChain;
+      let chain: ReturnType<typeof app.createTrackAudioChain> | undefined;
+      let reverb: ReturnType<typeof app.getOrCreateReverbChain> | undefined;
+      let buffer: Tone.ToneAudioBuffer | undefined;
+      try {
+        app.reverbChain = null;
+        buffer = await renderOfflineAudio(() => {
+          reverb = app.getOrCreateReverbChain();
+          chain = app.createTrackAudioChain();
+          app.updateTrackChainSettings(source, chain);
+          const activeNoise = type === 'waveform' && waveform.endsWith('-noise');
+          check(Boolean(chain.noiseSynth) === activeNoise, `${type}/${waveform} uses only its active noise routing`);
+          check(Boolean(chain.choir) === (type === 'waveform' && waveform.startsWith('choir-')),
+            `${type}/${waveform} uses only its active choir routing`);
+          chain.mixGain.gain.value = 1;
+          app.triggerTrackVoice(source, chain, [69], 0.03, 0, 0.5, 0);
+        }, 0.04, 1, 48000);
+        const samples = buffer.getChannelData(0);
+        check(samples.every(Number.isFinite) && samples.some(sample => Math.abs(sample) > 0.00001),
+          `${type}/${waveform} produces finite audible browser audio`);
+      } finally {
+        buffer?.dispose();
+        if (chain) app.disposeTrackChain(chain);
+        if (reverb) disposeReverbAudioChain(reverb);
+        app.reverbChain = savedReverb;
+      }
+    }
+  }
   return labels;
 }
 

@@ -370,7 +370,7 @@
               />
             </v-col>
           </v-row>
-          <template v-if="partialGenerator.type !== 'tonewheel'">
+          <template v-if="partialGenerator.type === 'sequence' || partialGenerator.type === 'binary'">
             <v-row>
               <v-col v-if="partialGenerator.type === 'sequence'" cols="12" md="6">
                 <v-select :model-value="partialGenerator.sequence" label="Amplitude sequence" :items="partialSequenceOptions" density="comfortable" variant="outlined" hide-details @update:modelValue="updatePartialGenerator({ sequence: $event })" />
@@ -404,7 +404,7 @@
             </v-row>
             <p class="text-caption text-medium-emphasis mt-2">Mapping → harmonic mask → tilt → optional peak normalization. Inverse keeps zeros silent. Binary and Thue–Morse start at n = 0.</p>
           </template>
-          <v-row>
+          <v-row v-if="partialGenerator.type === 'waveform'">
             <v-col cols="12">
               <v-select
                 v-model="draftTrack.waveform"
@@ -419,22 +419,26 @@
           </v-row>
           <figure class="partial-spectrum">
             <figcaption class="text-subtitle-2">Static harmonic spectrum preview</figcaption>
-            <p v-if="isNoiseWaveform" class="text-caption">Noise waveforms bypass partial generation; their sound is unchanged. No harmonic spectrum is shown.</p>
+            <p v-if="isNoiseWaveform" class="text-caption">Noise is broadband, not a harmonic spectrum. No discrete partials are shown.</p>
             <template v-else>
               <svg viewBox="0 0 640 150" role="img" :aria-label="partialSpectrumDescription">
                 <title>Static harmonic spectrum</title>
                 <desc>{{ partialSpectrumDescription }}</desc>
-                <line x1="32" y1="120" x2="624" y2="120" class="spectrum-axis" />
-                <line x1="32" y1="12" x2="32" y2="120" class="spectrum-axis" />
+                <g v-for="tick in spectrumTicks" :key="tick.db">
+                  <line x1="48" :y1="tick.y" x2="624" :y2="tick.y" class="spectrum-grid" />
+                  <text x="42" :y="tick.y + 4" text-anchor="end">{{ tick.db }}</text>
+                </g>
+                <line x1="48" y1="120" x2="624" y2="120" class="spectrum-axis" />
+                <line x1="48" y1="12" x2="48" y2="120" class="spectrum-axis" />
                 <line v-for="bar in partialSpectrumBars" :key="bar.harmonic" :x1="bar.x" :x2="bar.x" :y1="bar.y" y2="120" class="spectrum-bar">
-                  <title>{{ bar.harmonic }}× fundamental: {{ bar.amplitude.toPrecision(3) }}</title>
+                  <title>{{ bar.harmonic }}× fundamental: {{ bar.amplitude.toPrecision(3) }} ({{ bar.decibels.toFixed(1) }} dB relative to peak)</title>
                 </line>
-                <text x="32" y="140">0</text>
+                <text x="48" y="140">0</text>
                 <text x="328" y="140" text-anchor="middle">Frequency / musical fundamental</text>
                 <text x="624" y="140" text-anchor="end">{{ partialSpectrum.length / 2 }}×</text>
-                <text x="36" y="22">Peak {{ partialSpectrumPeak.toPrecision(3) }}</text>
               </svg>
-              <p class="text-caption text-medium-emphasis">Waveform-weighted amplitudes; vertical scale fits the peak. Static base morph position only, without LFO motion, breath noise, envelopes, effects, or pitch-dependent band limiting.</p>
+              <p v-if="partialSpectrumPeak === 0" class="text-caption" role="status">Silent spectrum: all partial amplitudes are zero. Adjust the source settings to generate sound.</p>
+              <p class="text-caption text-medium-emphasis">Magnitude in dB relative to peak ({{ partialSpectrumPeak.toPrecision(3) }}); partials below −60 dB are hidden. Static base morph position only, without LFO motion, breath noise, envelopes, effects, or pitch-dependent band limiting.</p>
             </template>
           </figure>
           <v-row class="compact-row">
@@ -1036,6 +1040,7 @@ import {
   type TonewheelWavetableLfo,
 } from '../audio/tonewheelWavetable';
 import { LFO_SYNC_RATE_OPTIONS, LFO_WAVEFORM_OPTIONS } from '../audio/lfo';
+import { getSpectrumPreview } from '../audio/spectrumPreview';
 import {
   CUSTOM_TIME_WARP_CURVE,
   TIME_WARP_CURVE_OPTIONS,
@@ -1094,9 +1099,11 @@ export default defineComponent({
       waveformOptions: WAVEFORM_OPTIONS,
       partialSourceOptions: [
         { title: 'Tonewheel (drawbars)', value: 'tonewheel' },
+        { title: 'Waveform (Fourier spectrum / noise)', value: 'waveform' },
         { title: 'Sequence', value: 'sequence' },
         { title: 'Binary', value: 'binary' },
       ],
+      spectrumTicks: [0, -20, -40, -60].map((db) => ({ db, y: 16 - db / 60 * 104 })),
       partialSequenceOptions: [
         { title: 'Natural (1, 2, 3, …)', value: 'natural' },
         { title: 'Fibonacci (1, 1, 2, …)', value: 'fibonacci' },
@@ -1168,7 +1175,8 @@ export default defineComponent({
       return normalizePartialGenerator(this.draftTrack.partialGenerator);
     },
     isNoiseWaveform(): boolean {
-      return this.draftTrack.waveform === 'pink-noise' || this.draftTrack.waveform === 'brown-noise';
+      return this.partialGenerator.type === 'waveform'
+        && (this.draftTrack.waveform === 'pink-noise' || this.draftTrack.waveform === 'brown-noise');
     },
     partialSpectrum(): number[] {
       if (this.isNoiseWaveform) return [];
@@ -1177,20 +1185,18 @@ export default defineComponent({
         : this.draftTrack.tonewheelDrawbars;
       return generatePartialSpectrum(this.partialGenerator, this.draftTrack.waveform, drawbars);
     },
-    partialSpectrumPeak(): number {
-      return Math.max(0, ...this.partialSpectrum.map(Math.abs));
+    partialSpectrumPreview() {
+      return getSpectrumPreview(this.partialSpectrum);
     },
-    partialSpectrumBars(): Array<{ harmonic: number; amplitude: number; x: number; y: number }> {
-      const peak = this.partialSpectrumPeak || 1;
-      return this.partialSpectrum.map((amplitude, index) => ({
-        harmonic: (index + 1) / 2,
-        amplitude: Math.abs(amplitude),
-        x: 32 + (index + 1) / this.partialSpectrum.length * 592,
-        y: 120 - Math.abs(amplitude) / peak * 104,
-      })).filter((bar) => bar.amplitude > 0);
+    partialSpectrumPeak(): number {
+      return this.partialSpectrumPreview.peak;
+    },
+    partialSpectrumBars() {
+      return this.partialSpectrumPreview.bars;
     },
     partialSpectrumDescription(): string {
-      return `Static ${this.partialGenerator.type} spectrum with ${this.draftTrack.waveform} waveform weighting. ${this.partialSpectrumBars.length} nonzero partials; peak amplitude ${this.partialSpectrumPeak.toPrecision(3)}. Frequencies are multiples of the musical fundamental.`;
+      const source = this.partialGenerator.type === 'waveform' ? this.draftTrack.waveform : this.partialGenerator.type;
+      return `Static ${source} spectrum. ${this.partialSpectrumBars.length} visible partials; peak amplitude ${this.partialSpectrumPeak.toPrecision(3)}. Magnitude from 0 to -60 dB relative to peak. Frequencies are multiples of the musical fundamental.`;
     },
     selectedTrackSequenceLength(): number {
       return this.parseSequence(this.draftTrack.sequenceInput).length;
@@ -1410,8 +1416,13 @@ export default defineComponent({
 }
 
 .spectrum-bar {
-  stroke: var(--indicator-amber);
+  stroke: var(--indicator-amber, #f2b84b);
   stroke-width: 2;
+}
+
+.spectrum-grid {
+  stroke: currentColor;
+  stroke-opacity: 0.15;
 }
 
 .editor-surface {

@@ -52,7 +52,8 @@ import {
 } from '../src/audio/spectra.js';
 import { encodeWavFromChannelsSync } from '../src/audio/wav.js';
 import { prepareTonewheel, sampleTonewheel } from './tonewheelOscillator.js';
-import { normalizePartialGenerator, type PartialGenerator } from '../src/audio/partialGenerator.js';
+import { getEffectiveWaveform, isNoiseWaveform, normalizePartialGenerator, normalizeTrackPartialGenerator, type PartialGenerator } from '../src/audio/partialGenerator.js';
+import { CHOIR_FORMANT_BANDS, getChoirFormantBandGainLinear } from '../src/audio/choir.js';
 import { preparePartialOscillator } from './partialOscillator.js';
 
 export interface GenerateTrackOptions {
@@ -70,7 +71,7 @@ export interface GenerateTrackOptions {
   denominator?: number;
   /** Oscillator shape metadata (not used by MIDI export). */
   waveform?: string;
-  /** Optional procedural harmonic weighting; omitted values retain legacy tonewheel synthesis. */
+  /** Independent partial source; defaults to sine tonewheels, except legacy noise selects waveform. */
   partialGenerator?: PartialGenerator;
   /** @deprecated Legacy generator values are accepted and normalized to tonewheel. */
   generatorType?: string;
@@ -144,7 +145,7 @@ export interface GenerateTrackOptions {
   monoLegato?: boolean;
   unisonVoices?: number;
   unisonDetune?: number;
-  /** Nine Hammond-style drawbar levels (0-8) used by the tonewheel waveform. */
+  /** Nine Hammond-style drawbar levels (0-8) used only by the tonewheel source. */
   tonewheelDrawbars?: number[];
   /** Sparse multidimensional tonewheel configurations and current morph position. */
   tonewheelWavetable?: TonewheelWavetable;
@@ -255,7 +256,7 @@ export interface GenerateOptions {
   gain?: number;
   limiterGain?: number;
   waveshaper?: WaveshaperSettings;
-  /** Legacy single-track waveform metadata used when tracks is omitted. */
+  /** Waveform-source selection used when tracks is omitted. Legacy noise selects that source automatically. */
   waveform?: string;
   partialGenerator?: PartialGenerator;
   /** Legacy single-track delay in bars used when tracks is omitted. */
@@ -527,7 +528,7 @@ function normalizeTracks(options: GenerateOptions): NormalizedTrack[] {
     numerator: clamp(options.numerator ?? 4, 1, 16),
     denominator: clamp(options.denominator ?? 5, 1, 16),
     waveform: options.waveform ?? 'sine',
-    partialGenerator: normalizePartialGenerator(options.partialGenerator),
+    partialGenerator: normalizeTrackPartialGenerator(options.partialGenerator, options.waveform ?? 'sine'),
     breathEnabled: false,
     breathLevel: -18,
     breathHarmonic: 2,
@@ -661,7 +662,7 @@ function normalizeTracks(options: GenerateOptions): NormalizedTrack[] {
     unisonVoices: clamp(track.unisonVoices ?? fallbackTrack.unisonVoices, 1, 8),
     unisonDetune: clamp(track.unisonDetune ?? fallbackTrack.unisonDetune, 0, 100),
     tonewheelDrawbars: normalizeTonewheelDrawbars(track.tonewheelDrawbars),
-    partialGenerator: normalizePartialGenerator(track.partialGenerator),
+    partialGenerator: normalizeTrackPartialGenerator(track.partialGenerator ?? options.partialGenerator, track.waveform ?? fallbackTrack.waveform),
     tonewheelWavetable: track.tonewheelWavetable ?? fallbackTrack.tonewheelWavetable,
     tremoloEnabled: Boolean(track.tremoloEnabled ?? fallbackTrack.tremoloEnabled),
     tremoloFrequency: clamp(track.tremoloFrequency ?? fallbackTrack.tremoloFrequency, 0.01, 40),
@@ -813,6 +814,40 @@ function nextPinkNoise(state: BreathRenderState): number {
   state.pink[1] = 0.963 * state.pink[1] + white * 0.2965164;
   state.pink[2] = 0.57 * state.pink[2] + white * 1.0526913;
   return clamp((state.pink[0] + state.pink[1] + state.pink[2] + white * 0.1848) * 0.11, -1, 1);
+}
+
+function createSourceNoiseSampler(waveform: string, seed: number): () => number {
+  const state: BreathRenderState = { seed: (seed >>> 0) || 1, pink: [0, 0, 0], x1: 0, x2: 0, y1: 0, y2: 0 };
+  let brown = 0;
+  return () => {
+    const pink = nextPinkNoise(state);
+    if (waveform !== 'brown-noise') return pink;
+    const white = (state.seed / 0xFFFFFFFF) * 2 - 1;
+    brown = (brown + 0.02 * white) / 1.02;
+    return brown * 3.5;
+  };
+}
+
+function createChoirProcessor(waveform: string, sampleRate: number): (input: number) => number {
+  if (waveform !== 'choir-ah' && waveform !== 'choir-oh') return input => input;
+  const filters = CHOIR_FORMANT_BANDS[waveform].map(band => {
+    const omega = 2 * Math.PI * Math.min(band.frequency, sampleRate * 0.45) / sampleRate;
+    const alpha = Math.sin(omega) / (2 * Math.max(0.5, band.frequency / Math.max(20, band.bandwidth)));
+    const b0 = alpha / (1 + alpha);
+    const a1 = -2 * Math.cos(omega) / (1 + alpha);
+    const a2 = (1 - alpha) / (1 + alpha);
+    const gain = getChoirFormantBandGainLinear(band.gainDb);
+    let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+    return (input: number) => {
+      const output = b0 * (input - x2) - a1 * y1 - a2 * y2;
+      x2 = x1;
+      x1 = input;
+      y2 = y1;
+      y1 = output;
+      return output * gain;
+    };
+  });
+  return input => filters.reduce((sum, filter) => sum + filter(input), 0);
 }
 
 function renderBreathNoise(
@@ -1227,16 +1262,16 @@ export async function renderWavChannels(
     const drumEchoRight = drumEchoLeft ? new Float32Array(frameCount) : null;
     const drumReverbLeft = isDrumTrack && hasReverbSend && entry.track.reverbWet > -96 ? new Float32Array(frameCount) : null;
     const drumReverbRight = drumReverbLeft ? new Float32Array(frameCount) : null;
-    const staticTonewheel = prepareTonewheel(interpolateTonewheelDrawbars(
-      entry.track.tonewheelWavetable,
-      entry.track.tonewheelDrawbars,
-    ));
     const partialGenerator = normalizePartialGenerator(entry.track.partialGenerator);
-    const isNoiseWaveform = entry.track.waveform === 'pink-noise' || entry.track.waveform === 'brown-noise';
-    const partialOscillator = !isDrumTrack && !isNoiseWaveform && partialGenerator.type !== 'tonewheel'
-      ? preparePartialOscillator(partialGenerator, entry.track.waveform)
+    const staticTonewheel = partialGenerator.type === 'tonewheel'
+      ? prepareTonewheel(interpolateTonewheelDrawbars(entry.track.tonewheelWavetable, entry.track.tonewheelDrawbars))
+      : [];
+    const waveform = getEffectiveWaveform(partialGenerator, entry.track.waveform);
+    const isNoise = isNoiseWaveform(waveform);
+    const partialOscillator = !isDrumTrack && !isNoise && partialGenerator.type !== 'tonewheel'
+      ? preparePartialOscillator(partialGenerator, waveform)
       : null;
-    const hasTonewheelModulation = partialOscillator === null
+    const hasTonewheelModulation = partialGenerator.type === 'tonewheel'
       && entry.track.tonewheelWavetable.enabled
       && entry.track.tonewheelWavetable.lfos.some((lfo) => (
         lfo.enabled && lfo.depth !== 0 && lfo.routes.some((route) => route !== 0)
@@ -1313,6 +1348,16 @@ export async function renderWavChannels(
       const voiceRelease = entry.track.release;
       const endFrame = Math.min(frameCount, Math.ceil((start + duration + voiceRelease) * sampleRate));
       const voicedNotes = limitPolyphony(notes, entry.track.polyphony);
+      if (isNoise) {
+        const noise = createSourceNoiseSampler(waveform, 0x9E3779B9 ^ event.order ^ (trackIndex << 12));
+        for (let frame = startFrame; frame < endFrame; frame += 1) {
+          const sample = noise() * noteAmplitude * Math.SQRT1_2
+            * getAdsrLevel((frame - startFrame) / sampleRate, duration, entry.track);
+          trackLeft[frame] += sample;
+          trackRight[frame] += sample;
+        }
+        continue;
+      }
       // High-note priority already picked the winner, so the glide follows a single pitch.
       const glidePlan: GlidePlan | null = isMonoTrack && voicedNotes.length > 0
         ? planMonoGlide(
@@ -1343,6 +1388,7 @@ export async function renderWavChannels(
             const rightPan = Math.sin(voicePan * Math.PI / 2);
             let phase = 0;
             let tonewheel = staticTonewheel;
+            const choir = createChoirProcessor(waveform, sampleRate);
             for (let frame = startFrame; frame < endFrame; frame += 1) {
               const t = (frame - startFrame) / sampleRate;
               if (hasTonewheelModulation && (frame - startFrame) % 64 === 0) {
@@ -1391,8 +1437,8 @@ export async function renderWavChannels(
                 ? partialOscillator(phase, frequency * vibrato * pitchEnvelopeRatio * (
                   glidePlan && glidePlan.seconds > 0 ? getGlideFrequency(glidePlan, t) / glidePlan.toFrequency : 1
                 ), sampleRate)
-                : sampleTonewheel(phase, entry.track.waveform, tonewheel);
-              const sample = oscillatorSample * voiceGain * env;
+                : sampleTonewheel(phase, 'sine', tonewheel);
+              const sample = choir(oscillatorSample * voiceGain * env);
               trackLeft[frame] += sample * leftPan;
               trackRight[frame] += sample * rightPan;
 

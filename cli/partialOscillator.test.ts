@@ -8,6 +8,7 @@ import { preparePartialOscillator } from './partialOscillator.js';
 
 test('CLI oscillators sample the shared browser spectrum at the musical fundamental', () => {
   const configs = [
+    { type: 'waveform' },
     ...['natural', 'fibonacci', 'primes', 'powers-of-two', 'thue-morse'].map(sequence => ({
       type: 'sequence', sequence,
     })),
@@ -17,7 +18,7 @@ test('CLI oscillators sample the shared browser spectrum at the musical fundamen
     const generator = normalizePartialGenerator({ ...config, harmonicCount: 64, mask: 'odd', tilt: -3 });
     assert.notEqual(generator.type, 'tonewheel');
     if (generator.type === 'tonewheel') throw new Error('Expected procedural generator');
-    for (const waveform of ['sine', 'square', 'triangle', 'sawtooth', 'flute', 'oboe', 'pulse-25', 'formant']) {
+    for (const waveform of ['sine', 'square', 'triangle', 'sawtooth', 'flute', 'oboe', 'pulse-25', 'formant', 'choir-ah', 'pink-noise']) {
       const spectrum = generatePartialSpectrum(generator, waveform);
       const sample = preparePartialOscillator(generator, waveform);
       const cachedSample = preparePartialOscillator(generator, waveform);
@@ -47,7 +48,9 @@ test('CLI excludes harmonics at and above Nyquist, including changing pitch and 
         return ratio * frequency < sampleRate / 2
           ? sum + amplitude * Math.sin(2 * Math.PI * ratio * phase) : sum;
       }, 0);
-      assert.ok(Math.abs(sample(phase, frequency, sampleRate) - expected) < 1e-7);
+      const interpolationBound = spectrum.reduce((sum, amplitude, bin) =>
+        sum + Math.abs(amplitude) * (Math.PI * (bin + 1) / 65536) ** 2 / 8, 0);
+      assert.ok(Math.abs(sample(phase, frequency, sampleRate) - expected) <= interpolationBound + 1e-12);
     }
   }
 });
@@ -89,8 +92,9 @@ test('procedural WAV output changes deterministically without changing MIDI', as
   assert.deepEqual(await generateMidi(proceduralOptions), await generateMidi(legacyOptions));
 });
 
-test('inactive tonewheel settings do not alter procedural rendering', async () => {
-  const partialGenerator = normalizePartialGenerator({ type: 'binary', mode: 'popcount' });
+test('inactive tonewheel settings do not alter waveform or procedural rendering', async () => {
+  for (const type of ['sequence', 'binary', 'waveform']) {
+  const partialGenerator = normalizePartialGenerator({ type, mode: 'popcount' });
   const proceduralTrack = { ...track, partialGenerator };
   const expected = await generateWav({ ...options, tracks: [proceduralTrack] });
   const animatedTrack = normalizePresetData({ tracks: [{
@@ -109,4 +113,72 @@ test('inactive tonewheel settings do not alter procedural rendering', async () =
     ...options, tracks: [{ ...proceduralTrack, tonewheelDrawbars: animatedTrack.tonewheelDrawbars,
       tonewheelWavetable: animatedTrack.tonewheelWavetable }],
   }), expected);
+  }
+});
+
+test('inactive waveform selections cannot change tonewheel, sequence, or binary WAV and MIDI', async () => {
+  for (const type of ['tonewheel', 'sequence', 'binary']) {
+    const partialGenerator = normalizePartialGenerator({ type });
+    const source = { ...track, partialGenerator, waveform: 'sine' };
+    const expected = await generateWav({ ...options, tracks: [source] });
+    const midi = await generateMidi({ ...options, tracks: [source] });
+    for (const waveform of ['triangle', 'square', 'choir-ah', 'choir-oh', 'pink-noise', 'brown-noise']) {
+      const input = { ...options, tracks: [{ ...source, waveform }] };
+      assert.deepEqual(await generateWav(input), expected, `${type} ignores ${waveform}`);
+      assert.deepEqual(await generateMidi(input), midi);
+    }
+  }
+});
+
+test('waveform source renders distinct deterministic signals and actual nonperiodic noise without drawbars', async () => {
+  let previous: Uint8Array | undefined;
+  const midi = await generateMidi({ ...options, tracks: [track] });
+  for (const waveform of ['sine', 'square', 'choir-ah', 'choir-oh', 'pink-noise', 'brown-noise']) {
+    const source = { ...track, waveform, partialGenerator: { type: 'waveform' } as const, tonewheelDrawbars: Array(9).fill(0) };
+    const input = { ...options, tracks: [source] };
+    const wav = await generateWav(input);
+    assert.ok(wav.subarray(44).some(byte => byte !== 0), `${waveform} is audible`);
+    assert.deepEqual(await generateWav(input), wav);
+    assert.deepEqual(await generateWav({ ...options, tracks: [{ ...source, tonewheelDrawbars: Array(9).fill(8) }] }), wav);
+    assert.deepEqual(await generateMidi(input), midi);
+    if (previous) assert.notDeepEqual(wav, previous);
+    previous = wav;
+    if (waveform.endsWith('-noise')) {
+      assert.deepEqual(await generateWav({ ...options, tracks: [{ ...source, partialGenerator: undefined }] }), wav);
+      assert.deepEqual(await generateWav({ ...options, tracks: [{ ...source, unisonVoices: 4, unisonDetune: 80 }] }), wav);
+      assert.notDeepEqual(wav, await generateWav({ ...options, tracks: [{ ...source, waveform: 'sine' }] }));
+    }
+  }
+});
+
+test('legacy single-track noise input migrates but an explicit tonewheel source remains tonal', async () => {
+  for (const waveform of ['pink-noise', 'brown-noise']) {
+    const legacy = { ...options, waveform, sequence: '1', denominator: 16 };
+    const migrated = await generateWav(legacy);
+    assert.deepEqual(await generateWav({ ...legacy, partialGenerator: { type: 'waveform' } }), migrated);
+    const tonal = await generateWav({ ...legacy, partialGenerator: { type: 'tonewheel' } });
+    assert.notDeepEqual(tonal, migrated);
+    assert.deepEqual(tonal, await generateWav({ ...legacy, waveform: 'sine', partialGenerator: { type: 'tonewheel' } }));
+  }
+});
+
+test('tracks inherit an explicit top-level source without overriding local sources or legacy noise migration', async () => {
+  for (const type of ['sequence', 'binary', 'tonewheel']) {
+    const partialGenerator = normalizePartialGenerator({ type });
+    for (const waveform of ['pink-noise', 'brown-noise', 'choir-ah']) {
+      const source = { ...track, waveform };
+      const inherited = { ...options, partialGenerator, tracks: [source] };
+      assert.deepEqual(await generateWav(inherited),
+        await generateWav({ ...options, tracks: [{ ...source, partialGenerator }] }));
+      assert.deepEqual(await generateWav(inherited),
+        await generateWav({ ...inherited, tracks: [{ ...source, waveform: 'sine' }] }));
+      assert.deepEqual(await generateMidi(inherited), await generateMidi({ ...options, tracks: [source] }));
+      const explicit = { ...source, partialGenerator: { type: 'waveform' } as const };
+      assert.deepEqual(await generateWav({ ...inherited, tracks: [explicit] }),
+        await generateWav({ ...options, tracks: [explicit] }));
+    }
+  }
+  const legacyNoise = { ...track, waveform: 'pink-noise' };
+  assert.deepEqual(await generateWav({ ...options, tracks: [legacyNoise] }),
+    await generateWav({ ...options, tracks: [{ ...legacyNoise, partialGenerator: { type: 'waveform' } }] }));
 });

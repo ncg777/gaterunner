@@ -18,6 +18,7 @@ interface ProceduralSettings {
 
 export type PartialGenerator =
   | { type: 'tonewheel' }
+  | { type: 'waveform' }
   | (ProceduralSettings & { type: 'sequence'; sequence: PartialSequence })
   | (ProceduralSettings & { type: 'binary'; mode: PartialBinaryMode; bit: number });
 
@@ -35,6 +36,7 @@ function choice<T extends string>(value: unknown, choices: readonly T[], fallbac
 
 export function normalizePartialGenerator(value: unknown): PartialGenerator {
   const raw = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>;
+  if (raw.type === 'waveform') return { type: 'waveform' };
   if (raw.type !== 'sequence' && raw.type !== 'binary') {
     return { type: 'tonewheel' };
   }
@@ -55,6 +57,23 @@ export function normalizePartialGenerator(value: unknown): PartialGenerator {
   return raw.type === 'sequence'
     ? { type: 'sequence', sequence: choice(raw.sequence, sequences, 'natural'), ...common }
     : { type: 'binary', mode: choice(raw.mode, modes, 'popcount'), bit: Math.round(boundedNumber(raw.bit, 0, 0, 5)), ...common };
+}
+
+export function isNoiseWaveform(waveform: string): boolean {
+  return waveform === 'pink-noise' || waveform === 'brown-noise';
+}
+
+/** Only legacy noise tracks without an explicit source need source migration. */
+export function normalizeTrackPartialGenerator(value: unknown, waveform: string): PartialGenerator {
+  const raw = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>;
+  if (!['tonewheel', 'waveform', 'sequence', 'binary'].includes(raw.type as string) && isNoiseWaveform(waveform)) {
+    return { type: 'waveform' };
+  }
+  return normalizePartialGenerator(value);
+}
+
+export function getEffectiveWaveform(generator: unknown, waveform: string): string {
+  return normalizePartialGenerator(generator).type === 'waveform' ? waveform : 'sine';
 }
 
 function isPrime(value: number): boolean {
@@ -87,10 +106,10 @@ function passesMask(harmonic: number, mask: PartialMask): boolean {
   }
 }
 
-/** Note-harmonic weights before waveform weighting and half-fundamental expansion. */
+/** Direct note-harmonic amplitudes before half-fundamental expansion. */
 export function generateProceduralAmplitudes(value: unknown): number[] {
   const generator = normalizePartialGenerator(value);
-  if (generator.type === 'tonewheel') return [];
+  if (generator.type !== 'sequence' && generator.type !== 'binary') return [];
   let previous = 0;
   let current = 1;
   let prime = 1;
@@ -134,18 +153,21 @@ export function generateProceduralAmplitudes(value: unknown): number[] {
     : amplitudes.map((weight) => Math.min(MAX_PROCEDURAL_AMPLITUDE, weight));
 }
 
-/** Signed waveform-weighted spectrum on the legacy half-musical-fundamental basis. */
+/** Source-local spectrum on the half-musical-fundamental basis. */
 export function generatePartialSpectrum(
   generator: unknown,
   waveform = 'sine',
   drawbars: readonly number[] = DEFAULT_TONEWHEEL_DRAWBARS,
 ): PartialSpectrum {
   const normalized = normalizePartialGenerator(generator);
-  if (normalized.type === 'tonewheel') return getTonewheelSpectrum(drawbars, waveform);
-  const amplitudes = generateProceduralAmplitudes(normalized);
+  if (normalized.type === 'tonewheel') return getTonewheelSpectrum(drawbars, 'sine');
+  if (normalized.type === 'waveform' && isNoiseWaveform(waveform)) return [];
+  const amplitudes = normalized.type === 'waveform'
+    ? Array.from({ length: 64 }, (_, index) => getWaveformPartialAmplitude(waveform, index + 1))
+    : generateProceduralAmplitudes(normalized);
   const spectrum = Array.from({ length: amplitudes.length * 2 }, () => 0);
   amplitudes.forEach((weight, index) => {
-    spectrum[2 * (index + 1) - 1] = weight === 0 ? 0 : weight * getWaveformPartialAmplitude(waveform, index + 1);
+    spectrum[2 * (index + 1) - 1] = weight;
   });
   return spectrum;
 }
