@@ -1,0 +1,49 @@
+import { nextTick } from 'vue';
+import { normalizePartialGenerator } from '../audio/partialGenerator';
+import type EditorSurface from '../components/EditorSurface.vue';
+import { clonePresetTrackData } from '../presets';
+
+export async function runSpectrumPreviewChecks(editor: InstanceType<typeof EditorSurface>) {
+  const labels: string[] = [];
+  const check = (condition: boolean, label: string) => {
+    if (!condition) throw new Error(label);
+    labels.push(label);
+  };
+  const original = clonePresetTrackData(editor.draftTrack);
+  const originalTab = editor.activeControlTab;
+  const root = editor.$el as HTMLElement;
+  const bars = () => [...root.querySelectorAll<SVGLineElement>('.spectrum-bar')];
+  const hasWaveformSelector = () => [...root.querySelectorAll('label')].some((label) => label.textContent === 'Waveform');
+  try {
+    editor.activeControlTab = 'generator';
+    editor.draftTrack.partialGenerator = normalizePartialGenerator({ type: 'sequence', harmonicCount: 8 });
+    for (const waveform of ['sine', 'square', 'choir-ah', 'pink-noise']) {
+      editor.draftTrack.waveform = waveform;
+      await nextTick();
+      check(bars().length === 8, `Sequence displays all eight partials regardless of stored ${waveform}`);
+      check(!hasWaveformSelector(), `Sequence hides inactive ${waveform} selector`);
+    }
+    check(bars().every((bar) => getComputedStyle(bar).stroke !== 'none'), 'Spectrum bars have a visible stroke without a global color token');
+    check(bars().every((bar) => Number(bar.getAttribute('y1')) < 120), 'Nonzero partials have visible height');
+    editor.draftTrack.partialGenerator = normalizePartialGenerator({ type: 'binary', mode: 'bit', bit: 5, harmonicCount: 8 });
+    await nextTick();
+    check(bars().length === 0 && root.textContent!.includes('Silent spectrum:'), 'All-zero spectra explicitly report silence');
+    editor.draftTrack.partialGenerator = { type: 'waveform' };
+    editor.draftTrack.waveform = 'square';
+    await nextTick();
+    check(hasWaveformSelector() && bars().length === 32, 'Waveform source exposes its selector and Fourier partials');
+    editor.draftTrack.waveform = 'brown-noise';
+    await nextTick();
+    check(!root.querySelector('.partial-spectrum svg') && root.textContent!.includes('Noise is broadband'), 'Noise has an explicit broadband explanation instead of an empty plot');
+    editor.draftTrack.partialGenerator = { type: 'tonewheel' };
+    editor.draftTrack.tonewheelWavetable.enabled = false;
+    editor.draftTrack.tonewheelDrawbars = [0, 0, 8, 0, 0, 0, 0, 0, 0];
+    await nextTick();
+    check(!hasWaveformSelector() && bars().length === 1, 'Tonewheel displays sine drawbars even with a stored noise waveform');
+    return labels;
+  } finally {
+    editor.draftTrack = original;
+    editor.activeControlTab = originalTab;
+    await nextTick();
+  }
+}

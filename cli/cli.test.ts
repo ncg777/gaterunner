@@ -543,6 +543,7 @@ test('flute with breath noise renders audible deterministic CLI audio', async ()
       name: 'Breathy Flute',
       trackKind: 'melodic' as const,
       waveform: 'flute',
+      partialGenerator: { type: 'waveform' } as const,
       breathEnabled: true,
       breathLevel: -18,
       breathHarmonic: 5,
@@ -579,6 +580,7 @@ test('reed waveforms render audible, deterministic and distinct CLI audio', asyn
       bpm: 120,
       tracks: [{
         waveform,
+        partialGenerator: { type: 'waveform' } as const,
         sequence: '1',
         numerator: 1,
         denominator: 4,

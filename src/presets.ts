@@ -28,7 +28,7 @@ import {
   type DrumLane,
 } from './domain/rhythmTrack.js';
 import { normalizeBitmaskSequenceInput } from './trackActivation.js';
-import { normalizePartialGenerator, type PartialGenerator } from './audio/partialGenerator.js';
+import { normalizeTrackPartialGenerator, type PartialGenerator } from './audio/partialGenerator.js';
 import { DEFAULT_TONEWHEEL_DRAWBARS } from './audio/tonewheelSpectrum.js';
 export { DEFAULT_TONEWHEEL_DRAWBARS } from './audio/tonewheelSpectrum.js';
 import {
@@ -836,7 +836,7 @@ export function clonePresetTrackData(track: PresetTrackData): PresetTrackData {
     denominator: track.denominator,
     phase: track.phase,
     waveform: track.waveform,
-    partialGenerator: normalizePartialGenerator(track.partialGenerator),
+    partialGenerator: normalizeTrackPartialGenerator(track.partialGenerator, track.waveform),
     sequenceInput: track.sequenceInput,
     octave: track.octave,
     lengthFactor: track.lengthFactor,
@@ -963,7 +963,7 @@ export function normalizePresetTrackData(value: unknown, index = 0): PresetTrack
     denominator: clamp(parseInteger(raw.denominator?.toString(), DEFAULT_PRESET_TRACK_DATA.denominator), 1, 16),
     phase: clamp(parseNumber(raw.phase, DEFAULT_PRESET_TRACK_DATA.phase), 0, 1),
     waveform: normalizeWaveform(raw.waveform),
-    partialGenerator: normalizePartialGenerator(raw.partialGenerator),
+    partialGenerator: normalizeTrackPartialGenerator(raw.partialGenerator, normalizeWaveform(raw.waveform)),
     sequenceInput: typeof raw.sequenceInput === 'string' ? raw.sequenceInput : DEFAULT_PRESET_TRACK_DATA.sequenceInput,
     octave: clamp(parseInteger(raw.octave?.toString(), DEFAULT_PRESET_TRACK_DATA.octave), 0, 10),
     lengthFactor: clamp(parseInteger(raw.lengthFactor?.toString(), DEFAULT_PRESET_TRACK_DATA.lengthFactor), 0, 400),
@@ -1198,8 +1198,8 @@ export function arePresetDataEqual(left: PresetData, right: PresetData): boolean
       || leftTrack.denominator !== rightTrack.denominator
       || leftTrack.phase !== rightTrack.phase
       || leftTrack.waveform !== rightTrack.waveform
-      || JSON.stringify(normalizePartialGenerator(leftTrack.partialGenerator))
-        !== JSON.stringify(normalizePartialGenerator(rightTrack.partialGenerator))
+      || JSON.stringify(normalizeTrackPartialGenerator(leftTrack.partialGenerator, leftTrack.waveform))
+        !== JSON.stringify(normalizeTrackPartialGenerator(rightTrack.partialGenerator, rightTrack.waveform))
       || leftTrack.sequenceInput !== rightTrack.sequenceInput
       || leftTrack.octave !== rightTrack.octave
       || leftTrack.lengthFactor !== rightTrack.lengthFactor

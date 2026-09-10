@@ -345,14 +345,14 @@ import {
   sampleLfoAtTime,
   type LfoWaveform,
 } from './audio/lfo';
-import { getChoirFormantBandGainLinear } from './audio/choir';
+import { CHOIR_FORMANT_BANDS, getChoirFormantBandGainLinear, type FormantBand } from './audio/choir';
 import { PitchEnvelopeSynth } from './audio/pitchEnvelopeSynth';
 import { MonoGlideSynth } from './audio/monoGlideSynth';
 import { isMonophonic, limitPolyphony, type GlideCurve, type GlideMode } from './audio/glide';
 import { claimVoices, getSynthVoiceCount, prewarmVoicePool, retainVoicePool, type SoundingNote } from './audio/voicePool';
 import { createDrumInstrument, type DrumInstrument } from './audio/drumKit';
 import { interpolateModulatedTonewheelDrawbars } from './audio/tonewheelWavetable';
-import { generatePartialSpectrum, normalizePartialGenerator } from './audio/partialGenerator';
+import { generatePartialSpectrum, getEffectiveWaveform, normalizePartialGenerator } from './audio/partialGenerator';
 import { getPartialSpectrumGain } from './audio/partialSpectrumGain';
 import {
   BREATH_FILTER_Q,
@@ -473,29 +473,6 @@ const FILTER_LFO_STATE = createSkewLfoState();
 /** Reusable static spectra, keyed by waveform and normalized generator settings. */
 const partialSpectrumCache = new Map<string, number[]>();
 const PARTIAL_SPECTRUM_CACHE_LIMIT = 1024;
-
-interface FormantBand {
-  frequency: number;
-  bandwidth: number;
-  gainDb: number;
-}
-
-const CHOIR_FORMANT_BANDS: Record<'choir-ah' | 'choir-oh', readonly FormantBand[]> = {
-  'choir-ah': [
-    { frequency: 730, bandwidth: 90, gainDb: 0 },
-    { frequency: 1090, bandwidth: 110, gainDb: -4 },
-    { frequency: 2440, bandwidth: 140, gainDb: -8 },
-    { frequency: 3400, bandwidth: 220, gainDb: -14 },
-    { frequency: 4500, bandwidth: 280, gainDb: -20 },
-  ],
-  'choir-oh': [
-    { frequency: 450, bandwidth: 70, gainDb: 0 },
-    { frequency: 800, bandwidth: 90, gainDb: -5 },
-    { frequency: 2830, bandwidth: 130, gainDb: -12 },
-    { frequency: 3500, bandwidth: 200, gainDb: -18 },
-    { frequency: 4500, bandwidth: 260, gainDb: -24 },
-  ],
-};
 
 type NoiseWaveform = 'pink-noise' | 'brown-noise';
 type ChoirWaveform = keyof typeof CHOIR_FORMANT_BANDS;
@@ -1919,7 +1896,7 @@ export default defineComponent({
     getTrackRoutingSignature(track: PresetTrackData): string {
       return [
         track.trackKind,
-        track.waveform,
+        this.getEffectiveTrackWaveform(track),
         track.breathEnabled,
         track.vibratoEnabled,
         track.tremoloEnabled,
@@ -1975,6 +1952,9 @@ export default defineComponent({
         }
       }
     },
+    getEffectiveTrackWaveform(track: PresetTrackData): string {
+      return getEffectiveWaveform(track.partialGenerator, track.waveform);
+    },
     isChoirWaveform(waveform: string): waveform is ChoirWaveform {
       return waveform === 'choir-ah' || waveform === 'choir-oh';
     },
@@ -2016,8 +1996,8 @@ export default defineComponent({
     },
     getTonewheelPartials(track: PresetTrackData, timeSeconds = 0, noteStartSeconds = 0): number[] {
       // Noise waveforms never use the additive oscillator path.
-      if (this.isNoiseWaveform(track.waveform)) {
-        return [1];
+      if (this.isNoiseWaveform(this.getEffectiveTrackWaveform(track))) {
+        return [];
       }
 
       const generator = normalizePartialGenerator(track.partialGenerator);
@@ -2034,7 +2014,7 @@ export default defineComponent({
           bpm: this.bpm,
         },
       ) : undefined;
-      const key = `${track.waveform}|${JSON.stringify(generator)}|${drawbars?.join(',') ?? ''}`;
+      const key = `${this.getEffectiveTrackWaveform(track)}|${JSON.stringify(generator)}|${drawbars?.join(',') ?? ''}`;
       const cached = animated ? undefined : partialSpectrumCache.get(key);
       if (cached) {
         return cached;
@@ -2064,7 +2044,7 @@ export default defineComponent({
       velocity: number,
       modulationTimeSeconds?: number,
     ) {
-      if (this.isNoiseWaveform(track.waveform)) {
+      if (this.isNoiseWaveform(this.getEffectiveTrackWaveform(track))) {
         this.ensureTrackNoiseSynth(chain).triggerAttackRelease(duration, when, velocity);
         return;
       }
@@ -2263,8 +2243,8 @@ export default defineComponent({
       setReverbOutputEnabled(chain, this.reverbEnabled);
     },
     routeTrackAudioChain(track: PresetTrackData, chain: TrackAudioChain) {
-      const isNoise = this.isNoiseWaveform(track.waveform);
-      const isChoir = this.isChoirWaveform(track.waveform);
+      const isNoise = this.isNoiseWaveform(this.getEffectiveTrackWaveform(track));
+      const isChoir = this.isChoirWaveform(this.getEffectiveTrackWaveform(track));
 
       chain.synth?.disconnect();
       chain.synthGain?.disconnect();
@@ -2373,7 +2353,7 @@ export default defineComponent({
       this.rebuildDrumInstruments(track, chain);
       this.syncTrackChainNodeOptions(track, chain);
       const routingSignature = this.getTrackRoutingSignature(track);
-      const isNoise = this.isNoiseWaveform(track.waveform);
+      const isNoise = this.isNoiseWaveform(this.getEffectiveTrackWaveform(track));
       const envelope = {
         attackCurve: 'exponential' as const,
         attack: Math.max(track.attack, ENVELOPE_SMOOTHING_SECONDS),
@@ -2395,7 +2375,7 @@ export default defineComponent({
             this.ensureTrackNoiseSynth(chain).set({
               envelope,
               noise: {
-                type: isNoise ? this.getNoiseType(track.waveform) : 'pink',
+                type: isNoise ? this.getNoiseType(this.getEffectiveTrackWaveform(track)) : 'pink',
               },
             });
           }
@@ -2435,8 +2415,8 @@ export default defineComponent({
               (synth as TonewheelPolySynth).set(voiceOptions as Parameters<TonewheelPolySynth['set']>[0]);
             }
             chain.lastAppliedPartials = partials;
-            if (this.isChoirWaveform(track.waveform)) {
-              this.updateChoirFormantBank(track.waveform, this.ensureTrackChoirBank(chain).formants);
+            if (this.isChoirWaveform(this.getEffectiveTrackWaveform(track))) {
+              this.updateChoirFormantBank(this.getEffectiveTrackWaveform(track), this.ensureTrackChoirBank(chain).formants);
             }
           }
           if (track.breathEnabled) {
@@ -2540,11 +2520,12 @@ export default defineComponent({
      * fans out across every pooled voice, so it only runs when this signature changes.
      */
     getTrackVoiceSignature(track: PresetTrackData): string {
+      const generator = normalizePartialGenerator(track.partialGenerator);
       return [
-        track.waveform,
-        JSON.stringify(normalizePartialGenerator(track.partialGenerator)),
-        track.tonewheelDrawbars,
-        JSON.stringify(track.tonewheelWavetable),
+        this.getEffectiveTrackWaveform(track),
+        JSON.stringify(generator),
+        generator.type === 'tonewheel' ? track.tonewheelDrawbars : '',
+        generator.type === 'tonewheel' ? JSON.stringify(track.tonewheelWavetable) : '',
         track.breathEnabled,
         track.breathLevel,
         track.breathHarmonic,
@@ -2569,7 +2550,7 @@ export default defineComponent({
       ].join('|');
     },
     applyTonewheelModulation(track: PresetTrackData, chain: TrackAudioChain, timeSeconds: number) {
-      if (!chain.synth || this.isNoiseWaveform(track.waveform)) {
+      if (!chain.synth || this.isNoiseWaveform(this.getEffectiveTrackWaveform(track))) {
         return;
       }
       const partials = this.getTonewheelPartials(track, timeSeconds, chain.modulationNoteStartSeconds);
@@ -2596,7 +2577,7 @@ export default defineComponent({
         && (track.tonewheelWavetable.lfos ?? []).some((lfo) => (
           lfo.enabled && lfo.depth > 0 && lfo.routes.some((amount) => amount !== 0)
         ));
-      if (!hasActiveRoutes || track.trackKind === 'rhythmic' || this.isNoiseWaveform(track.waveform)) {
+      if (!hasActiveRoutes || track.trackKind === 'rhythmic' || this.isNoiseWaveform(this.getEffectiveTrackWaveform(track))) {
         chain.wavetableLfoLoop?.dispose();
         chain.wavetableLfoLoop = null;
         return;

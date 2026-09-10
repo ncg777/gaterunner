@@ -86,7 +86,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             waveform: {
               type: 'string',
-              description: 'Legacy single-track waveform metadata. Used when tracks is omitted. Default: "sine".',
+              description: 'Single-track waveform-source selection. Inactive for other partial sources. Legacy noise without a source selects waveform; other missing sources default to sine tonewheels.',
             },
             delay: {
               type: 'number',
@@ -165,7 +165,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                   denominator: { type: 'number' },
                   waveform: {
                     type: 'string',
-                    description: 'Tonewheel source shape, including flute, oboe, clarinet, saxophone, pulse-25, and pulse-12.',
+                    description: 'Shape used only by the waveform partial source, including flute, oboe, clarinet, saxophone, pulse-25, and pulse-12. Tonewheel, sequence, and binary sources ignore this selection.',
                   },
                   breathEnabled: { type: 'boolean', description: 'Adds one filtered pink-noise breath layer per melodic event.' },
                   breathLevel: { type: 'number', minimum: -60, maximum: 0, description: 'Breath layer level in dB.' },

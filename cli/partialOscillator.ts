@@ -1,5 +1,6 @@
 import {
   generatePartialSpectrum,
+  getEffectiveWaveform,
   type PartialGenerator,
 } from '../src/audio/partialGenerator.js';
 
@@ -7,12 +8,12 @@ const TABLE_SIZE = 65536;
 const CACHE_LIMIT = 32;
 const tables = new Map<string, Float64Array>();
 
-/** Static procedural sources use the same half-fundamental spectrum as the browser. */
+/** Waveform and procedural sources use the same half-fundamental spectrum as the browser. */
 export function preparePartialOscillator(
   generator: Exclude<PartialGenerator, { type: 'tonewheel' }>,
   waveform: string,
 ): (phase: number, frequency?: number, sampleRate?: number) => number {
-  const key = `${waveform}|${JSON.stringify(generator)}`;
+  const key = `${getEffectiveWaveform(generator, waveform)}|${JSON.stringify(generator)}`;
   const spectrum = generatePartialSpectrum(generator, waveform);
   let lastHarmonic = -1;
   let samples: Float64Array;
