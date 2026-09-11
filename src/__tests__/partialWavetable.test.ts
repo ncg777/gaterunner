@@ -24,7 +24,8 @@ const tonewheel: PartialSourceSnapshot = {
 const sequence: PartialSourceSnapshot = {
   partialGenerator: {
     type: 'sequence', sequence: 'natural', harmonicCount: 1, normalize: true,
-    mapping: 'linear', exponent: 1, mask: 'none', tilt: 0,
+    mapping: 'linear', exponent: 1, mappingModulus: 2,
+    mask: 'none', invertMask: false, maskPeriod: 2, maskOffset: 0, tilt: 0,
   },
   waveform: 'sine',
   tonewheelDrawbars: [],

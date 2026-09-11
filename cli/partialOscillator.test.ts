@@ -10,13 +10,20 @@ test('CLI oscillators sample the shared browser spectrum at the musical fundamen
   const configs = [
     { type: 'waveform' },
     { type: 'waveform', contrast: 0.5, oddEvenBalance: 12, normalize: true },
-    ...['natural', 'fibonacci', 'primes', 'powers-of-two', 'thue-morse'].map(sequence => ({
+    ...[
+      'natural', 'fibonacci', 'primes', 'powers-of-two', 'thue-morse', 'triangular', 'lucas',
+      'divisor-count', 'stern-diatomic', 'euler-totient', 'recaman',
+    ].map(sequence => ({
       type: 'sequence', sequence,
     })),
     ...['popcount', 'parity', 'bit'].map(mode => ({ type: 'binary', mode, bit: 2 })),
+    {
+      type: 'sequence', sequence: 'recaman', mapping: 'modulo', mappingModulus: 5,
+      mask: 'periodic', maskPeriod: 4, maskOffset: 1, invertMask: true,
+    },
   ];
   for (const config of configs) {
-    const generator = normalizePartialGenerator({ ...config, harmonicCount: 64, mask: 'odd', tilt: -3 });
+    const generator = normalizePartialGenerator({ harmonicCount: 64, mask: 'odd', tilt: -3, ...config });
     assert.notEqual(generator.type, 'tonewheel');
     if (generator.type === 'tonewheel') throw new Error('Expected procedural generator');
     for (const waveform of ['sine', 'square', 'triangle', 'sawtooth', 'flute', 'oboe', 'pulse-25', 'formant', 'choir-ah', 'pink-noise']) {
@@ -76,7 +83,14 @@ const options = { bpm: 240, reverb: { enabled: false } };
 
 test('CLI preset conversion retains generator configuration and legacy tonewheel defaults', () => {
   const data = normalizePresetData({
-    tracks: [{ ...track, sequenceInput: '1 2', partialGenerator: { type: 'binary', mode: 'bit', bit: 2 } }, {}],
+    tracks: [{
+      ...track,
+      sequenceInput: '1 2',
+      partialGenerator: {
+        type: 'sequence', sequence: 'stern-diatomic', mapping: 'modulo', mappingModulus: 5,
+        mask: 'periodic', maskPeriod: 4, maskOffset: 2, invertMask: true,
+      },
+    }, {}],
   });
   const input = presetDataToGeneratorInput(data);
   assert.deepEqual(input.tracks[0].partialGenerator, data.tracks[0].partialGenerator);

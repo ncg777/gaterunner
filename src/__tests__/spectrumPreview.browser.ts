@@ -26,6 +26,18 @@ export async function runSpectrumPreviewChecks(editor: InstanceType<typeof Edito
     }
     check(bars().every((bar) => getComputedStyle(bar).stroke !== 'none'), 'Spectrum bars have a visible stroke without a global color token');
     check(bars().every((bar) => Number(bar.getAttribute('y1')) < 120), 'Nonzero partials have visible height');
+    editor.updatePartialGenerator({
+      sequence: 'recaman', mapping: 'modulo', mappingModulus: 5,
+      mask: 'periodic', maskPeriod: 4, maskOffset: 1, invertMask: true,
+    });
+    await nextTick();
+    check(root.textContent!.includes('Mapping modulus (5)'), 'Modulo mapping exposes its modulus control');
+    check(root.textContent!.includes('Mask period (4)') && root.textContent!.includes('Mask offset (1; 0 starts at harmonic 1)'),
+      'Periodic mask exposes its period and zero-based offset controls');
+    check(root.textContent!.includes('Invert harmonic mask'), 'Nonempty masks expose inversion');
+    editor.updatePartialGenerator({ mask: 'none' });
+    await nextTick();
+    check(!root.textContent!.includes('Invert harmonic mask'), 'None mask clears and hides inversion');
     editor.draftTrack.partialGenerator = normalizePartialGenerator({ type: 'binary', mode: 'bit', bit: 5, harmonicCount: 8 });
     await nextTick();
     check(bars().length === 0 && root.textContent!.includes('Silent spectrum:'), 'All-zero spectra explicitly report silence');

@@ -2,26 +2,35 @@ import { getWaveformPartialAmplitude, isPulseWaveform, PULSE_DUTY } from './spec
 import { DEFAULT_TONEWHEEL_DRAWBARS, getTonewheelSpectrum } from './tonewheelSpectrum.js';
 
 export type PartialSpectrum = number[];
-export type PartialSequence = 'natural' | 'fibonacci' | 'primes' | 'powers-of-two' | 'thue-morse';
-export type PartialMapping = 'linear' | 'power' | 'sqrt' | 'inverse';
-export type PartialMask = 'none' | 'odd' | 'even' | 'prime' | 'fibonacci' | 'power-of-two';
+export type PartialSequence = 'natural' | 'fibonacci' | 'primes' | 'powers-of-two' | 'thue-morse'
+  | 'triangular' | 'lucas' | 'divisor-count' | 'stern-diatomic' | 'euler-totient' | 'recaman';
+export type PartialMapping = 'linear' | 'power' | 'sqrt' | 'inverse'
+  | 'logarithmic' | 'inverse-sqrt' | 'saturating' | 'modulo';
+export type PartialMask = 'none' | 'odd' | 'even' | 'prime' | 'fibonacci' | 'power-of-two'
+  | 'square' | 'triangular' | 'thue-morse' | 'periodic';
 export type PartialBinaryMode = 'popcount' | 'parity' | 'bit';
 
-interface ProceduralSettings {
+interface MaskSettings {
+  mask: PartialMask;
+  invertMask: boolean;
+  maskPeriod: number;
+  maskOffset: number;
+}
+
+interface ProceduralSettings extends MaskSettings {
   harmonicCount: number;
   normalize: boolean;
   mapping: PartialMapping;
   exponent: number;
-  mask: PartialMask;
+  mappingModulus: number;
   tilt: number;
 }
 
-interface WaveformSettings {
+interface WaveformSettings extends MaskSettings {
   harmonicCount: number;
   tilt: number;
   contrast: number;
   oddEvenBalance: number;
-  mask: PartialMask;
   normalize: boolean;
 }
 
@@ -53,6 +62,22 @@ function choice<T extends string>(value: unknown, choices: readonly T[], fallbac
   return choices.includes(value as T) ? value as T : fallback;
 }
 
+const MASKS: readonly PartialMask[] = [
+  'none', 'odd', 'even', 'prime', 'fibonacci', 'power-of-two',
+  'square', 'triangular', 'thue-morse', 'periodic',
+];
+
+function normalizeMaskSettings(raw: Record<string, unknown>): MaskSettings {
+  const mask = choice(raw.mask, MASKS, 'none');
+  const maskPeriod = Math.round(boundedNumber(raw.maskPeriod, 2, 2, 64));
+  return {
+    mask,
+    invertMask: mask !== 'none' && raw.invertMask === true,
+    maskPeriod,
+    maskOffset: Math.round(boundedNumber(raw.maskOffset, 0, 0, maskPeriod - 1)),
+  };
+}
+
 export function normalizePartialGenerator(value: unknown): NormalizedPartialGenerator {
   const raw = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>;
   if (raw.type === 'waveform') return {
@@ -61,13 +86,16 @@ export function normalizePartialGenerator(value: unknown): NormalizedPartialGene
     tilt: boundedNumber(raw.tilt, 0, -24, 24),
     contrast: boundedNumber(raw.contrast, 1, 0.25, 4),
     oddEvenBalance: boundedNumber(raw.oddEvenBalance, 0, -24, 24),
-    mask: choice(raw.mask, ['none', 'odd', 'even', 'prime', 'fibonacci', 'power-of-two'], 'none'),
+    ...normalizeMaskSettings(raw),
     normalize: typeof raw.normalize === 'boolean' ? raw.normalize : false,
   };
   if (raw.type !== 'sequence' && raw.type !== 'binary') {
     return { type: 'tonewheel' };
   }
-  const sequences: readonly PartialSequence[] = ['natural', 'fibonacci', 'primes', 'powers-of-two', 'thue-morse'];
+  const sequences: readonly PartialSequence[] = [
+    'natural', 'fibonacci', 'primes', 'powers-of-two', 'thue-morse',
+    'triangular', 'lucas', 'divisor-count', 'stern-diatomic', 'euler-totient', 'recaman',
+  ];
   const modes: readonly PartialBinaryMode[] = ['popcount', 'parity', 'bit'];
   if ((raw.type === 'sequence' && raw.sequence !== undefined && !sequences.includes(raw.sequence as PartialSequence))
     || (raw.type === 'binary' && raw.mode !== undefined && !modes.includes(raw.mode as PartialBinaryMode))) {
@@ -76,9 +104,12 @@ export function normalizePartialGenerator(value: unknown): NormalizedPartialGene
   const common: ProceduralSettings = {
     harmonicCount: Math.round(boundedNumber(raw.harmonicCount, 16, 1, 64)),
     normalize: typeof raw.normalize === 'boolean' ? raw.normalize : true,
-    mapping: choice(raw.mapping, ['linear', 'power', 'sqrt', 'inverse'], 'linear'),
+    mapping: choice(raw.mapping, [
+      'linear', 'power', 'sqrt', 'inverse', 'logarithmic', 'inverse-sqrt', 'saturating', 'modulo',
+    ], 'linear'),
     exponent: boundedNumber(raw.exponent, 1, 0.1, 4),
-    mask: choice(raw.mask, ['none', 'odd', 'even', 'prime', 'fibonacci', 'power-of-two'], 'none'),
+    mappingModulus: Math.round(boundedNumber(raw.mappingModulus, 2, 2, 64)),
+    ...normalizeMaskSettings(raw),
     tilt: boundedNumber(raw.tilt, 0, -24, 24),
   };
   return raw.type === 'sequence'
@@ -121,20 +152,62 @@ function popcount(value: number): number {
   return count;
 }
 
-function passesMask(harmonic: number, mask: PartialMask): boolean {
-  switch (mask) {
-    case 'odd': return harmonic % 2 === 1;
-    case 'even': return harmonic % 2 === 0;
-    case 'prime': return isPrime(harmonic);
-    case 'power-of-two': return (harmonic & (harmonic - 1)) === 0;
+function isTriangular(value: number): boolean {
+  return Number.isInteger(Math.sqrt(8 * value + 1));
+}
+
+function divisorCount(value: number): number {
+  let count = 0;
+  for (let divisor = 1; divisor * divisor <= value; divisor += 1) {
+    if (value % divisor === 0) count += divisor * divisor === value ? 1 : 2;
+  }
+  return count;
+}
+
+function eulerTotient(value: number): number {
+  let result = value;
+  let remainder = value;
+  for (let factor = 2; factor * factor <= remainder; factor += 1) {
+    if (remainder % factor !== 0) continue;
+    while (remainder % factor === 0) remainder /= factor;
+    result -= result / factor;
+  }
+  if (remainder > 1) result -= result / remainder;
+  return result;
+}
+
+function sternDiatomic(value: number): number {
+  if (value === 0) return 0;
+  let left = 0;
+  let right = 1;
+  for (const bit of value.toString(2)) {
+    if (bit === '0') right = left + right;
+    else left += right;
+  }
+  return left;
+}
+
+function passesMask(harmonic: number, settings: MaskSettings): boolean {
+  let passes: boolean;
+  switch (settings.mask) {
+    case 'odd': passes = harmonic % 2 === 1; break;
+    case 'even': passes = harmonic % 2 === 0; break;
+    case 'prime': passes = isPrime(harmonic); break;
+    case 'power-of-two': passes = (harmonic & (harmonic - 1)) === 0; break;
+    case 'square': passes = Number.isInteger(Math.sqrt(harmonic)); break;
+    case 'triangular': passes = isTriangular(harmonic); break;
+    case 'thue-morse': passes = popcount(harmonic - 1) % 2 === 1; break;
+    case 'periodic': passes = (harmonic - 1) % settings.maskPeriod === settings.maskOffset; break;
     case 'fibonacci': {
       let previous = 1;
       let current = 1;
       while (current < harmonic) [previous, current] = [current, previous + current];
-      return current === harmonic;
+      passes = current === harmonic;
+      break;
     }
-    default: return true;
+    default: passes = true;
   }
+  return settings.mask !== 'none' && settings.invertMask ? !passes : passes;
 }
 
 /** Direct note-harmonic amplitudes before half-fundamental expansion. */
@@ -144,6 +217,10 @@ export function generateProceduralAmplitudes(value: unknown): number[] {
   let previous = 0;
   let current = 1;
   let prime = 1;
+  let lucasPrevious = 2;
+  let lucasCurrent = 1;
+  let recaman = 0;
+  const recamanSeen = new Set([0]);
   const amplitudes = Array.from({ length: generator.harmonicCount }, (_, n) => {
     const harmonic = n + 1;
     let weight: number;
@@ -162,6 +239,22 @@ export function generateProceduralAmplitudes(value: unknown): number[] {
           break;
         case 'powers-of-two': weight = 2 ** n; break;
         case 'thue-morse': weight = popcount(n) % 2; break;
+        case 'triangular': weight = harmonic * (harmonic + 1) / 2; break;
+        case 'lucas':
+          weight = lucasPrevious;
+          [lucasPrevious, lucasCurrent] = [lucasCurrent, lucasPrevious + lucasCurrent];
+          break;
+        case 'divisor-count': weight = divisorCount(harmonic); break;
+        case 'stern-diatomic': weight = sternDiatomic(harmonic); break;
+        case 'euler-totient': weight = eulerTotient(harmonic); break;
+        case 'recaman': {
+          weight = recaman;
+          const step = n + 1;
+          const candidate = recaman - step;
+          recaman = candidate > 0 && !recamanSeen.has(candidate) ? candidate : recaman + step;
+          recamanSeen.add(recaman);
+          break;
+        }
         default: weight = harmonic;
       }
     }
@@ -171,8 +264,12 @@ export function generateProceduralAmplitudes(value: unknown): number[] {
       case 'power': weight **= generator.exponent; break;
       case 'sqrt': weight = Math.sqrt(weight); break;
       case 'inverse': weight = 1 / weight; break;
+      case 'logarithmic': weight = Math.log2(1 + weight); break;
+      case 'inverse-sqrt': weight = 1 / Math.sqrt(weight); break;
+      case 'saturating': weight /= 1 + weight; break;
+      case 'modulo': weight %= generator.mappingModulus; break;
     }
-    if (!passesMask(harmonic, generator.mask)) return 0;
+    if (!passesMask(harmonic, generator)) return 0;
     weight *= 10 ** ((generator.tilt * Math.log2(harmonic)) / 20);
     return weight;
   });
@@ -190,7 +287,7 @@ function generateWaveformAmplitudes(generator: WaveformSettings, waveform: strin
     // Keep analytical pulse nulls silent instead of amplifying Math.sin rounding residue.
     if (isPulseWaveform(waveform) && Number.isInteger(harmonic * PULSE_DUTY[waveform])) return 0;
     const amplitude = getWaveformPartialAmplitude(waveform, harmonic);
-    if (amplitude === 0 || !passesMask(harmonic, generator.mask)) return 0;
+    if (amplitude === 0 || !passesMask(harmonic, generator)) return 0;
     // Positive balance attenuates odd harmonics; negative balance attenuates even ones.
     const balanceDb = harmonic % 2 === 1
       ? -Math.max(0, generator.oddEvenBalance) : Math.min(0, generator.oddEvenBalance);

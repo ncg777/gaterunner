@@ -22,9 +22,10 @@ const sequence = (name: string, extra: Record<string, unknown> = {}) => ({
 const binary = (mode: string, extra: Record<string, unknown> = {}) => ({
   type: 'binary', mode, harmonicCount: 8, normalize: false, ...extra,
 });
+const maskDefaults = { mask: 'none', invertMask: false, maskPeriod: 2, maskOffset: 0 };
 const waveformDefaults = {
   type: 'waveform', harmonicCount: 64, tilt: 0, contrast: 1,
-  oddEvenBalance: 0, mask: 'none', normalize: false,
+  oddEvenBalance: 0, ...maskDefaults, normalize: false,
 };
 
 test('each sequence has the documented starting index', () => {
@@ -34,6 +35,12 @@ test('each sequence has the documented starting index', () => {
     primes: [2, 3, 5, 7, 11, 13, 17, 19],
     'powers-of-two': [1, 2, 4, 8, 16, 32, 64, 128],
     'thue-morse': [0, 1, 1, 0, 1, 0, 0, 1],
+    triangular: [1, 3, 6, 10, 15, 21, 28, 36],
+    lucas: [2, 1, 3, 4, 7, 11, 18, 29],
+    'divisor-count': [1, 2, 2, 3, 2, 4, 2, 4],
+    'stern-diatomic': [1, 1, 2, 1, 3, 2, 3, 1],
+    'euler-totient': [1, 1, 2, 2, 4, 2, 6, 4],
+    recaman: [0, 1, 3, 6, 2, 7, 13, 20],
   };
   for (const [name, expected] of Object.entries(examples)) {
     assert.deepEqual(generateProceduralAmplitudes(sequence(name)), expected);
@@ -56,8 +63,12 @@ test('mappings operate on values, preserve zeros, and do not mutate inputs', () 
     ['power', [1, 4, 9, 16]],
     ['sqrt', [1, Math.sqrt(2), Math.sqrt(3), 2]],
     ['inverse', [1, 1 / 2, 1 / 3, 1 / 4]],
+    ['logarithmic', [1, Math.log2(3), 2, Math.log2(5)]],
+    ['inverse-sqrt', [1, 1 / Math.sqrt(2), 1 / Math.sqrt(3), 0.5]],
+    ['saturating', [0.5, 2 / 3, 0.75, 0.8]],
+    ['modulo', [1, 2, 0, 1]],
   ] as const) {
-    const generator = sequence('natural', { mapping, exponent: 2, harmonicCount: 4 });
+    const generator = sequence('natural', { mapping, exponent: 2, mappingModulus: 3, harmonicCount: 4 });
     const before = { ...generator };
     assert.deepEqual(generateProceduralAmplitudes(generator), expected);
     assert.deepEqual(generator, before);
@@ -74,11 +85,24 @@ test('masks select musical harmonic numbers, not generated values or zero-based 
     prime: [2, 3, 5, 7],
     fibonacci: [1, 2, 3, 5, 8],
     'power-of-two': [1, 2, 4, 8],
+    square: [1, 4],
+    triangular: [1, 3, 6],
+    'thue-morse': [2, 3, 5, 8],
   };
   for (const [mask, harmonics] of Object.entries(selected)) {
     const values = generateProceduralAmplitudes(sequence('primes', { mask }));
     assert.deepEqual(values.map((weight, index) => weight > 0 ? index + 1 : 0).filter(Boolean), harmonics);
   }
+  const periodic = generateProceduralAmplitudes(sequence('natural', {
+    mask: 'periodic', maskPeriod: 3, maskOffset: 1,
+  }));
+  assert.deepEqual(periodic.map((weight, index) => weight > 0 ? index + 1 : 0).filter(Boolean), [2, 5, 8]);
+  const inverted = generateProceduralAmplitudes(sequence('natural', { mask: 'prime', invertMask: true }));
+  assert.deepEqual(inverted.map((weight, index) => weight > 0 ? index + 1 : 0).filter(Boolean), [1, 4, 6, 8]);
+  assert.deepEqual(
+    generateProceduralAmplitudes(sequence('natural', { mask: 'none', invertMask: true })),
+    generateProceduralAmplitudes(sequence('natural')),
+  );
 });
 
 test('tilt uses dB per octave, after mapping and masks, before peak normalization', () => {
@@ -136,11 +160,11 @@ test('unknown configs default to tonewheel and recognized sparse configs get saf
   }
   assert.deepEqual(normalizePartialGenerator({ type: 'sequence' }), {
     type: 'sequence', sequence: 'natural', harmonicCount: 16, normalize: true,
-    mapping: 'linear', exponent: 1, mask: 'none', tilt: 0,
+    mapping: 'linear', exponent: 1, mappingModulus: 2, ...maskDefaults, tilt: 0,
   });
   assert.deepEqual(normalizePartialGenerator({ type: 'binary' }), {
     type: 'binary', mode: 'popcount', bit: 0, harmonicCount: 16, normalize: true,
-    mapping: 'linear', exponent: 1, mask: 'none', tilt: 0,
+    mapping: 'linear', exponent: 1, mappingModulus: 2, ...maskDefaults, tilt: 0,
   });
   assert.deepEqual(normalizePartialGenerator({
     type: 'binary', bit: Infinity, harmonicCount: NaN, normalize: 'false',
@@ -150,22 +174,37 @@ test('unknown configs default to tonewheel and recognized sparse configs get saf
     type: 'binary', harmonicCount: -1, exponent: 0, tilt: 100, bit: 100,
   }), {
     type: 'binary', mode: 'popcount', bit: 5, harmonicCount: 1, normalize: true,
-    mapping: 'linear', exponent: 0.1, mask: 'none', tilt: 24,
+    mapping: 'linear', exponent: 0.1, mappingModulus: 2, ...maskDefaults, tilt: 24,
   });
   const clamped = normalizePartialGenerator({ type: 'sequence', harmonicCount: 100, exponent: 100, tilt: -100 });
   assert.equal(clamped.type === 'sequence' && clamped.harmonicCount, 64);
   assert.equal(clamped.type === 'sequence' && clamped.exponent, 4);
   assert.equal(clamped.type === 'sequence' && clamped.tilt, -24);
+  assert.deepEqual(normalizePartialGenerator({
+    type: 'sequence', mapping: 'modulo', mappingModulus: 100,
+    mask: 'periodic', maskPeriod: 5.6, maskOffset: 100, invertMask: true,
+  }), {
+    type: 'sequence', sequence: 'natural', harmonicCount: 16, normalize: true,
+    mapping: 'modulo', exponent: 1, mappingModulus: 64,
+    mask: 'periodic', invertMask: true, maskPeriod: 6, maskOffset: 5, tilt: 0,
+  });
+  const none = normalizePartialGenerator({ type: 'waveform', mask: 'none', invertMask: true });
+  assert.equal(none.type === 'waveform' && none.invertMask, false);
 });
 
 test('every generator and mapping stays deterministic, nonnegative and bounded at extremes', () => {
-  const modes = ['natural', 'fibonacci', 'primes', 'powers-of-two', 'thue-morse'].map((name) => sequence(name));
+  const modes = [
+    'natural', 'fibonacci', 'primes', 'powers-of-two', 'thue-morse', 'triangular', 'lucas',
+    'divisor-count', 'stern-diatomic', 'euler-totient', 'recaman',
+  ].map((name) => sequence(name));
   modes.push(...['popcount', 'parity', 'bit'].map((mode) => binary(mode)));
   for (const mode of modes) {
-    for (const mapping of ['linear', 'power', 'sqrt', 'inverse']) {
+    for (const mapping of [
+      'linear', 'power', 'sqrt', 'inverse', 'logarithmic', 'inverse-sqrt', 'saturating', 'modulo',
+    ]) {
       for (const tilt of [-24, 24]) {
         for (const normalize of [false, true]) {
-          const config = { ...mode, harmonicCount: 64, exponent: 4, mapping, tilt, normalize };
+          const config = { ...mode, harmonicCount: 64, exponent: 4, mapping, mappingModulus: 7, tilt, normalize };
           const result = generateProceduralAmplitudes(config);
           assert.equal(result.length, 64);
           assert.deepEqual(result, generateProceduralAmplitudes(config));
@@ -268,13 +307,19 @@ test('procedural configs clone independently, round-trip version 2, and particip
     assert.notEqual(trackClone.partialGenerator, source.tracks[0].partialGenerator);
     assert.equal(arePresetDataEqual(source, clone), true);
     for (const [field, value] of Object.entries({
-      harmonicCount: 9, normalize: true, mapping: 'inverse', exponent: 2, mask: 'prime', tilt: 6,
+      harmonicCount: 9, normalize: true, mapping: 'modulo', exponent: 2, mappingModulus: 5,
+      mask: 'periodic', maskPeriod: 4, maskOffset: 2, tilt: 6,
       ...(config.type === 'sequence' ? { sequence: 'primes' } : { mode: 'parity', bit: 3 }),
     })) {
       const changed = clonePresetData(source);
       changed.tracks[0].partialGenerator = normalizePartialGenerator({ ...changed.tracks[0].partialGenerator, [field]: value });
       assert.equal(arePresetDataEqual(source, changed), false, field);
     }
+    const inverted = clonePresetData(source);
+    inverted.tracks[0].partialGenerator = normalizePartialGenerator({
+      ...inverted.tracks[0].partialGenerator, mask: 'prime', invertMask: true,
+    });
+    assert.equal(arePresetDataEqual(source, inverted), false, 'invertMask');
     const exported = buildSinglePresetExport(createNamedPreset('Procedural', source));
     assert.equal(exported.version, 2);
     const imported = parsePresetImportPayload(JSON.stringify(exported));
@@ -365,10 +410,15 @@ test('waveform balance attenuates the opposite parity and masks select musical h
   for (const [mask, selected] of Object.entries({
     none: [1, 2, 3, 4, 5, 6, 7, 8], odd: [1, 3, 5, 7], even: [2, 4, 6, 8],
     prime: [2, 3, 5, 7], fibonacci: [1, 2, 3, 5, 8], 'power-of-two': [1, 2, 4, 8],
+    square: [1, 4], triangular: [1, 3, 6], 'thue-morse': [2, 3, 5, 8],
   })) {
     const spectrum = generatePartialSpectrum({ type: 'waveform', harmonicCount: 8, mask }, 'sawtooth');
     assert.deepEqual(spectrum.flatMap((amplitude, bin) => amplitude ? [(bin + 1) / 2] : []), selected);
   }
+  const periodic = generatePartialSpectrum({
+    type: 'waveform', harmonicCount: 8, mask: 'periodic', maskPeriod: 3, maskOffset: 1, invertMask: true,
+  }, 'sawtooth');
+  assert.deepEqual(periodic.flatMap((amplitude, bin) => amplitude ? [(bin + 1) / 2] : []), [1, 3, 4, 6, 7]);
 });
 
 test('waveform transforms compose before absolute peak normalization and stay finite at extremes', () => {

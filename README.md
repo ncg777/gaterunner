@@ -201,13 +201,41 @@ Each melodic track uses one bounded-cost tonewheel engine.
 - Imported presets that contain retired FM or virtual-analog fields remain loadable.
   Those fields are silently discarded and the track keeps its tonewheel-compatible settings.
 
+### Procedural Partial Sources
+
+Select **Sequence** or **Binary** as the **Partial source** to generate amplitudes
+for 1–64 musical harmonics. Sequence choices include natural numbers, Fibonacci,
+primes, powers of two, Thue–Morse, triangular and Lucas numbers, divisor counts,
+Stern's diatomic sequence, Euler's totient sequence, and Recamán's sequence.
+Binary choices remain popcount, parity, and a selected bit. Thue–Morse, Recamán,
+and binary sequences start at n = 0, with their first value controlling harmonic 1.
+
+Amplitude mappings are linear, power, square root, inverse, logarithmic
+($\log_2(1+w)$), inverse square root, saturating ($w/(1+w)$), and raw modulo.
+Inverse mappings keep an input zero silent. Modulo uses `value % mappingModulus`,
+so exact multiples of the modulus become silent.
+
+Harmonic masks keep odd, even, prime, Fibonacci, power-of-two, square, triangular,
+or Thue–Morse harmonic numbers. A periodic mask keeps harmonics satisfying
+`(harmonic - 1) % maskPeriod === maskOffset`; for example, period 4 and offset 0
+keep harmonics 1, 5, 9, and so on. Any non-None mask can be inverted. Choosing
+None clears inversion rather than producing a silent spectrum.
+
+The processing order is base amplitude → mapping → mask/inversion → spectral tilt
+→ optional peak normalization. These settings persist inside `partialGenerator`
+as `mapping`, `exponent`, `mappingModulus`, `mask`, `invertMask`, `maskPeriod`,
+`maskOffset`, `tilt`, and `normalize`. Defaults preserve existing preset sounds.
+Browser playback, the spectrum preview, multidimensional wavetable sources, and
+CLI WAV rendering all use the same generated spectrum. MIDI is unchanged.
+
 ### Waveform Spectral Transforms
 
 Select **Waveform** as the **Partial source** in a melodic track's **Generator** tab.
 Its harmonic spectrum can be reshaped before envelopes, filters, and effects:
 
 - **Harmonic count** (1–64) limits the highest musical harmonic.
-- **Harmonic mask** keeps all, odd, even, prime, Fibonacci, or power-of-two harmonics.
+- **Harmonic mask** supports the same number-family, periodic, and inverted masks
+  as procedural sources.
 - **Spectral tilt** (−24 to +24 dB/octave) darkens or brightens the spectrum relative
   to the fundamental.
 - **Spectral contrast** (0.25–4) raises each partial's magnitude to that power.
@@ -229,7 +257,8 @@ transforms, unison, preview, and multidimensional wavetable crossfades.
 Defaults (64 harmonics, no mask, 0 dB tilt/balance, contrast 1, normalization off)
 preserve existing waveform sounds. Settings persist with presets, copies, JSON
 export/import, and shared URLs inside `partialGenerator` using `harmonicCount`,
-`mask`, `tilt`, `contrast`, `oddEvenBalance`, and `normalize`.
+`mask`, `invertMask`, `maskPeriod`, `maskOffset`, `tilt`, `contrast`,
+`oddEvenBalance`, and `normalize`.
 
 ### Waveshaper And Tanh Drive
 

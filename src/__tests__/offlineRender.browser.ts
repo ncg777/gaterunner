@@ -71,6 +71,14 @@ export async function runPartialGeneratorChecks(app: InstanceType<typeof App>) {
     'Browser uses shared procedural spectrum');
   check(first === app.getTonewheelPartials(track, 10, 5), 'Static spectrum cache reuses arrays across time');
   const signature = app.getTrackVoiceSignature(track);
+  track.partialGenerator = normalizePartialGenerator({
+    type: 'sequence', sequence: 'recaman', mapping: 'modulo', mappingModulus: 5,
+    mask: 'periodic', maskPeriod: 4, maskOffset: 1, invertMask: true,
+  });
+  check(JSON.stringify(app.getTonewheelPartials(track)) === JSON.stringify(trim(
+    generatePartialSpectrum(track.partialGenerator, track.waveform),
+  )), 'Browser uses expanded sequence, mapping, and mask settings');
+  check(signature !== app.getTrackVoiceSignature(track), 'Expanded generator settings update voice settings');
   track.partialGenerator = normalizePartialGenerator({ type: 'binary', mode: 'parity' });
   check(first !== app.getTonewheelPartials(track), 'Generator changes invalidate cached spectrum');
   check(signature !== app.getTrackVoiceSignature(track), 'Generator changes update voice settings');
@@ -140,7 +148,8 @@ export async function runPartialGeneratorChecks(app: InstanceType<typeof App>) {
           source: {
             partialGenerator: {
               type: 'sequence', sequence: 'natural', harmonicCount: 1, normalize: true,
-              mapping: 'linear', exponent: 1, mask: 'none', tilt: 0,
+              mapping: 'linear', exponent: 1, mappingModulus: 2,
+              mask: 'none', invertMask: false, maskPeriod: 2, maskOffset: 0, tilt: 0,
             },
             waveform: 'sine', tonewheelDrawbars: Array(9).fill(0),
           },

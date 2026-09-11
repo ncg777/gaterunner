@@ -417,6 +417,18 @@
               <v-col v-if="partialGenerator.mapping === 'power'" cols="12">
                 <EditableSlider :model-value="partialGenerator.exponent" :label="`Power exponent (${partialGenerator.exponent.toFixed(2)})`" :min="0.1" :max="4" :step="0.05" @update:modelValue="updatePartialGenerator({ exponent: $event })" />
               </v-col>
+              <v-col v-if="partialGenerator.mapping === 'modulo'" cols="12">
+                <EditableSlider :model-value="partialGenerator.mappingModulus" :label="`Mapping modulus (${partialGenerator.mappingModulus})`" :min="2" :max="64" :step="1" @update:modelValue="updatePartialGenerator({ mappingModulus: $event })" />
+              </v-col>
+              <v-col v-if="partialGenerator.mask === 'periodic'" cols="12" md="6">
+                <EditableSlider :model-value="partialGenerator.maskPeriod" :label="`Mask period (${partialGenerator.maskPeriod})`" :min="2" :max="64" :step="1" @update:modelValue="updatePartialGenerator({ maskPeriod: $event })" />
+              </v-col>
+              <v-col v-if="partialGenerator.mask === 'periodic'" cols="12" md="6">
+                <EditableSlider :model-value="partialGenerator.maskOffset" :label="`Mask offset (${partialGenerator.maskOffset}; 0 starts at harmonic 1)`" :min="0" :max="partialGenerator.maskPeriod - 1" :step="1" @update:modelValue="updatePartialGenerator({ maskOffset: $event })" />
+              </v-col>
+              <v-col v-if="partialGenerator.mask !== 'none'" cols="12">
+                <v-switch :model-value="partialGenerator.invertMask" label="Invert harmonic mask" density="compact" hide-details @update:modelValue="updatePartialGenerator({ invertMask: Boolean($event) })" />
+              </v-col>
               <v-col cols="12" md="8">
                 <EditableSlider :model-value="partialGenerator.tilt" :label="`Spectral tilt (${partialGenerator.tilt.toFixed(1)} dB/oct)`" :min="-24" :max="24" :step="0.5" @update:modelValue="updatePartialGenerator({ tilt: $event })" />
               </v-col>
@@ -424,7 +436,7 @@
                 <v-switch :model-value="partialGenerator.normalize" label="Peak normalization" density="compact" hide-details @update:modelValue="updatePartialGenerator({ normalize: Boolean($event) })" />
               </v-col>
             </v-row>
-            <p class="text-caption text-medium-emphasis mt-2">Mapping → harmonic mask → tilt → optional peak normalization. Inverse keeps zeros silent. Binary and Thue–Morse start at n = 0.</p>
+            <p class="text-caption text-medium-emphasis mt-2">Mapping → harmonic mask → tilt → optional peak normalization. Inverse mappings keep zeros silent. Modulo uses the raw remainder. Binary, Thue–Morse, and Recamán start at n = 0.</p>
           </template>
           <v-row v-if="partialGenerator.type === 'waveform'">
             <v-col cols="12">
@@ -446,6 +458,15 @@
               </v-col>
               <v-col cols="12" md="6">
                 <v-select :model-value="partialGenerator.mask" label="Harmonic mask" :items="partialMaskOptions" density="comfortable" variant="outlined" hide-details @update:modelValue="updatePartialGenerator({ mask: $event })" />
+              </v-col>
+              <v-col v-if="partialGenerator.mask === 'periodic'" cols="12" md="6">
+                <EditableSlider :model-value="partialGenerator.maskPeriod" :label="`Mask period (${partialGenerator.maskPeriod})`" :min="2" :max="64" :step="1" @update:modelValue="updatePartialGenerator({ maskPeriod: $event })" />
+              </v-col>
+              <v-col v-if="partialGenerator.mask === 'periodic'" cols="12" md="6">
+                <EditableSlider :model-value="partialGenerator.maskOffset" :label="`Mask offset (${partialGenerator.maskOffset}; 0 starts at harmonic 1)`" :min="0" :max="partialGenerator.maskPeriod - 1" :step="1" @update:modelValue="updatePartialGenerator({ maskOffset: $event })" />
+              </v-col>
+              <v-col v-if="partialGenerator.mask !== 'none'" cols="12">
+                <v-switch :model-value="partialGenerator.invertMask" label="Invert harmonic mask" density="compact" hide-details @update:modelValue="updatePartialGenerator({ invertMask: Boolean($event) })" />
               </v-col>
               <v-col cols="12" md="6">
                 <EditableSlider :model-value="partialGenerator.tilt" :label="`Spectral tilt (${partialGenerator.tilt.toFixed(1)} dB/oct)`" :min="-24" :max="24" :step="0.5" @update:modelValue="updatePartialGenerator({ tilt: $event })" />
@@ -1128,6 +1149,12 @@ export default defineComponent({
         { title: 'Primes (2, 3, 5, …)', value: 'primes' },
         { title: 'Powers of two (1, 2, 4, …)', value: 'powers-of-two' },
         { title: 'Thue–Morse (0, 1, 1, 0, …)', value: 'thue-morse' },
+        { title: 'Triangular (1, 3, 6, 10, …)', value: 'triangular' },
+        { title: 'Lucas (2, 1, 3, 4, …)', value: 'lucas' },
+        { title: 'Divisor count (1, 2, 2, 3, …)', value: 'divisor-count' },
+        { title: 'Stern diatomic (1, 1, 2, 1, …)', value: 'stern-diatomic' },
+        { title: 'Euler totient (1, 1, 2, 2, …)', value: 'euler-totient' },
+        { title: 'Recamán (0, 1, 3, 6, …)', value: 'recaman' },
       ],
       partialBinaryModeOptions: [
         { title: 'Popcount (number of set bits)', value: 'popcount' },
@@ -1139,6 +1166,10 @@ export default defineComponent({
         { title: 'Power', value: 'power' },
         { title: 'Square root', value: 'sqrt' },
         { title: 'Inverse (zeros stay zero)', value: 'inverse' },
+        { title: 'Logarithmic (log₂(1 + value))', value: 'logarithmic' },
+        { title: 'Inverse square root (zeros stay zero)', value: 'inverse-sqrt' },
+        { title: 'Saturating (value / (1 + value))', value: 'saturating' },
+        { title: 'Modulo (raw remainder)', value: 'modulo' },
       ],
       partialMaskOptions: [
         { title: 'None', value: 'none' },
@@ -1147,6 +1178,10 @@ export default defineComponent({
         { title: 'Prime harmonics', value: 'prime' },
         { title: 'Fibonacci harmonics', value: 'fibonacci' },
         { title: 'Power-of-two harmonics', value: 'power-of-two' },
+        { title: 'Square harmonics', value: 'square' },
+        { title: 'Triangular harmonics', value: 'triangular' },
+        { title: 'Thue–Morse harmonics', value: 'thue-morse' },
+        { title: 'Periodic comb', value: 'periodic' },
       ],
       skewLfoWaveformOptions: SKEW_LFO_WAVEFORM_OPTIONS,
       wavetableLfoWaveformOptions: LFO_WAVEFORM_OPTIONS,
