@@ -2297,7 +2297,7 @@ export default defineComponent({
       chain.sourceBus.disconnect();
       chain.waveshaper?.output.disconnect();
       chain.limiterGain.disconnect();
-      chain.limiter.disconnect(chain.outputGain);
+      (chain.limiter as Tone.ToneAudioNode).disconnect();
       chain.outputGain.disconnect();
       chain.vibrato?.disconnect();
       chain.tremolo?.disconnect();
