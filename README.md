@@ -207,8 +207,24 @@ Select **Sequence** or **Binary** as the **Partial source** to generate amplitud
 for 1–64 musical harmonics. Sequence choices include natural numbers, Fibonacci,
 primes, powers of two, Thue–Morse, triangular and Lucas numbers, divisor counts,
 Stern's diatomic sequence, Euler's totient sequence, and Recamán's sequence.
-Binary choices remain popcount, parity, and a selected bit. Thue–Morse, Recamán,
-and binary sequences start at n = 0, with their first value controlling harmonic 1.
+Binary modes derive amplitudes from n = 0, 1, 2, and so on, with n = 0
+controlling harmonic 1. Every binary mode therefore starts with a silent fundamental:
+
+- **Popcount**, **parity**, and **selected bit** count set bits, reduce that count
+  modulo 2, or extract bit 0–5.
+- **Gray code** uses `n ^ (n >> 1)` directly; **Gray popcount** counts its set bits.
+- **Bit length** counts significant bits, producing 0, 1, 2, 2, 3, 3, 3, 3, ….
+- **Ruler** counts trailing zeros in `n + 1`, producing 0, 1, 0, 2, 0, 1, 0, 3, ….
+- **Longest one-run** measures the longest consecutive group of set bits;
+  **one-run count** counts separate groups of set bits.
+- **Rudin–Shapiro** is the parity of overlapping `11` pairs, calculated as
+  `popcount(n & (n >> 1)) % 2`.
+- **Bit reversal** reverses the lowest `bitWidth` bits. Width is 1–6 and defaults
+  to 6; shorter widths repeat every $2^{\text{bitWidth}}$ indices because higher
+  bits are ignored. Width 3 starts 0, 4, 2, 6, 1, 5, 3, 7.
+
+Thue–Morse and Recamán also start at n = 0, with their first value controlling
+harmonic 1.
 
 Amplitude mappings are linear, power, square root, inverse, logarithmic
 ($\log_2(1+w)$), inverse square root, saturating ($w/(1+w)$), and raw modulo.
@@ -224,7 +240,8 @@ None clears inversion rather than producing a silent spectrum.
 The processing order is base amplitude → mapping → mask/inversion → spectral tilt
 → optional peak normalization. These settings persist inside `partialGenerator`
 as `mapping`, `exponent`, `mappingModulus`, `mask`, `invertMask`, `maskPeriod`,
-`maskOffset`, `tilt`, and `normalize`. Defaults preserve existing preset sounds.
+`maskOffset`, `bit`, `bitWidth`, `tilt`, and `normalize`. Defaults preserve
+existing preset sounds.
 Browser playback, the spectrum preview, multidimensional wavetable sources, and
 CLI WAV rendering all use the same generated spectrum. MIDI is unchanged.
 

@@ -8,7 +8,8 @@ export type PartialMapping = 'linear' | 'power' | 'sqrt' | 'inverse'
   | 'logarithmic' | 'inverse-sqrt' | 'saturating' | 'modulo';
 export type PartialMask = 'none' | 'odd' | 'even' | 'prime' | 'fibonacci' | 'power-of-two'
   | 'square' | 'triangular' | 'thue-morse' | 'periodic';
-export type PartialBinaryMode = 'popcount' | 'parity' | 'bit';
+export type PartialBinaryMode = 'popcount' | 'parity' | 'bit' | 'gray-code' | 'gray-popcount'
+  | 'bit-length' | 'ruler' | 'longest-one-run' | 'one-run-count' | 'rudin-shapiro' | 'bit-reversal';
 
 interface MaskSettings {
   mask: PartialMask;
@@ -38,7 +39,7 @@ export type PartialGenerator =
   | { type: 'tonewheel' }
   | (Partial<WaveformSettings> & { type: 'waveform' })
   | (ProceduralSettings & { type: 'sequence'; sequence: PartialSequence })
-  | (ProceduralSettings & { type: 'binary'; mode: PartialBinaryMode; bit: number });
+  | (ProceduralSettings & { type: 'binary'; mode: PartialBinaryMode; bit: number; bitWidth: number });
 
 export type NormalizedPartialGenerator =
   | Exclude<PartialGenerator, { type: 'waveform' }>
@@ -96,7 +97,10 @@ export function normalizePartialGenerator(value: unknown): NormalizedPartialGene
     'natural', 'fibonacci', 'primes', 'powers-of-two', 'thue-morse',
     'triangular', 'lucas', 'divisor-count', 'stern-diatomic', 'euler-totient', 'recaman',
   ];
-  const modes: readonly PartialBinaryMode[] = ['popcount', 'parity', 'bit'];
+  const modes: readonly PartialBinaryMode[] = [
+    'popcount', 'parity', 'bit', 'gray-code', 'gray-popcount', 'bit-length', 'ruler',
+    'longest-one-run', 'one-run-count', 'rudin-shapiro', 'bit-reversal',
+  ];
   if ((raw.type === 'sequence' && raw.sequence !== undefined && !sequences.includes(raw.sequence as PartialSequence))
     || (raw.type === 'binary' && raw.mode !== undefined && !modes.includes(raw.mode as PartialBinaryMode))) {
     return { type: 'tonewheel' };
@@ -114,7 +118,13 @@ export function normalizePartialGenerator(value: unknown): NormalizedPartialGene
   };
   return raw.type === 'sequence'
     ? { type: 'sequence', sequence: choice(raw.sequence, sequences, 'natural'), ...common }
-    : { type: 'binary', mode: choice(raw.mode, modes, 'popcount'), bit: Math.round(boundedNumber(raw.bit, 0, 0, 5)), ...common };
+    : {
+      type: 'binary',
+      mode: choice(raw.mode, modes, 'popcount'),
+      bit: Math.round(boundedNumber(raw.bit, 0, 0, 5)),
+      bitWidth: Math.round(boundedNumber(raw.bitWidth, 6, 1, 6)),
+      ...common,
+    };
 }
 
 export function isNoiseWaveform(waveform: string): boolean {
@@ -150,6 +160,58 @@ function popcount(value: number): number {
   let count = 0;
   for (let bits = value; bits > 0; bits >>>= 1) count += bits & 1;
   return count;
+}
+
+function longestOneRun(value: number): number {
+  let longest = 0;
+  let current = 0;
+  for (let bits = value; bits > 0; bits >>>= 1) {
+    current = (bits & 1) === 1 ? current + 1 : 0;
+    longest = Math.max(longest, current);
+  }
+  return longest;
+}
+
+function oneRunCount(value: number): number {
+  let count = 0;
+  let previousBit = 0;
+  for (let bits = value; bits > 0; bits >>>= 1) {
+    const currentBit = bits & 1;
+    if (currentBit === 1 && previousBit === 0) count += 1;
+    previousBit = currentBit;
+  }
+  return count;
+}
+
+function trailingZeroCount(value: number): number {
+  let count = 0;
+  for (let bits = value; (bits & 1) === 0; bits >>>= 1) count += 1;
+  return count;
+}
+
+function reverseBits(value: number, width: number): number {
+  let reversed = 0;
+  for (let bitIndex = 0; bitIndex < width; bitIndex += 1) {
+    reversed = (reversed << 1) | ((value >>> bitIndex) & 1);
+  }
+  return reversed;
+}
+
+function getBinaryWeight(mode: PartialBinaryMode, value: number, bit: number, bitWidth: number): number {
+  const grayCode = value ^ (value >>> 1);
+  switch (mode) {
+    case 'parity': return popcount(value) % 2;
+    case 'bit': return (value >>> bit) & 1;
+    case 'gray-code': return grayCode;
+    case 'gray-popcount': return popcount(grayCode);
+    case 'bit-length': return value === 0 ? 0 : Math.floor(Math.log2(value)) + 1;
+    case 'ruler': return trailingZeroCount(value + 1);
+    case 'longest-one-run': return longestOneRun(value);
+    case 'one-run-count': return oneRunCount(value);
+    case 'rudin-shapiro': return popcount(value & (value >>> 1)) % 2;
+    case 'bit-reversal': return reverseBits(value, bitWidth);
+    default: return popcount(value);
+  }
 }
 
 function isTriangular(value: number): boolean {
@@ -225,8 +287,7 @@ export function generateProceduralAmplitudes(value: unknown): number[] {
     const harmonic = n + 1;
     let weight: number;
     if (generator.type === 'binary') {
-      weight = generator.mode === 'bit' ? (n >>> generator.bit) & 1
-        : generator.mode === 'parity' ? popcount(n) % 2 : popcount(n);
+      weight = getBinaryWeight(generator.mode, n, generator.bit, generator.bitWidth);
     } else {
       switch (generator.sequence) {
         case 'fibonacci':

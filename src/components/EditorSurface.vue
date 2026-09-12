@@ -406,6 +406,9 @@
               <v-col v-if="partialGenerator.type === 'binary' && partialGenerator.mode === 'bit'" cols="12">
                 <EditableSlider :model-value="partialGenerator.bit" :label="`Bit index (${partialGenerator.bit}; 0 = least significant)`" :min="0" :max="5" :step="1" @update:modelValue="updatePartialGenerator({ bit: $event })" />
               </v-col>
+              <v-col v-if="partialGenerator.type === 'binary' && partialGenerator.mode === 'bit-reversal'" cols="12">
+                <EditableSlider :model-value="partialGenerator.bitWidth" :label="`Bit-reversal width (${partialGenerator.bitWidth})`" :min="1" :max="6" :step="1" @update:modelValue="updatePartialGenerator({ bitWidth: $event })" />
+              </v-col>
             </v-row>
             <v-row>
               <v-col cols="12" md="6">
@@ -1160,6 +1163,14 @@ export default defineComponent({
         { title: 'Popcount (number of set bits)', value: 'popcount' },
         { title: 'Parity (popcount modulo 2)', value: 'parity' },
         { title: 'Selected bit', value: 'bit' },
+        { title: 'Gray code (0, 1, 3, 2, …)', value: 'gray-code' },
+        { title: 'Gray popcount (0, 1, 2, 1, …)', value: 'gray-popcount' },
+        { title: 'Bit length (0, 1, 2, 2, …)', value: 'bit-length' },
+        { title: 'Ruler (0, 1, 0, 2, …)', value: 'ruler' },
+        { title: 'Longest one-run (0, 1, 1, 2, …)', value: 'longest-one-run' },
+        { title: 'One-run count (0, 1, 1, 1, …)', value: 'one-run-count' },
+        { title: 'Rudin–Shapiro (0, 0, 0, 1, …)', value: 'rudin-shapiro' },
+        { title: 'Bit reversal', value: 'bit-reversal' },
       ],
       partialMappingOptions: [
         { title: 'Linear', value: 'linear' },

@@ -38,6 +38,14 @@ export async function runSpectrumPreviewChecks(editor: InstanceType<typeof Edito
     editor.updatePartialGenerator({ mask: 'none' });
     await nextTick();
     check(!root.textContent!.includes('Invert harmonic mask'), 'None mask clears and hides inversion');
+    editor.draftTrack.partialGenerator = normalizePartialGenerator({
+      type: 'binary', mode: 'bit-reversal', bitWidth: 4, harmonicCount: 16,
+    });
+    await nextTick();
+    check(root.textContent!.includes('Bit-reversal width (4)'), 'Bit reversal exposes its width control');
+    editor.updatePartialGenerator({ mode: 'gray-code' });
+    await nextTick();
+    check(!root.textContent!.includes('Bit-reversal width'), 'Other binary modes hide the reversal width control');
     editor.draftTrack.partialGenerator = normalizePartialGenerator({ type: 'binary', mode: 'bit', bit: 5, harmonicCount: 8 });
     await nextTick();
     check(bars().length === 0 && root.textContent!.includes('Silent spectrum:'), 'All-zero spectra explicitly report silence');

@@ -79,6 +79,14 @@ export async function runPartialGeneratorChecks(app: InstanceType<typeof App>) {
     generatePartialSpectrum(track.partialGenerator, track.waveform),
   )), 'Browser uses expanded sequence, mapping, and mask settings');
   check(signature !== app.getTrackVoiceSignature(track), 'Expanded generator settings update voice settings');
+  const sequenceSignature = app.getTrackVoiceSignature(track);
+  track.partialGenerator = normalizePartialGenerator({
+    type: 'binary', mode: 'bit-reversal', bitWidth: 4, mapping: 'logarithmic',
+  });
+  check(JSON.stringify(app.getTonewheelPartials(track)) === JSON.stringify(trim(
+    generatePartialSpectrum(track.partialGenerator, track.waveform),
+  )), 'Browser uses enriched binary modes and bit width');
+  check(sequenceSignature !== app.getTrackVoiceSignature(track), 'Enriched binary settings update voice settings');
   track.partialGenerator = normalizePartialGenerator({ type: 'binary', mode: 'parity' });
   check(first !== app.getTonewheelPartials(track), 'Generator changes invalidate cached spectrum');
   check(signature !== app.getTrackVoiceSignature(track), 'Generator changes update voice settings');

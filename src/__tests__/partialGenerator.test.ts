@@ -47,7 +47,7 @@ test('each sequence has the documented starting index', () => {
   }
 });
 
-test('binary modes count bits, return parity, or select an individual bit starting at zero', () => {
+test('binary modes derive deterministic amplitudes from indices starting at zero', () => {
   assert.deepEqual(generateProceduralAmplitudes(binary('popcount')), [0, 1, 1, 2, 1, 2, 2, 3]);
   assert.deepEqual(generateProceduralAmplitudes(binary('parity')), [0, 1, 1, 0, 1, 0, 0, 1]);
   assert.deepEqual(generateProceduralAmplitudes(binary('bit')), [0, 1, 0, 1, 0, 1, 0, 1]);
@@ -55,6 +55,15 @@ test('binary modes count bits, return parity, or select an individual bit starti
   assert.deepEqual(generateProceduralAmplitudes(binary('bit', { bit: 2 })), [0, 0, 0, 0, 1, 1, 1, 1]);
   assert.deepEqual(generateProceduralAmplitudes(binary('bit', { bit: 5, harmonicCount: 64 })),
     [...Array(32).fill(0), ...Array(32).fill(1)]);
+  assert.deepEqual(generateProceduralAmplitudes(binary('gray-code')), [0, 1, 3, 2, 6, 7, 5, 4]);
+  assert.deepEqual(generateProceduralAmplitudes(binary('gray-popcount')), [0, 1, 2, 1, 2, 3, 2, 1]);
+  assert.deepEqual(generateProceduralAmplitudes(binary('bit-length')), [0, 1, 2, 2, 3, 3, 3, 3]);
+  assert.deepEqual(generateProceduralAmplitudes(binary('ruler')), [0, 1, 0, 2, 0, 1, 0, 3]);
+  assert.deepEqual(generateProceduralAmplitudes(binary('longest-one-run')), [0, 1, 1, 2, 1, 1, 2, 3]);
+  assert.deepEqual(generateProceduralAmplitudes(binary('one-run-count')), [0, 1, 1, 1, 1, 2, 1, 1]);
+  assert.deepEqual(generateProceduralAmplitudes(binary('rudin-shapiro')), [0, 0, 0, 1, 0, 0, 1, 0]);
+  assert.deepEqual(generateProceduralAmplitudes(binary('bit-reversal')), [0, 32, 16, 48, 8, 40, 24, 56]);
+  assert.deepEqual(generateProceduralAmplitudes(binary('bit-reversal', { bitWidth: 3 })), [0, 4, 2, 6, 1, 5, 3, 7]);
 });
 
 test('mappings operate on values, preserve zeros, and do not mutate inputs', () => {
@@ -163,17 +172,17 @@ test('unknown configs default to tonewheel and recognized sparse configs get saf
     mapping: 'linear', exponent: 1, mappingModulus: 2, ...maskDefaults, tilt: 0,
   });
   assert.deepEqual(normalizePartialGenerator({ type: 'binary' }), {
-    type: 'binary', mode: 'popcount', bit: 0, harmonicCount: 16, normalize: true,
+    type: 'binary', mode: 'popcount', bit: 0, bitWidth: 6, harmonicCount: 16, normalize: true,
     mapping: 'linear', exponent: 1, mappingModulus: 2, ...maskDefaults, tilt: 0,
   });
   assert.deepEqual(normalizePartialGenerator({
-    type: 'binary', bit: Infinity, harmonicCount: NaN, normalize: 'false',
+    type: 'binary', bit: Infinity, bitWidth: NaN, harmonicCount: NaN, normalize: 'false',
     mapping: {}, exponent: null, mask: [], tilt: -Infinity,
   }), normalizePartialGenerator({ type: 'binary' }));
   assert.deepEqual(normalizePartialGenerator({
     type: 'binary', harmonicCount: -1, exponent: 0, tilt: 100, bit: 100,
   }), {
-    type: 'binary', mode: 'popcount', bit: 5, harmonicCount: 1, normalize: true,
+    type: 'binary', mode: 'popcount', bit: 5, bitWidth: 6, harmonicCount: 1, normalize: true,
     mapping: 'linear', exponent: 0.1, mappingModulus: 2, ...maskDefaults, tilt: 24,
   });
   const clamped = normalizePartialGenerator({ type: 'sequence', harmonicCount: 100, exponent: 100, tilt: -100 });
@@ -190,6 +199,10 @@ test('unknown configs default to tonewheel and recognized sparse configs get saf
   });
   const none = normalizePartialGenerator({ type: 'waveform', mask: 'none', invertMask: true });
   assert.equal(none.type === 'waveform' && none.invertMask, false);
+  const narrowReversal = normalizePartialGenerator({ type: 'binary', mode: 'bit-reversal', bitWidth: -10 });
+  const wideReversal = normalizePartialGenerator({ type: 'binary', mode: 'bit-reversal', bitWidth: 100 });
+  assert.equal(narrowReversal.type === 'binary' && narrowReversal.bitWidth, 1);
+  assert.equal(wideReversal.type === 'binary' && wideReversal.bitWidth, 6);
 });
 
 test('every generator and mapping stays deterministic, nonnegative and bounded at extremes', () => {
@@ -197,7 +210,10 @@ test('every generator and mapping stays deterministic, nonnegative and bounded a
     'natural', 'fibonacci', 'primes', 'powers-of-two', 'thue-morse', 'triangular', 'lucas',
     'divisor-count', 'stern-diatomic', 'euler-totient', 'recaman',
   ].map((name) => sequence(name));
-  modes.push(...['popcount', 'parity', 'bit'].map((mode) => binary(mode)));
+  modes.push(...[
+    'popcount', 'parity', 'bit', 'gray-code', 'gray-popcount', 'bit-length', 'ruler',
+    'longest-one-run', 'one-run-count', 'rudin-shapiro', 'bit-reversal',
+  ].map((mode) => binary(mode)));
   for (const mode of modes) {
     for (const mapping of [
       'linear', 'power', 'sqrt', 'inverse', 'logarithmic', 'inverse-sqrt', 'saturating', 'modulo',
@@ -309,7 +325,7 @@ test('procedural configs clone independently, round-trip version 2, and particip
     for (const [field, value] of Object.entries({
       harmonicCount: 9, normalize: true, mapping: 'modulo', exponent: 2, mappingModulus: 5,
       mask: 'periodic', maskPeriod: 4, maskOffset: 2, tilt: 6,
-      ...(config.type === 'sequence' ? { sequence: 'primes' } : { mode: 'parity', bit: 3 }),
+      ...(config.type === 'sequence' ? { sequence: 'primes' } : { mode: 'bit-reversal', bit: 3, bitWidth: 4 }),
     })) {
       const changed = clonePresetData(source);
       changed.tracks[0].partialGenerator = normalizePartialGenerator({ ...changed.tracks[0].partialGenerator, [field]: value });

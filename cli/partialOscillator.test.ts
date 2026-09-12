@@ -16,7 +16,10 @@ test('CLI oscillators sample the shared browser spectrum at the musical fundamen
     ].map(sequence => ({
       type: 'sequence', sequence,
     })),
-    ...['popcount', 'parity', 'bit'].map(mode => ({ type: 'binary', mode, bit: 2 })),
+    ...[
+      'popcount', 'parity', 'bit', 'gray-code', 'gray-popcount', 'bit-length', 'ruler',
+      'longest-one-run', 'one-run-count', 'rudin-shapiro', 'bit-reversal',
+    ].map(mode => ({ type: 'binary', mode, bit: 2, bitWidth: 4 })),
     {
       type: 'sequence', sequence: 'recaman', mapping: 'modulo', mappingModulus: 5,
       mask: 'periodic', maskPeriod: 4, maskOffset: 1, invertMask: true,
@@ -87,7 +90,7 @@ test('CLI preset conversion retains generator configuration and legacy tonewheel
       ...track,
       sequenceInput: '1 2',
       partialGenerator: {
-        type: 'sequence', sequence: 'stern-diatomic', mapping: 'modulo', mappingModulus: 5,
+        type: 'binary', mode: 'bit-reversal', bitWidth: 4, mapping: 'modulo', mappingModulus: 5,
         mask: 'periodic', maskPeriod: 4, maskOffset: 2, invertMask: true,
       },
     }, {}],
@@ -134,14 +137,21 @@ test('generic tonewheel endpoints match standalone tonewheel rendering', async (
 });
 
 test('procedural WAV output changes deterministically without changing MIDI', async () => {
-  const partialGenerator = normalizePartialGenerator({ type: 'sequence', sequence: 'primes', mapping: 'inverse' });
   const legacyOptions = { ...options, tracks: [track] };
-  const proceduralOptions = { ...options, tracks: [{ ...track, partialGenerator }] };
   const legacy = await generateWav(legacyOptions);
-  const rendered = await generateWav(proceduralOptions);
-  assert.notDeepEqual(rendered, legacy);
-  assert.deepEqual(await generateWav(proceduralOptions), rendered);
-  assert.deepEqual(await generateMidi(proceduralOptions), await generateMidi(legacyOptions));
+  for (const partialGenerator of [
+    normalizePartialGenerator({ type: 'sequence', sequence: 'primes', mapping: 'inverse' }),
+    normalizePartialGenerator({
+      type: 'binary', mode: 'bit-reversal', bitWidth: 4, mapping: 'logarithmic',
+      mask: 'periodic', maskPeriod: 3, maskOffset: 1, invertMask: true,
+    }),
+  ]) {
+    const proceduralOptions = { ...options, tracks: [{ ...track, partialGenerator }] };
+    const rendered = await generateWav(proceduralOptions);
+    assert.notDeepEqual(rendered, legacy);
+    assert.deepEqual(await generateWav(proceduralOptions), rendered);
+    assert.deepEqual(await generateMidi(proceduralOptions), await generateMidi(legacyOptions));
+  }
 });
 
 test('waveform transforms survive CLI preset conversion and change WAV but not MIDI', async () => {
