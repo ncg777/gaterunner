@@ -1,5 +1,6 @@
 import { markRaw } from 'vue';
 import * as Tone from 'tone';
+import { getMasterBus } from './masterBus.js';
 
 export interface ReverbAudioChain {
   lowCut: Tone.Filter;
@@ -52,6 +53,32 @@ function fillPinkNoise(channel: Float32Array, startFrame: number, decayFrames: n
   }
 }
 
+/**
+ * Web Audio's own convolver normalization scales by 44100/sampleRate, which makes the
+ * wet level drift between a 44.1 kHz playback context and a 48 kHz render. This repeats
+ * the spec's RMS formula without that term so both contexts land on the same level.
+ */
+function normalizeImpulse(impulse: AudioBuffer) {
+  const calibration = 0.00125;
+  const minimumPower = 0.000125;
+  let power = 0;
+  for (let channel = 0; channel < impulse.numberOfChannels; channel += 1) {
+    const samples = impulse.getChannelData(channel);
+    for (let frame = 0; frame < samples.length; frame += 1) {
+      power += samples[frame] * samples[frame];
+    }
+  }
+
+  const rms = Math.sqrt(power / Math.max(1, impulse.numberOfChannels * impulse.length));
+  const scale = calibration / Math.max(minimumPower, Number.isFinite(rms) ? rms : 0);
+  for (let channel = 0; channel < impulse.numberOfChannels; channel += 1) {
+    const samples = impulse.getChannelData(channel);
+    for (let frame = 0; frame < samples.length; frame += 1) {
+      samples[frame] *= scale;
+    }
+  }
+}
+
 export function createPinkNoiseImpulse(decay: number, preDelay: number): AudioBuffer {
   const context = Tone.getContext();
   const sampleRate = context.sampleRate;
@@ -63,6 +90,7 @@ export function createPinkNoiseImpulse(decay: number, preDelay: number): AudioBu
 
   fillPinkNoise(impulse.getChannelData(0), preDelayFrames, decayFrames, 0x7f4a7c15);
   fillPinkNoise(impulse.getChannelData(1), preDelayFrames, decayFrames, 0x3c6ef372);
+  normalizeImpulse(impulse);
   return impulse;
 }
 
@@ -74,9 +102,10 @@ export function createReverbAudioChain(settings: ReverbSettings): ReverbAudioCha
   const lowCut = markRaw(new Tone.Filter({ type: 'highpass', frequency: settings.lowCutFrequency, rolloff: -12 })) as Tone.Filter;
   const highCut = markRaw(new Tone.Filter({ type: 'lowpass', frequency: settings.highCutFrequency, rolloff: -12 })) as Tone.Filter;
   const convolver = markRaw(new Tone.Convolver({
-    normalize: true,
+    normalize: false,
     url: createPinkNoiseImpulse(settings.decay, settings.preDelay),
-  }).toDestination()) as Tone.Convolver;
+  })) as Tone.Convolver;
+  convolver.connect(getMasterBus(convolver.context).input);
 
   lowCut.chain(highCut, convolver);
   return {
@@ -98,10 +127,10 @@ export function setReverbOutputEnabled(chain: ReverbAudioChain, enabled: boolean
   }
 
   if (enabled) {
-    chain.convolver.toDestination();
+    chain.convolver.connect(getMasterBus(chain.convolver.context).input);
   } else {
-    // Only the destination edge is severed; the convolver keeps any other wiring intact.
-    chain.convolver.disconnect(chain.convolver.context.destination);
+    // Only the master bus edge is severed; the convolver keeps any other wiring intact.
+    chain.convolver.disconnect(getMasterBus(chain.convolver.context).input);
   }
   chain.outputConnected = enabled;
 }

@@ -159,6 +159,16 @@
                 @update:modelValue="handleDraftChange"
               />
             </div>
+            <div class="a4-control">
+              <EditableSlider
+                :label="'Master (' + Number(masterGain).toFixed(1) + ' dB)'"
+                :min="-96"
+                :step="0.1"
+                :max="12"
+                v-model="masterGain"
+                @update:modelValue="handleDraftChange"
+              />
+            </div>
           </div>
         </div>
 
@@ -329,6 +339,7 @@ import {
 } from './audio/reverb';
 import { encodeWavFromChannels } from './audio/wav';
 import { renderOfflineAudio } from './audio/offlineRender';
+import { getMasterBus, disposeMasterBus, setMasterGainDb } from './audio/masterBus';
 import { buildTrackFadeEnvelope } from './audio/trackFade';
 import { getStepDurations } from './audio/stepDurations';
 import { Phaser } from './audio/phaser';
@@ -533,6 +544,7 @@ export default defineComponent({
     return {
       bpm: initialState.draft.bpm,
       a4: initialState.draft.a4,
+      masterGain: initialState.draft.masterGain,
       forte: initialState.draft.forte,
       bitmaskSequenceInput: initialState.draft.bitmaskSequenceInput,
       tracks: initialState.draft.tracks.map((track) => clonePresetTrackData(track)) as PresetTrackData[],
@@ -1298,6 +1310,7 @@ export default defineComponent({
       const liveReverbChain = this.reverbChain;
       const liveTrackSynths = this.trackSynths;
       let offlineReverbChain: ReverbAudioChain | null = null;
+      let offlineContextRef: Tone.OfflineContext | null = null;
       const offlineTrackChains: TrackAudioChain[] = [];
       let rendered: unknown;
       try {
@@ -1314,7 +1327,9 @@ export default defineComponent({
 
             this.reverbChain = null;
             this.trackSynths = markRaw({});
-            this.getOrCreateReverbChain();
+            offlineContextRef = offlineContext;
+            setMasterGainDb(getMasterBus(offlineContext), this.masterGain);
+            this.updateReverbChain();
             offlineReverbChain = this.reverbChain;
 
             offlineContext.transport.stop();
@@ -1407,6 +1422,12 @@ export default defineComponent({
           } catch {
           }
         }
+        if (offlineContextRef) {
+          try {
+            disposeMasterBus(offlineContextRef);
+          } catch {
+          }
+        }
       }
 
       this.setWavExportProgress(ENCODE_PROGRESS_START, 'Encoding WAV...');
@@ -1437,6 +1458,7 @@ export default defineComponent({
       return normalizePresetData({
         bpm: this.bpm,
         a4: this.a4,
+        masterGain: this.masterGain,
         forte: this.forte,
         bitmaskSequenceInput: this.bitmaskSequenceInput,
         tracks: this.tracks.map((track) => clonePresetTrackData(track)),
@@ -1456,6 +1478,7 @@ export default defineComponent({
       const previousTrackMixStates = this.trackMixStates;
       this.bpm = normalized.bpm;
       this.a4 = normalized.a4;
+      this.masterGain = normalized.masterGain;
       this.forte = normalized.forte;
       this.bitmaskSequenceInput = normalized.bitmaskSequenceInput;
       this.reverbEnabled = normalized.reverb.enabled;
@@ -1485,6 +1508,7 @@ export default defineComponent({
       const rebuildLoops = options.rebuildLoops ?? true;
       const createMissingChains = options.createMissingChains ?? this.isRunning;
       Tone.getTransport().bpm.value = this.bpm;
+      setMasterGainDb(getMasterBus(), this.masterGain);
       const signatureTrack = this.currentTrack ?? this.tracks[0];
       if (signatureTrack) {
         Tone.getTransport().timeSignature = [signatureTrack.numerator, signatureTrack.denominator];
@@ -1610,7 +1634,8 @@ export default defineComponent({
       const fadeGain = markRaw(new Tone.Gain(1));
       const mixGain = markRaw(new Tone.Gain(1));
       const echoReturnGain = markRaw(new Tone.Gain(1));
-      const dryGain = markRaw(new Tone.Gain(1).toDestination());
+      const dryGain = markRaw(new Tone.Gain(1));
+      dryGain.connect(getMasterBus(dryGain.context).input);
       const reverbSend = markRaw(new Tone.Gain(0));
       const drumReverbFadeGain = markRaw(new Tone.Gain(1));
       const drumReverbTrackGain = markRaw(new Tone.Gain(1));

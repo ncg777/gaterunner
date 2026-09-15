@@ -8,6 +8,7 @@ import {
 } from '../src/audio/pitchEnvelope.js';
 import { getTrackFadeGain } from '../src/audio/trackFade.js';
 import { createWaveshaperProcessor, lookupTransferCurve, TANH_CURVE } from '../src/audio/trackDistortion.js';
+import { applyMasterClip } from '../src/audio/masterClip.js';
 import { normalizeWaveshaperSettings, type WaveshaperSettings } from '../src/audio/waveshaper.js';
 import { getStepDurations } from '../src/audio/stepDurations.js';
 import {
@@ -223,6 +224,8 @@ export interface GenerateReverbOptions {
   enabled?: boolean;
   decay?: number;
   preDelay?: number;
+  /** Dry (unprocessed) level in dB (-96 to 12). */
+  dry?: number;
   /** Reverb level in dB (-96 to 0). */
   wet?: number;
   /** Reverb high-pass cutoff as a MIDI note pitch (0-127). */
@@ -236,6 +239,8 @@ export interface GenerateOptions {
   bpm?: number;
   /** Concert pitch frequency of A4 in Hz (380-500). Default: 440 */
   a4?: number;
+  /** Output trim in dB (-96 to 12) applied to the whole mix before the master soft clipper. Default: 0 */
+  masterGain?: number;
   /** Legacy single-track numerator (1-16). Used when tracks is omitted. */
   numerator?: number;
   /** Legacy single-track denominator (1-16). Used when tracks is omitted. */
@@ -309,6 +314,8 @@ export interface WavChannelRenderResult {
   reverbLeft: Float32Array | Float64Array | null;
   reverbRight: Float32Array | Float64Array | null;
   sampleRate: number;
+  a4: number;
+  masterGain: number;
   reverb: NormalizedReverb;
 }
 
@@ -333,6 +340,7 @@ interface TrackScheduledEvent {
 interface PreparedRenderData {
   bpm: number;
   a4: number;
+  masterGain: number;
   activationMasks: bigint[];
   tracks: TrackRenderData[];
   reverb: NormalizedReverb;
@@ -701,6 +709,7 @@ function normalizeReverb(options: GenerateOptions): NormalizedReverb {
     enabled: Boolean(reverb.enabled ?? true),
     decay: clamp(reverb.decay ?? 3, 0.1, 30),
     preDelay: clamp(reverb.preDelay ?? 0.02, 0, 1),
+    dry: clamp(reverb.dry ?? 0, -96, 12),
     wet: clamp(reverb.wet ?? -7, -96, 0),
     lowCut: clamp(reverb.lowCut ?? 39, 0, 127),
     highCut: clamp(reverb.highCut ?? 119, 0, 127),
@@ -773,6 +782,7 @@ async function prepareRenderData(options: GenerateOptions): Promise<PreparedRend
   return {
     bpm,
     a4,
+    masterGain: clamp(options.masterGain ?? 0, -96, 12),
     activationMasks: parseBitmaskSequenceInput(options.bitmaskSequenceInput).masks,
     tracks: trackData,
     reverb: normalizeReverb(options),
@@ -1112,9 +1122,49 @@ function applyDrumEchoReturn(left: Float32Array, right: Float32Array, track: Nor
   }
 }
 
-function applyReverbSend(left: Float32Array, right: Float32Array, sendLeft: Float32Array, sendRight: Float32Array, reverb: NormalizedReverb, sampleRate: number): void {
+/** Second-order RBJ shelf-less cut, matching the -12 dB/oct Tone.Filter on the reverb send. */
+function createReverbCutFilter(type: 'highpass' | 'lowpass', frequency: number, sampleRate: number): (sample: number) => number {
+  const cutoff = clamp(frequency, 10, sampleRate * 0.49);
+  const omega = (2 * Math.PI * cutoff) / sampleRate;
+  const cosine = Math.cos(omega);
+  const alpha = Math.sin(omega) / (2 * Math.SQRT1_2);
+  const a0 = 1 + alpha;
+  const b0 = (type === 'highpass' ? (1 + cosine) / 2 : (1 - cosine) / 2) / a0;
+  const b1 = (type === 'highpass' ? -(1 + cosine) : 1 - cosine) / a0;
+  const b2 = b0;
+  const a1 = (-2 * cosine) / a0;
+  const a2 = (1 - alpha) / a0;
+  let previousInput1 = 0;
+  let previousInput2 = 0;
+  let previousOutput1 = 0;
+  let previousOutput2 = 0;
+  return (sample: number) => {
+    const output = b0 * sample + b1 * previousInput1 + b2 * previousInput2 - a1 * previousOutput1 - a2 * previousOutput2;
+    previousInput2 = previousInput1;
+    previousInput1 = sample;
+    previousOutput2 = previousOutput1;
+    previousOutput1 = output;
+    return output;
+  };
+}
+
+function applyReverbSend(left: Float32Array, right: Float32Array, sendLeft: Float32Array, sendRight: Float32Array, reverb: NormalizedReverb, sampleRate: number, a4: number): void {
   if (!reverb.enabled || reverb.wet <= -96) {
     return;
+  }
+
+  // The app filters the send before the convolver, so the tap bank sees the same band.
+  const lowCut = [
+    createReverbCutFilter('highpass', midiToFrequency(reverb.lowCut, a4), sampleRate),
+    createReverbCutFilter('highpass', midiToFrequency(reverb.lowCut, a4), sampleRate),
+  ];
+  const highCut = [
+    createReverbCutFilter('lowpass', midiToFrequency(reverb.highCut, a4), sampleRate),
+    createReverbCutFilter('lowpass', midiToFrequency(reverb.highCut, a4), sampleRate),
+  ];
+  for (let frame = 0; frame < sendLeft.length; frame += 1) {
+    sendLeft[frame] = highCut[0](lowCut[0](sendLeft[frame]));
+    sendRight[frame] = highCut[1](lowCut[1](sendRight[frame]));
   }
 
   const preDelayFrames = Math.round(reverb.preDelay * sampleRate);
@@ -1127,7 +1177,10 @@ function applyReverbSend(left: Float32Array, right: Float32Array, sendLeft: Floa
       pan: index % 2 === 0 ? 0.65 : 0.35,
     };
   });
-  const wetGain = dbToGain(reverb.wet);
+  // The app's convolver uses an energy-normalized impulse, so the tap bank is normalized
+  // the same way; otherwise eight near-unity taps land far hotter than realtime playback.
+  const tapEnergy = Math.sqrt(taps.reduce((total, tap) => total + tap.gain * tap.gain, 0)) || 1;
+  const wetGain = dbToGain(reverb.wet) / tapEnergy;
   for (let frame = 0; frame < left.length; frame += 1) {
     let wetLeft = 0;
     let wetRight = 0;
@@ -1557,7 +1610,7 @@ export async function renderWavChannels(
     }
   });
 
-  return { left, right, reverbLeft, reverbRight, sampleRate, reverb: prepared.reverb };
+  return { left, right, reverbLeft, reverbRight, sampleRate, a4: prepared.a4, masterGain: prepared.masterGain, reverb: prepared.reverb };
 }
 
 async function combineWavChannelRenders(
@@ -1594,8 +1647,22 @@ async function combineWavChannelRenders(
   }
   const left = mix.left as Float32Array;
   const right = mix.right as Float32Array;
+  // Dry trim first, so the wet return keeps the balance the app's reverb controls describe.
+  const dryGain = dbToGain(mix.reverb.dry);
+  if (dryGain !== 1) {
+    for (let frame = 0; frame < left.length; frame += 1) {
+      left[frame] *= dryGain;
+      right[frame] *= dryGain;
+    }
+  }
   if (mix.reverbLeft && mix.reverbRight) {
-    applyReverbSend(left, right, mix.reverbLeft as Float32Array, mix.reverbRight as Float32Array, mix.reverb, mix.sampleRate);
+    applyReverbSend(left, right, mix.reverbLeft as Float32Array, mix.reverbRight as Float32Array, mix.reverb, mix.sampleRate, mix.a4);
+  }
+  // Same master stage as the browser: output trim, then the shared soft-clip curve.
+  const masterGain = dbToGain(mix.masterGain);
+  for (let frame = 0; frame < left.length; frame += 1) {
+    left[frame] = applyMasterClip(left[frame] * masterGain);
+    right[frame] = applyMasterClip(right[frame] * masterGain);
   }
   return { channels: [left, right], sampleRate: mix.sampleRate };
 }
@@ -1624,7 +1691,7 @@ export async function generateWav(
   renderOptions.onTiming?.({ stage: 'render', milliseconds: performance.now() - renderStarted });
 
   const encodeStarted = performance.now();
-  const bytes = encodeWavFromChannelsSync(rendered.channels, rendered.sampleRate, { dither: false });
+  const bytes = encodeWavFromChannelsSync(rendered.channels, rendered.sampleRate);
   renderOptions.onTiming?.({ stage: 'encode', milliseconds: performance.now() - encodeStarted });
   return bytes;
 }

@@ -13,6 +13,7 @@ export function presetDataToGeneratorInput(data: PresetData) {
   return {
     bpm: data.bpm,
     a4: data.a4,
+    masterGain: data.masterGain,
     forte: data.forte,
     bitmaskSequenceInput: data.bitmaskSequenceInput,
     tracks: data.tracks.map((track) => ({
@@ -97,6 +98,7 @@ export function presetDataToGeneratorInput(data: PresetData) {
       enabled: data.reverb.enabled,
       decay: data.reverb.decay,
       preDelay: data.reverb.preDelay,
+      dry: data.reverb.dry,
       wet: data.reverb.wet,
       lowCut: data.reverb.lowCut,
       highCut: data.reverb.highCut,
@@ -104,6 +106,7 @@ export function presetDataToGeneratorInput(data: PresetData) {
   } satisfies {
     bpm: number;
     a4: number;
+    masterGain: number;
     forte: string;
     bitmaskSequenceInput: string;
     tracks: GenerateTrackOptions[];
@@ -114,6 +117,7 @@ export function presetDataToGeneratorInput(data: PresetData) {
 function parsePresetFile(value: string): {
   bpm: number;
   a4: number;
+  masterGain: number;
   forte: string;
   bitmaskSequenceInput: string;
   tracks: GenerateTrackOptions[];
@@ -199,6 +203,7 @@ program
   .option('-f, --format <type>', 'Output format: midi or wav', 'midi')
   .option('--bpm <number>', 'Shared tempo in beats per minute (1-499)', '90')
   .option('--a4 <number>', 'Concert pitch A4 frequency in Hz (380-500)', '440')
+  .option('--master-gain <number>', 'Master output trim in dB applied before the master soft clipper (-96 to +12)', '0')
   .option('--numerator <number>', 'Legacy single-track numerator (1-16)', '4')
   .option('--denominator <number>', 'Legacy single-track denominator (1-16)', '5')
   .option('--forte <string>', 'Forte number (pitch-class set identifier)', '5-35.05')
@@ -227,7 +232,7 @@ program
   .option('--b <string>', 'Optional song-level track activation masks (space-separated nonnegative decimals; blank disables)')
   .option('-p, --preset <file>', 'JSON preset file to load instead of individual generation parameters')
   .option('--tracks <json>', 'JSON array of tracks with per-track sequence, instrument, filter, echoDelay notation (1/1..1/16T), and reverb send controls', parseTracksJson)
-  .option('--reverb <json>', 'JSON object with global reverb enabled, decay, preDelay, wet, lowCut, highCut', parseReverbJson)
+  .option('--reverb <json>', 'JSON object with global reverb enabled, decay, preDelay, dry, wet, lowCut, highCut', parseReverbJson)
   .option('--threads <number>', 'WAV render threads (default: available CPU cores)')
   .option('--verbose', 'Print WAV render and encoding timings')
   .action(async (options) => {
@@ -237,6 +242,7 @@ program
         : {
             bpm: parseInt(options.bpm),
             a4: parseFloat(options.a4),
+            masterGain: parseFloat(options.masterGain),
             numerator: parseInt(options.numerator),
             denominator: parseInt(options.denominator),
             forte: options.forte,

@@ -617,3 +617,63 @@ test('unknown generator values fall back to tonewheel rendering', async () => {
   assert.equal(Buffer.from(wav.subarray(0, 4)).toString('ascii'), 'RIFF');
   assert.ok(wav.byteLength > 44);
 });
+
+function readWavSamples(wav: Uint8Array): { bitsPerSample: number; samples: number[] } {
+  const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
+  const bitsPerSample = view.getUint16(34, true);
+  const bytesPerSample = bitsPerSample / 8;
+  const samples: number[] = [];
+  for (let offset = 44; offset + bytesPerSample <= wav.byteLength; offset += bytesPerSample) {
+    // 24-bit PCM is little-endian two's complement across three bytes.
+    const raw = wav[offset] | (wav[offset + 1] << 8) | (wav[offset + 2] << 16);
+    samples.push(((raw << 8) >> 8) / 0x800000);
+  }
+  return { bitsPerSample, samples };
+}
+
+const loudMixOptions: GenerateOptions = {
+  bpm: 120,
+  forte: '5-35.05',
+  tracks: Array.from({ length: 6 }, (_, index) => ({
+    name: `Loud ${index}`,
+    denominator: 4,
+    sequence: '1 3 5 7',
+    repeats: 1,
+    octave: 4 + (index % 3),
+    waveform: 'sawtooth',
+    limiterGain: 24,
+  })),
+  reverb: { enabled: false },
+};
+
+test('CLI WAV export is 24-bit and dithers digital silence', async () => {
+  const wav = await generateWav({
+    tracks: [{ sequence: '0', repeats: 1 }],
+    reverb: { enabled: false },
+  });
+  const { bitsPerSample, samples } = readWavSamples(wav);
+
+  assert.equal(bitsPerSample, 24);
+  assert.ok(samples.length > 0);
+  // Dither is the only thing that can move a silent render off exact zero.
+  assert.ok(samples.some((sample) => sample !== 0), 'silent render has no dither noise');
+  assert.ok(samples.every((sample) => Math.abs(sample) <= 2 / 0x800000), 'dither noise exceeds 1 LSB');
+});
+
+test('the master stage keeps a hot multi-track mix inside full scale', async () => {
+  const { samples } = readWavSamples(await generateWav(loudMixOptions));
+
+  assert.ok(samples.length > 0);
+  assert.ok(samples.every((sample) => Math.abs(sample) <= 1), 'master stage let the mix exceed full scale');
+});
+
+test('master gain trims the exported level', async () => {
+  const trimmed = readWavSamples(await generateWav({ ...loudMixOptions, masterGain: -24 })).samples;
+  const untrimmed = readWavSamples(await generateWav(loudMixOptions)).samples;
+  const peak = (samples: number[]) => samples.reduce((highest, sample) => Math.max(highest, Math.abs(sample)), 0);
+
+  assert.ok(peak(trimmed) < peak(untrimmed), 'master gain did not attenuate the export');
+  // Trimmed well below the knee, nothing may sit pinned against full scale.
+  assert.ok(trimmed.every((sample) => Math.abs(sample) < 1 - 1 / 0x800000), 'trimmed mix is still clipping');
+});
+

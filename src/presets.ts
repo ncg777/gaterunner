@@ -290,6 +290,8 @@ export interface PresetData {
   bpm: number;
   /** Concert pitch frequency of A4 in Hz (default 440). */
   a4: number;
+  /** Output trim in dB applied to the whole mix before the master soft clipper. */
+  masterGain: number;
   forte: string;
   /**
    * Optional song-level track activation sequence B: whitespace-separated
@@ -504,6 +506,7 @@ export const DEFAULT_PRESET_TRACK_DATA: PresetTrackData = {
 export const DEFAULT_PRESET_DATA: PresetData = {
   bpm: 90,
   a4: 440,
+  masterGain: 0,
   forte: '5-35.05',
   bitmaskSequenceInput: '',
   tracks: [DEFAULT_PRESET_TRACK_DATA],
@@ -1124,6 +1127,7 @@ export function clonePresetData(data: PresetData): PresetData {
   return {
     bpm: data.bpm,
     a4: data.a4,
+    masterGain: data.masterGain,
     forte: data.forte,
     bitmaskSequenceInput: data.bitmaskSequenceInput,
     tracks: data.tracks.map((track) => clonePresetTrackData(track)),
@@ -1179,6 +1183,7 @@ export function normalizePresetData(value: unknown): PresetData {
   return {
     bpm: clamp(parseInteger(raw.bpm?.toString(), DEFAULT_PRESET_DATA.bpm), 1, 499),
     a4: clamp(parseNumber(raw.a4, DEFAULT_PRESET_DATA.a4), 380, 500),
+    masterGain: clamp(parseNumber(raw.masterGain, DEFAULT_PRESET_DATA.masterGain), -96, 12),
     forte: typeof raw.forte === 'string' && raw.forte.trim().length > 0 ? raw.forte : DEFAULT_PRESET_DATA.forte,
     bitmaskSequenceInput: normalizeBitmaskSequenceInput(
       raw.bitmaskSequenceInput ?? (raw as { b?: unknown }).b,
@@ -1191,6 +1196,7 @@ export function normalizePresetData(value: unknown): PresetData {
 export function arePresetDataEqual(left: PresetData, right: PresetData): boolean {
   if (left.bpm !== right.bpm
     || left.a4 !== right.a4
+    || left.masterGain !== right.masterGain
     || left.forte !== right.forte
     || left.bitmaskSequenceInput !== right.bitmaskSequenceInput
     || left.tracks.length !== right.tracks.length
@@ -1736,6 +1742,7 @@ export function buildDraftFromUrl(search: string, baseData: PresetData): PresetD
   return normalizePresetData({
     bpm: params.get('bpm') ?? baseData.bpm,
     a4: params.get('a4') ?? baseData.a4,
+    masterGain: baseData.masterGain,
     forte: params.get('forte') ?? baseData.forte,
     bitmaskSequenceInput: params.get('b') ?? baseData.bitmaskSequenceInput,
     tracks: [
