@@ -350,7 +350,14 @@ import { CHOIR_FORMANT_BANDS, getChoirFormantBandGainLinear, type FormantBand } 
 import { PitchEnvelopeSynth } from './audio/pitchEnvelopeSynth';
 import { MonoGlideSynth } from './audio/monoGlideSynth';
 import { isMonophonic, limitPolyphony, type GlideCurve, type GlideMode } from './audio/glide';
-import { claimVoices, getSynthVoiceCount, prewarmVoicePool, retainVoicePool, type SoundingNote } from './audio/voicePool';
+import {
+  claimVoices,
+  getSynthVoiceCount,
+  prewarmVoicePool,
+  recycleReleasedVoices,
+  retainVoicePool,
+  type SoundingNote,
+} from './audio/voicePool';
 import { createDrumInstrument, type DrumInstrument } from './audio/drumKit';
 import { interpolateModulatedTonewheelDrawbars } from './audio/tonewheelWavetable';
 import { generatePartialSpectrum, getEffectiveWaveform, normalizePartialGenerator } from './audio/partialGenerator';
@@ -1351,17 +1358,24 @@ export default defineComponent({
               );
 
               for (const event of events) {
-                this.scheduleFilterEnvelope(entry.track, event.notes, event.time, event.duration, chain);
-                if (entry.track.trackKind === 'rhythmic') {
-                  const noteVelocities = event.noteVelocities ?? event.notes.map(() => event.velocity);
-                  for (let noteIndex = 0; noteIndex < event.notes.length; noteIndex += 1) {
-                    const voiceId = event.drumVoiceIds?.[noteIndex];
-                    const instrument = voiceId ? chain.drumInstruments[voiceId] : undefined;
-                    this.chokeDrumXorGroup(chain, voiceId, event.time);
-                    instrument?.trigger(event.time, noteVelocities[noteIndex] ?? event.velocity, event.duration);
+                offlineContext.transport.schedule((time) => {
+                  this.scheduleFilterEnvelope(entry.track, event.notes, time, event.duration, chain);
+                  if (entry.track.trackKind === 'rhythmic') {
+                    const noteVelocities = event.noteVelocities ?? event.notes.map(() => event.velocity);
+                    for (let noteIndex = 0; noteIndex < event.notes.length; noteIndex += 1) {
+                      const voiceId = event.drumVoiceIds?.[noteIndex];
+                      const instrument = voiceId ? chain.drumInstruments[voiceId] : undefined;
+                      this.chokeDrumXorGroup(chain, voiceId, time);
+                      instrument?.trigger(time, noteVelocities[noteIndex] ?? event.velocity, event.duration);
+                    }
+                  } else {
+                    this.triggerTrackVoice(entry.track, chain, event.notes, event.duration, time, event.velocity, event.time);
                   }
-                } else {
-                  this.triggerTrackVoice(entry.track, chain, event.notes, event.duration, event.time, event.velocity, event.time);
+                }, event.time);
+                if (entry.track.trackKind === 'melodic' && chain.synth && !(chain.synth instanceof MonoGlideSynth)) {
+                  offlineContext.transport.schedule(() => {
+                    recycleReleasedVoices(chain.synth as TonewheelPolySynth);
+                  }, event.time + event.duration + Math.max(entry.track.release, ENVELOPE_SMOOTHING_SECONDS));
                 }
               }
             }

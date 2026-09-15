@@ -76,11 +76,34 @@ interface PolySynthInternals {
   };
   _voices: Array<{ dispose(): void }>;
   _availableVoices: Array<{ dispose(): void }>;
+  _activeVoices: Array<{ voice: { dispose(): void }; released: boolean }>;
   _averageActiveVoices: number;
   activeVoices: number;
   _gcTimeout: number;
   _collectGarbage(): void;
   _getNextAvailableVoice(): { dispose(): void } | undefined;
+}
+
+/**
+ * OfflineAudioContext does not dispatch Tone's native oscillator-ended callbacks while
+ * rendering, so released PolySynth voices never return to the available pool. Recycle
+ * them at a scheduled envelope end instead; realtime contexts retain Tone's lifecycle.
+ */
+export function recycleReleasedVoices(synth: Tone.PolySynth): number {
+  const internals = synth as unknown as PolySynthInternals;
+  let recycled = 0;
+  for (let index = internals._activeVoices.length - 1; index >= 0; index -= 1) {
+    const active = internals._activeVoices[index];
+    if (!active.released) {
+      continue;
+    }
+    internals._activeVoices.splice(index, 1);
+    if (!internals._availableVoices.includes(active.voice)) {
+      internals._availableVoices.push(active.voice);
+      recycled += 1;
+    }
+  }
+  return recycled;
 }
 
 /** Allocate the requested voices before playback so offline renders capture every native voice graph. */
