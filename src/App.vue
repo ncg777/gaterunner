@@ -365,7 +365,6 @@ import {
   claimVoices,
   getSynthVoiceCount,
   prewarmVoicePool,
-  recycleReleasedVoices,
   retainVoicePool,
   type SoundingNote,
 } from './audio/voicePool';
@@ -1393,11 +1392,6 @@ export default defineComponent({
                     this.triggerTrackVoice(entry.track, chain, event.notes, event.duration, time, event.velocity, event.time);
                   }
                 }, event.time);
-                if (entry.track.trackKind === 'melodic' && chain.synth && !(chain.synth instanceof MonoGlideSynth)) {
-                  offlineContext.transport.schedule(() => {
-                    recycleReleasedVoices(chain.synth as TonewheelPolySynth);
-                  }, event.time + event.duration + Math.max(entry.track.release, ENVELOPE_SMOOTHING_SECONDS));
-                }
               }
             }
 

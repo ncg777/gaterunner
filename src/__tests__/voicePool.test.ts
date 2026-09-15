@@ -5,7 +5,6 @@ import {
   claimVoices,
   getSynthVoiceCount,
   prewarmVoicePool,
-  recycleReleasedVoices,
   retainVoicePool,
   type SoundingNote,
 } from '../audio/voicePool.js';
@@ -63,24 +62,6 @@ test('prewarms the requested pool without consuming already available voices', (
   assert.equal(synth._voices.length, 20);
   assert.equal(synth._availableVoices.length, 20);
   assert.equal(new Set(synth._availableVoices).size, 20);
-});
-
-test('recycles released offline voices without duplicating available voices', () => {
-  const availableVoice = { dispose() {} };
-  const releasedVoice = { dispose() {} };
-  const activeVoice = { dispose() {} };
-  const synth = {
-    _activeVoices: [
-      { voice: releasedVoice, released: true },
-      { voice: activeVoice, released: false },
-      { voice: availableVoice, released: true },
-    ],
-    _availableVoices: [availableVoice],
-  };
-
-  assert.equal(recycleReleasedVoices(synth as never), 1);
-  assert.deepEqual(synth._activeVoices, [{ voice: activeVoice, released: false }]);
-  assert.deepEqual(synth._availableVoices, [availableVoice, releasedVoice]);
 });
 
 test('claims voices without stealing while the track stays inside its polyphony', () => {

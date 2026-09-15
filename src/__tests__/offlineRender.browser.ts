@@ -16,8 +16,54 @@ import { generatePartialSpectrum, normalizePartialGenerator } from '../audio/par
 import { interpolateModulatedTonewheelDrawbars } from '../audio/tonewheelWavetable';
 import { blendPartialWavetableSpectra } from '../audio/partialWavetable';
 import { PitchEnvelopeSynth } from '../audio/pitchEnvelopeSynth';
-import { prewarmVoicePool } from '../audio/voicePool';
+import { prewarmVoicePool, retainVoicePool } from '../audio/voicePool';
 import type App from '../App.vue';
+
+export async function runOfflineVoiceLifecycleChecks() {
+  const eventInterval = 0.08;
+  const noteDuration = 0.025;
+  const release = 0.18;
+  const eventCount = 48;
+  const finalNoteEnd = (eventCount - 1) * eventInterval + noteDuration;
+  let synth: Tone.PolySynth<PitchEnvelopeSynth> | undefined;
+  try {
+    const buffer = await renderOfflineAudio((context) => {
+      synth = new Tone.PolySynth(PitchEnvelopeSynth).toDestination();
+      synth.maxPolyphony = 16;
+      retainVoicePool(synth as unknown as Tone.PolySynth, 16);
+      prewarmVoicePool(synth as unknown as Tone.PolySynth, 16);
+      synth.set({
+        oscillator: { type: 'sine' },
+        envelope: { attack: 0.001, decay: 0.001, sustain: 1, release },
+      });
+      for (let index = 0; index < eventCount; index += 1) {
+        const start = index * eventInterval;
+        context.transport.schedule((time) => {
+          synth!.triggerAttackRelease(220 + (index % 4) * 55, noteDuration, time, 0.5);
+        }, start);
+      }
+      context.transport.start(0);
+    }, finalNoteEnd + release + 0.5, 1, 48000);
+
+    const samples = buffer.getChannelData(0);
+    const peakBetween = (start: number, end: number) => {
+      let peak = 0;
+      for (let frame = Math.floor(start * buffer.sampleRate); frame < Math.min(samples.length, Math.ceil(end * buffer.sampleRate)); frame += 1) {
+        peak = Math.max(peak, Math.abs(samples[frame]));
+      }
+      return peak;
+    };
+    const activePeak = peakBetween((eventCount - 8) * eventInterval, finalNoteEnd);
+    const tailPeak = peakBetween(finalNoteEnd + release + 0.1, buffer.duration);
+    const internals = synth as unknown as { _activeVoices: unknown[]; _availableVoices: unknown[] };
+    if (activePeak < 0.01 || tailPeak > 1e-4 || internals._activeVoices.length !== 0 || internals._availableVoices.length !== 16) {
+      throw new Error(`Offline voice lifecycle mismatch: active=${activePeak}, tail=${tailPeak}, voices=${internals._activeVoices.length}/${internals._availableVoices.length}`);
+    }
+    return { activePeak, tailPeak, availableVoices: internals._availableVoices.length };
+  } finally {
+    synth?.dispose();
+  }
+}
 
 export async function runVoiceFilterChecks() {
   const labels: string[] = [];
