@@ -164,7 +164,7 @@ export function createWaveshaperAudioChain(settings: WaveshaperSettings): Wavesh
   input.connect(drive);
   Tone.connect(dry, output);
   shapers.forEach((shaper, index) => {
-    shaper.oversample = 'none';
+    shaper.oversample = '4x';
     drive.connect(shaper);
     shaper.connect(fades[index]);
     fades[index].connect(shaped);

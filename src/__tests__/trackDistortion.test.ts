@@ -223,8 +223,8 @@ test('native adapter lifecycle with a deterministic audio clock', {
       const chain = createWaveshaperAudioChain(settings());
       assert.equal(currentContext.shapers.length, 2);
       assert.equal(currentContext.timers.size, 0);
-      assert.equal(chain.shapers[0].oversample, 'none');
-      assert.equal(chain.shapers[1].oversample, 'none');
+      assert.equal(chain.shapers[0].oversample, '4x');
+      assert.equal(chain.shapers[1].oversample, '4x');
       assert.equal(chain.curve?.[4096], 1);
       updateWaveshaperAudioChain(chain, settings({ expression: '-x', mix: 25, dcBlock: true }));
       assert.equal(chain.curve?.[4096], -1);
