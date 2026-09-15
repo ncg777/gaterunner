@@ -9,9 +9,9 @@ import {
   type SoundingNote,
 } from '../audio/voicePool.js';
 
-test('allocates more Tone voices than the musical voice count so release tails never drop a note', () => {
-  assert.ok(getSynthVoiceCount(1) > 1);
-  assert.ok(getSynthVoiceCount(8) > 8);
+test('allocates enough Tone voices for release tails between dense events', () => {
+  assert.equal(getSynthVoiceCount(2, 5.28, 60 / (46 * 2)), 20);
+  assert.equal(getSynthVoiceCount(2, 0.24, 60 / (46 * 4)), 4);
   assert.equal(getSynthVoiceCount(32), 32);
 });
 

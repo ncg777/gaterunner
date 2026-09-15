@@ -1655,7 +1655,7 @@ export default defineComponent({
           chain.synth = markRaw(new MonoGlideSynth());
         } else {
           const synth = markRaw(new Tone.PolySynth(PitchEnvelopeSynth));
-          const voiceCount = getSynthVoiceCount(track.polyphony);
+          const voiceCount = getSynthVoiceCount(track.polyphony, track.release, this.getTrackQuant(track));
           synth.maxPolyphony = voiceCount;
           // Reuse voices instead of letting Tone dispose and rebuild them every second.
           retainVoicePool(synth as unknown as Tone.PolySynth, voiceCount);
@@ -1681,7 +1681,7 @@ export default defineComponent({
       if (isMono === isMonophonic(track.polyphony)) {
         if (!isMono) {
           const synth = chain.synth as Tone.PolySynth;
-          const voiceCount = getSynthVoiceCount(track.polyphony);
+          const voiceCount = getSynthVoiceCount(track.polyphony, track.release, this.getTrackQuant(track));
           synth.maxPolyphony = voiceCount;
           retainVoicePool(synth as unknown as Tone.PolySynth, voiceCount);
           prewarmVoicePool(synth as unknown as Tone.PolySynth, track.polyphony);

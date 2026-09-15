@@ -7,15 +7,23 @@ import type * as Tone from 'tone';
 export const MAX_POOLED_VOICES = 32;
 
 /**
- * A released voice stays allocated for its whole release tail, so the number of Tone
- * voices has to exceed the musical voice count or PolySynth starts dropping notes.
+ * Tone voices to allocate for a track that should sound `polyphony` notes at once.
+ * Released voices remain allocated for the whole amp-envelope tail, so dense tracks
+ * need enough additional voices to cover every note interval crossed by that tail.
  */
-const VOICE_RELEASE_HEADROOM = 8;
-
-/** Tone voices to allocate for a track that should sound `polyphony` notes at once. */
-export function getSynthVoiceCount(polyphony: number): number {
+export function getSynthVoiceCount(
+  polyphony: number,
+  releaseSeconds = 0,
+  eventIntervalSeconds = Number.POSITIVE_INFINITY,
+): number {
   const musicalVoices = Math.max(1, Math.round(polyphony));
-  return Math.min(MAX_POOLED_VOICES, musicalVoices + VOICE_RELEASE_HEADROOM);
+  const releaseIntervals = Number.isFinite(releaseSeconds)
+    && Number.isFinite(eventIntervalSeconds)
+    && releaseSeconds > 0
+    && eventIntervalSeconds > 0
+    ? Math.ceil(releaseSeconds / eventIntervalSeconds)
+    : 0;
+  return Math.min(MAX_POOLED_VOICES, musicalVoices * (releaseIntervals + 1));
 }
 
 export interface SoundingNote {
