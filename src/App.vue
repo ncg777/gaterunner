@@ -1349,11 +1349,17 @@ export default defineComponent({
               offlineTrackChains.push(chain);
               this.trackSynths[`offline-${entry.track.id}`] = chain;
               this.updateTrackChainSettings(entry.track, chain);
+              const trackStartTime = this.getTrackDelaySeconds(entry.track);
+              // Continuous sources can start while the offline graph is being built.
+              if (trackStartTime > 0) {
+                chain.fadeGain.gain.setValueAtTime(0, 0);
+                chain.drumReverbFadeGain.gain.setValueAtTime(0, 0);
+              }
               this.scheduleTrackFadeEnvelope(
                 entry.track,
                 entry.notes,
                 chain.fadeGain.gain,
-                this.getTrackDelaySeconds(entry.track),
+                trackStartTime,
                 chain.drumReverbFadeGain.gain,
               );
 
@@ -3021,6 +3027,11 @@ export default defineComponent({
 
       this.transportMenuOpen = false;
       this.startExport('wav', 'Preparing WAV export...');
+      await this.$nextTick();
+      // Vue has flushed here, but the browser still needs a frame to paint the dialog.
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
+      });
 
       try {
         const data = await this.renderMixWav();
