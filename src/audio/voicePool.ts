@@ -83,7 +83,7 @@ interface PolySynthInternals {
   _getNextAvailableVoice(): { dispose(): void } | undefined;
 }
 
-/** Allocate the musical voices before playback so the first dense chord does no graph construction. */
+/** Allocate the requested voices before playback so offline renders capture every native voice graph. */
 export function prewarmVoicePool(synth: Tone.PolySynth, voiceCount: number): void {
   const internals = synth as unknown as PolySynthInternals;
   const target = Math.max(1, Math.min(MAX_POOLED_VOICES, Math.round(voiceCount)));

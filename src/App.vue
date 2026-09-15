@@ -1659,7 +1659,7 @@ export default defineComponent({
           synth.maxPolyphony = voiceCount;
           // Reuse voices instead of letting Tone dispose and rebuild them every second.
           retainVoicePool(synth as unknown as Tone.PolySynth, voiceCount);
-          prewarmVoicePool(synth as unknown as Tone.PolySynth, track.polyphony);
+          prewarmVoicePool(synth as unknown as Tone.PolySynth, voiceCount);
           chain.synth = synth;
         }
         chain.soundingNotes.length = 0;
@@ -1684,7 +1684,7 @@ export default defineComponent({
           const voiceCount = getSynthVoiceCount(track.polyphony, track.release, this.getTrackQuant(track));
           synth.maxPolyphony = voiceCount;
           retainVoicePool(synth as unknown as Tone.PolySynth, voiceCount);
-          prewarmVoicePool(synth as unknown as Tone.PolySynth, track.polyphony);
+          prewarmVoicePool(synth as unknown as Tone.PolySynth, voiceCount);
         }
         return;
       }

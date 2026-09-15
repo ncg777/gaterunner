@@ -45,8 +45,9 @@ test('rebinds Tone garbage collection so pooled voices are retained', () => {
   assert.equal(synth._voices.length, 2);
 });
 
-test('prewarms musical voices without consuming already available voices', () => {
+test('prewarms the requested pool without consuming already available voices', () => {
   const existingVoice = { dispose() {} };
+  const voiceCount = getSynthVoiceCount(2, 5.28, 60 / (46 * 2));
   const synth = {
     _voices: [existingVoice],
     _availableVoices: [existingVoice],
@@ -57,10 +58,10 @@ test('prewarms musical voices without consuming already available voices', () =>
     },
   };
 
-  prewarmVoicePool(synth as never, 4);
-  assert.equal(synth._voices.length, 4);
-  assert.equal(synth._availableVoices.length, 4);
-  assert.equal(new Set(synth._availableVoices).size, 4);
+  prewarmVoicePool(synth as never, voiceCount);
+  assert.equal(synth._voices.length, 20);
+  assert.equal(synth._availableVoices.length, 20);
+  assert.equal(new Set(synth._availableVoices).size, 20);
 });
 
 test('claims voices without stealing while the track stays inside its polyphony', () => {
