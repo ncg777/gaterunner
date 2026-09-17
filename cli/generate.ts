@@ -2,7 +2,6 @@ import ToneMidi from '@tonejs/midi';
 const { Midi } = ToneMidi;
 import { PCS12 } from 'ultra-mega-enumerator';
 import {
-  getPitchEnvelopeLevel,
   getPitchEnvelopeMidiOffset,
   normalizePitchEnvelopeShape,
 } from '../src/audio/pitchEnvelope.js';
@@ -61,8 +60,18 @@ import {
   resolvePartialWavetableConfigurationSource,
 } from '../src/audio/partialWavetable.js';
 import { preparePartialOscillator, preparePartialSpectrumOscillator, prepareModulatedSpectrumOscillator } from './partialOscillator.js';
+import { normalizeNativeEffectSettings, applyNativeTrackEffects, applyNativeEcho, type NativeEffectSettings } from './nativeTrackEffects.js';
+import { createSkewLfoState, getLfoFrequencyHz, sampleLfoAtTime } from '../src/audio/lfo.js';
+import { createPinkNoiseImpulseChannels } from '../src/audio/reverbImpulse.js';
+import { convolveInto } from './convolution.js';
+import { planNativeVoices } from './nativeVoices.js';
+import { sampleAmplitudeEnvelope, createNativePitchEnvelope, nativeUnisonGain } from './nativeEnvelope.js';
+import { getPartialSpectrumGain } from '../src/audio/partialSpectrumGain.js';
+import { createStereoFilter } from './biquad.js';
+import { createNativeNoise, nativeKickCycles } from './nativeDrumVoice.js';
+import { NativeEnvelopeAutomation, prepareNativeMonoEnvelopes } from './nativeEnvelopeAutomation.js';
 
-export interface GenerateTrackOptions {
+export interface GenerateTrackOptions extends Partial<NativeEffectSettings> {
   /** Optional display name for the track. */
   name?: string;
   /** Track encoding and playback kind. Legacy and omitted values are melodic. */
@@ -234,7 +243,7 @@ export interface GenerateReverbOptions {
   highCut?: number;
 }
 
-export interface GenerateOptions {
+export interface GenerateOptions extends Partial<NativeEffectSettings> {
   /** Tempo in beats per minute (1-499). Default: 90 */
   bpm?: number;
   /** Concert pitch frequency of A4 in Hz (380-500). Default: 440 */
@@ -395,7 +404,7 @@ function getLoopDurationSecondsFromTrackLengths(prepared: PreparedRenderData): n
 }
 
 function getTrackDelaySeconds(bpm: number, track: NormalizedTrack): number {
-  return track.delay * track.numerator * (60 / bpm);
+  return track.delay * track.numerator * (60 / bpm) + track.phase * (60 / (bpm * track.denominator));
 }
 
 function getTrackRepeatDurationSeconds(bpm: number, entry: TrackRenderData): number {
@@ -534,6 +543,7 @@ function normalizeTonewheelDrawbars(value: unknown): number[] {
 
 function normalizeTracks(options: GenerateOptions): NormalizedTrack[] {
   const fallbackTrack: NormalizedTrack = {
+    ...normalizeNativeEffectSettings(options),
     name: 'Track 1',
     trackKind: 'melodic',
     drumLanes: [],
@@ -623,6 +633,7 @@ function normalizeTracks(options: GenerateOptions): NormalizedTrack[] {
   }
 
   return incoming.map((track, index) => ({
+    ...normalizeNativeEffectSettings(track),
     name: track.name?.trim() ? track.name.trim() : `Track ${index + 1}`,
     trackKind: track.trackKind === 'rhythmic' ? 'rhythmic' : 'melodic',
     drumLanes: track.trackKind === 'rhythmic' ? normalizeDrumLanes(track.drumLanes) : [],
@@ -789,48 +800,6 @@ async function prepareRenderData(options: GenerateOptions): Promise<PreparedRend
   };
 }
 
-function getAdsrLevel(
-  elapsed: number,
-  gateDuration: number,
-  envelope: { attack: number; decay: number; sustain: number; release: number },
-): number {
-  let level: number;
-  if (envelope.attack > 0 && elapsed < envelope.attack) {
-    level = elapsed / envelope.attack;
-  } else if (envelope.decay > 0 && elapsed < envelope.attack + envelope.decay) {
-    level = 1 - ((elapsed - envelope.attack) / envelope.decay) * (1 - envelope.sustain);
-  } else {
-    level = envelope.sustain;
-  }
-  if (elapsed > gateDuration) {
-    const releaseProgress = (elapsed - gateDuration) / Math.max(envelope.release, 0.001);
-    level *= Math.max(0, 1 - releaseProgress);
-  }
-  return clamp(level, 0, 1);
-}
-
-interface BreathRenderState {
-  seed: number;
-  pink: [number, number, number];
-  x1: number;
-  x2: number;
-  y1: number;
-  y2: number;
-}
-
-function nextPinkNoise(state: BreathRenderState): number {
-  let seed = state.seed;
-  seed ^= seed << 13;
-  seed ^= seed >>> 17;
-  seed ^= seed << 5;
-  state.seed = seed >>> 0;
-  const white = (state.seed / 0xFFFFFFFF) * 2 - 1;
-  state.pink[0] = 0.99765 * state.pink[0] + white * 0.099046;
-  state.pink[1] = 0.963 * state.pink[1] + white * 0.2965164;
-  state.pink[2] = 0.57 * state.pink[2] + white * 1.0526913;
-  return clamp((state.pink[0] + state.pink[1] + state.pink[2] + white * 0.1848) * 0.11, -1, 1);
-}
-
 function createChoirProcessor(waveform: string, sampleRate: number): (input: number) => number {
   if (waveform !== 'choir-ah' && waveform !== 'choir-oh') return input => input;
   const filters = CHOIR_FORMANT_BANDS[waveform].map(band => {
@@ -853,48 +822,33 @@ function createChoirProcessor(waveform: string, sampleRate: number): (input: num
   return input => filters.reduce((sum, filter) => sum + filter(input), 0);
 }
 
-function renderBreathNoise(
-  left: Float32Array,
-  right: Float32Array,
-  startFrame: number,
-  endFrame: number,
-  sampleRate: number,
-  duration: number,
-  track: NormalizedTrack,
-  notes: number[],
-  a4: number,
-  seed: number,
-): void {
-  const meanFrequency = notes.reduce((sum, note) => sum + midiToFrequency(note, a4), 0) / notes.length;
-  const centerFrequency = clamp(meanFrequency * track.breathHarmonic, 20, sampleRate * 0.45);
-  const omega = 2 * Math.PI * centerFrequency / sampleRate;
-  const alpha = Math.sin(omega) / (2 * BREATH_FILTER_Q);
-  const denominator = 1 + alpha;
-  const b0 = alpha / denominator;
-  const b2 = -b0;
-  const a1 = -2 * Math.cos(omega) / denominator;
-  const a2 = (1 - alpha) / denominator;
-  const state: BreathRenderState = {
-    seed: (seed >>> 0) || 1,
-    pink: [0, 0, 0],
-    x1: 0,
-    x2: 0,
-    y1: 0,
-    y2: 0,
-  };
-  const gain = dbToGain(track.breathLevel) * Math.SQRT1_2;
-
-  for (let frame = startFrame; frame < endFrame; frame += 1) {
-    const elapsed = (frame - startFrame) / sampleRate;
-    const input = nextPinkNoise(state);
-    const filtered = b0 * input + b2 * state.x2 - a1 * state.y1 - a2 * state.y2;
-    state.x2 = state.x1;
-    state.x1 = input;
-    state.y2 = state.y1;
-    state.y1 = filtered;
-    const sample = filtered * gain * getAdsrLevel(elapsed, duration, track);
-    left[frame] += sample;
-    right[frame] += sample;
+function renderBreathNoise(left: Float32Array, right: Float32Array, sampleRate: number,
+  track: NormalizedTrack, events: readonly TrackScheduledEvent[], a4: number, seed: number): void {
+  // The browser owns one NoiseSynth and one filter per track, even on polyphonic tracks.
+  const filters = createStereoFilter({ filterEnabled: true, filterType: 'bandpass', filterQ: BREATH_FILTER_Q,
+    filterGain: 0, filterRolloff: -12 }, sampleRate);
+  let noiseLeft = createNativeNoise('pink', seed), noiseRight = createNativeNoise('pink', seed ^ 0x7f4a7c15);
+  const amplitude = new NativeEnvelopeAutomation(track, 'amplitude', sampleRate);
+  for (const event of events) {
+    if (!event.notes.length) continue;
+    amplitude.attack(event.time, event.velocity);
+    amplitude.release(event.time + event.duration);
+  }
+  let centerFrequency = 1000, eventIndex = 0;
+  const gain = dbToGain(track.breathLevel);
+  for (let frame = 0; frame < left.length; frame++) {
+    const time = frame / sampleRate;
+    while (eventIndex < events.length && Math.floor(events[eventIndex].time * sampleRate) <= frame) {
+      const event = events[eventIndex++];
+      if (!event.notes.length) continue;
+      const meanFrequency = event.notes.reduce((sum, note) => sum + midiToFrequency(note, a4), 0) / event.notes.length / 2;
+      centerFrequency = clamp(meanFrequency * track.breathHarmonic, 20, sampleRate * 0.45);
+      noiseLeft = createNativeNoise('pink', seed ^ event.order);
+      noiseRight = createNativeNoise('pink', seed ^ event.order ^ 0x7f4a7c15);
+    }
+    const level = amplitude.sample(time);
+    left[frame] += filters[0](level > 0 ? noiseLeft() * level : 0, centerFrequency) * gain;
+    right[frame] += filters[1](level > 0 ? noiseRight() * level : 0, centerFrequency) * gain;
   }
 }
 
@@ -926,56 +880,42 @@ function getFilterMidi(track: NormalizedTrack, midiNotes: number[]): number {
   return clamp(track.filterFrequency + (averageMidi - 69) * track.filterKeyFollow / 100, 0, 127);
 }
 
-function getFilterEnvelopePreReleaseLevel(track: NormalizedTrack, elapsed: number): number {
-  if (elapsed < track.filterEnvelopeAttack && track.filterEnvelopeAttack > 0) {
-    return elapsed / track.filterEnvelopeAttack;
-  }
-
-  const decayElapsed = elapsed - track.filterEnvelopeAttack;
-  if (decayElapsed < track.filterEnvelopeDecay && track.filterEnvelopeDecay > 0) {
-    return 1 - ((decayElapsed / track.filterEnvelopeDecay) * (1 - track.filterEnvelopeSustain));
-  }
-
-  return track.filterEnvelopeSustain;
-}
-
-function getFilterEnvelopeLevel(track: NormalizedTrack, elapsed: number, noteDuration: number): number {
-  if (!track.filterEnabled || track.filterEnvelopeAmount === 0) {
-    return 0;
-  }
-
-  const gateDuration = Math.max(0, noteDuration);
-  const safeElapsed = Math.max(0, elapsed);
-  const preReleaseLevel = getFilterEnvelopePreReleaseLevel(track, Math.min(safeElapsed, gateDuration));
-  if (safeElapsed <= gateDuration) {
-    return preReleaseLevel;
-  }
-
-  if (track.filterEnvelopeRelease <= 0) {
-    return 0;
-  }
-
-  return preReleaseLevel * Math.max(0, 1 - ((safeElapsed - gateDuration) / track.filterEnvelopeRelease));
-}
-
 function midiToFrequency(midi: number, a4 = 440): number {
   return a4 * Math.pow(2, (midi - 69) / 12);
 }
 
-function createFilterCutoff(track: NormalizedTrack, midiNotes: number[], duration: number, a4: number): (elapsed: number) => number {
+function createFilterCutoff(track: NormalizedTrack, midiNotes: number[], duration: number, a4: number, start = 0, bpm = 120): (elapsed: number) => number {
   if (!track.filterEnabled) {
     return () => 0;
   }
   const baseMidi = getFilterMidi(track, midiNotes);
-  if (track.filterEnvelopeAmount === 0) {
-    const frequency = midiToFrequency(clamp(baseMidi, 0, 127), a4);
-    return () => frequency;
-  }
-  return (elapsed) => midiToFrequency(clamp(
-    baseMidi + track.filterEnvelopeAmount * getFilterEnvelopeLevel(track, elapsed, duration),
-    0,
-    127,
-  ), a4);
+  const base = midiToFrequency(baseMidi, a4);
+  const modulate = (cutoff: (elapsed: number) => number): ((elapsed: number) => number) => {
+    if (!track.filterLfoEnabled || track.filterLfoAmount === 0) return cutoff;
+    const state = createSkewLfoState();
+    const frequencyHz = getLfoFrequencyHz({ sync: track.filterLfoSync,
+      rateHz: track.filterLfoRateHz, syncRate: track.filterLfoRate, bpm });
+    const minimumFrequency = midiToFrequency(0, a4);
+    const maximumFrequency = midiToFrequency(127, a4);
+    return elapsed => {
+      const frequency = cutoff(elapsed);
+      const offset = sampleLfoAtTime(state, start + Math.max(0, elapsed), frequencyHz,
+        track.filterLfoWaveform, track.filterLfoInitPhase) * track.filterLfoAmount;
+      return clamp(frequency * Math.pow(2, offset / 12), minimumFrequency, maximumFrequency);
+    };
+  };
+  if (track.filterEnvelopeAmount === 0) return modulate(() => base);
+  const peak = midiToFrequency(clamp(baseMidi + track.filterEnvelopeAmount, 0, 127), a4);
+  const sustain = midiToFrequency(clamp(baseMidi + track.filterEnvelopeAmount * track.filterEnvelopeSustain, 0, 127), a4);
+  const minimum = track.trackKind === 'rhythmic' ? 0.005 : 1 / WAV_EXPORT_SAMPLE_RATE;
+  const attack = Math.max(minimum, track.filterEnvelopeAttack);
+  const decay = Math.max(minimum, track.filterEnvelopeDecay);
+  const release = Math.max(minimum, track.filterEnvelopeRelease);
+  const heldCutoff = (elapsed: number) => elapsed < attack ? base + (peak - base) * elapsed / attack
+    : elapsed < attack + decay ? peak + (sustain - peak) * (elapsed - attack) / decay : sustain;
+  const gateCutoff = heldCutoff(duration);
+  return modulate(elapsed => elapsed <= duration ? heldCutoff(Math.max(0, elapsed))
+    : gateCutoff + (base - gateCutoff) * Math.min(1, (elapsed - duration) / release));
 }
 
 function dbToGain(db: number): number {
@@ -999,159 +939,9 @@ function findNextHitTime(times: readonly number[] | undefined, after: number): n
   return times[low];
 }
 
-function createStereoFilter(track: NormalizedTrack, sampleRate: number): [
-  (sample: number, cutoff: number) => number,
-  (sample: number, cutoff: number) => number,
-] {
-  if (!track.filterEnabled) {
-    return [(sample) => sample, (sample) => sample];
-  }
-
-  const quality = clamp(Number.isFinite(track.filterQ) ? track.filterQ : 1, 0.0001, 30);
-  const amplitude = Math.pow(10, clamp(Number.isFinite(track.filterGain) ? track.filterGain : 0, -48, 48) / 40);
-  let b0 = 0;
-  let b1 = 0;
-  let b2 = 0;
-  let a1 = 0;
-  let a2 = 0;
-  let previousCutoff = Number.NaN;
-  const createChannel = () => {
-    let input1 = 0;
-    let input2 = 0;
-    let output1 = 0;
-    let output2 = 0;
-    return (sample: number, cutoff: number) => {
-      const frequency = clamp(Number.isFinite(cutoff) ? cutoff : 20, 20, sampleRate * 0.49);
-      if (frequency !== previousCutoff) {
-        const omega = 2 * Math.PI * frequency / sampleRate;
-        const cosine = Math.cos(omega);
-        const sine = Math.sin(omega);
-        const alpha = sine / (2 * quality);
-        const shelfTerm = Math.sqrt(2 * amplitude) * sine;
-        let a0 = 1 + alpha;
-        a1 = -2 * cosine;
-        a2 = 1 - alpha;
-        switch (track.filterType) {
-          case 'highpass':
-            b0 = (1 + cosine) / 2;
-            b1 = -(1 + cosine);
-            b2 = b0;
-            break;
-          case 'bandpass':
-            b0 = alpha;
-            b1 = 0;
-            b2 = -alpha;
-            break;
-          case 'notch':
-            b0 = 1;
-            b1 = -2 * cosine;
-            b2 = 1;
-            break;
-          case 'peaking':
-            b0 = 1 + alpha * amplitude;
-            b1 = -2 * cosine;
-            b2 = 1 - alpha * amplitude;
-            a0 = 1 + alpha / amplitude;
-            a2 = 1 - alpha / amplitude;
-            break;
-          case 'lowshelf':
-            b0 = amplitude * (amplitude + 1 - (amplitude - 1) * cosine + shelfTerm);
-            b1 = 2 * amplitude * (amplitude - 1 - (amplitude + 1) * cosine);
-            b2 = amplitude * (amplitude + 1 - (amplitude - 1) * cosine - shelfTerm);
-            a0 = amplitude + 1 + (amplitude - 1) * cosine + shelfTerm;
-            a1 = -2 * (amplitude - 1 + (amplitude + 1) * cosine);
-            a2 = amplitude + 1 + (amplitude - 1) * cosine - shelfTerm;
-            break;
-          case 'highshelf':
-            b0 = amplitude * (amplitude + 1 + (amplitude - 1) * cosine + shelfTerm);
-            b1 = -2 * amplitude * (amplitude - 1 + (amplitude + 1) * cosine);
-            b2 = amplitude * (amplitude + 1 + (amplitude - 1) * cosine - shelfTerm);
-            a0 = amplitude + 1 - (amplitude - 1) * cosine + shelfTerm;
-            a1 = 2 * (amplitude - 1 - (amplitude + 1) * cosine);
-            a2 = amplitude + 1 - (amplitude - 1) * cosine - shelfTerm;
-            break;
-          case 'allpass':
-            b0 = 1 - alpha;
-            b1 = -2 * cosine;
-            b2 = 1 + alpha;
-            break;
-          case 'lowpass':
-          default:
-            b0 = (1 - cosine) / 2;
-            b1 = 1 - cosine;
-            b2 = b0;
-            break;
-        }
-        b0 /= a0;
-        b1 /= a0;
-        b2 /= a0;
-        a1 /= a0;
-        a2 /= a0;
-        previousCutoff = frequency;
-      }
-      const output = b0 * sample + b1 * input1 + b2 * input2 - a1 * output1 - a2 * output2;
-      input2 = input1;
-      input1 = sample;
-      output2 = output1;
-      output1 = output;
-      return output;
-    };
-  };
-  return [createChannel(), createChannel()];
-}
-
-function applyFeedbackEcho(left: Float32Array, right: Float32Array, track: NormalizedTrack, sampleRate: number, delaySeconds: number): void {
-  if (!track.echoEnabled || track.echoWet <= -96) {
-    return;
-  }
-
-  const delayFrames = Math.max(1, Math.round(delaySeconds * sampleRate));
-  const wetGain = dbToGain(track.echoWet);
-  for (let frame = delayFrames; frame < left.length; frame += 1) {
-    const echoLeft = (track.echoPingPong ? right[frame - delayFrames] : left[frame - delayFrames]) * track.echoFeedback;
-    const echoRight = (track.echoPingPong ? left[frame - delayFrames] : right[frame - delayFrames]) * track.echoFeedback;
-    left[frame] += echoLeft * wetGain;
-    right[frame] += echoRight * wetGain;
-  }
-}
-
-function applyDrumEchoReturn(left: Float32Array, right: Float32Array, track: NormalizedTrack, sampleRate: number, delaySeconds: number, returnLeft: Float32Array, returnRight: Float32Array): void {
-  const delayFrames = Math.max(1, Math.round(delaySeconds * sampleRate));
-  const wetGain = dbToGain(track.echoWet);
-  for (let frame = delayFrames; frame < left.length; frame += 1) {
-    const echoLeft = track.echoPingPong ? right[frame - delayFrames] : left[frame - delayFrames];
-    const echoRight = track.echoPingPong ? left[frame - delayFrames] : right[frame - delayFrames];
-    left[frame] += echoLeft * track.echoFeedback;
-    right[frame] += echoRight * track.echoFeedback;
-    returnLeft[frame] += echoLeft * wetGain;
-    returnRight[frame] += echoRight * wetGain;
-  }
-}
-
-/** Second-order RBJ shelf-less cut, matching the -12 dB/oct Tone.Filter on the reverb send. */
 function createReverbCutFilter(type: 'highpass' | 'lowpass', frequency: number, sampleRate: number): (sample: number) => number {
-  const cutoff = clamp(frequency, 10, sampleRate * 0.49);
-  const omega = (2 * Math.PI * cutoff) / sampleRate;
-  const cosine = Math.cos(omega);
-  const alpha = Math.sin(omega) / (2 * Math.SQRT1_2);
-  const a0 = 1 + alpha;
-  const b0 = (type === 'highpass' ? (1 + cosine) / 2 : (1 - cosine) / 2) / a0;
-  const b1 = (type === 'highpass' ? -(1 + cosine) : 1 - cosine) / a0;
-  const b2 = b0;
-  const a1 = (-2 * cosine) / a0;
-  const a2 = (1 - alpha) / a0;
-  let previousInput1 = 0;
-  let previousInput2 = 0;
-  let previousOutput1 = 0;
-  let previousOutput2 = 0;
-  return (sample: number) => {
-    const output = b0 * sample + b1 * previousInput1 + b2 * previousInput2 - a1 * previousOutput1 - a2 * previousOutput2;
-    previousInput2 = previousInput1;
-    previousInput1 = sample;
-    previousOutput2 = previousOutput1;
-    previousOutput1 = output;
-    return output;
-  };
+  const [process] = createStereoFilter({ filterEnabled: true, filterType: type, filterQ: 1, filterGain: 0, filterRolloff: -12 }, sampleRate);
+  return sample => process(sample, frequency);
 }
 
 function applyReverbSend(left: Float32Array, right: Float32Array, sendLeft: Float32Array, sendRight: Float32Array, reverb: NormalizedReverb, sampleRate: number, a4: number): void {
@@ -1159,7 +949,7 @@ function applyReverbSend(left: Float32Array, right: Float32Array, sendLeft: Floa
     return;
   }
 
-  // The app filters the send before the convolver, so the tap bank sees the same band.
+  // Filter the send before convolution, as in the browser reverb bus.
   const lowCut = [
     createReverbCutFilter('highpass', midiToFrequency(reverb.lowCut, a4), sampleRate),
     createReverbCutFilter('highpass', midiToFrequency(reverb.lowCut, a4), sampleRate),
@@ -1173,35 +963,10 @@ function applyReverbSend(left: Float32Array, right: Float32Array, sendLeft: Floa
     sendRight[frame] = highCut[1](lowCut[1](sendRight[frame]));
   }
 
-  const preDelayFrames = Math.round(reverb.preDelay * sampleRate);
-  const decayFrames = Math.max(1, Math.round(reverb.decay * sampleRate));
-  const taps = [0.029, 0.037, 0.041, 0.053, 0.071, 0.089, 0.113, 0.137].map((delay, index) => {
-    const frames = preDelayFrames + Math.round(delay * sampleRate);
-    return {
-      frames,
-      gain: Math.exp(-frames / decayFrames),
-      pan: index % 2 === 0 ? 0.65 : 0.35,
-    };
-  });
-  // The app's convolver uses an energy-normalized impulse, so the tap bank is normalized
-  // the same way; otherwise eight near-unity taps land far hotter than realtime playback.
-  const tapEnergy = Math.sqrt(taps.reduce((total, tap) => total + tap.gain * tap.gain, 0)) || 1;
-  const wetGain = dbToGain(reverb.wet) / tapEnergy;
-  for (let frame = 0; frame < left.length; frame += 1) {
-    let wetLeft = 0;
-    let wetRight = 0;
-    for (const tap of taps) {
-      const sourceFrame = frame - tap.frames;
-      if (sourceFrame < 0) {
-        continue;
-      }
-
-      wetLeft += (sendLeft[sourceFrame] * tap.pan + sendRight[sourceFrame] * (1 - tap.pan)) * tap.gain;
-      wetRight += (sendRight[sourceFrame] * tap.pan + sendLeft[sourceFrame] * (1 - tap.pan)) * tap.gain;
-    }
-    left[frame] += wetLeft * wetGain;
-    right[frame] += wetRight * wetGain;
-  }
+  const impulses = createPinkNoiseImpulseChannels(reverb.decay, reverb.preDelay, sampleRate);
+  const wetGain = dbToGain(reverb.wet);
+  convolveInto(sendLeft, impulses[0], left, wetGain);
+  convolveInto(sendRight, impulses[1], right, wetGain);
 }
 
 /**
@@ -1272,7 +1037,7 @@ export async function createWavRenderSession(options: GenerateOptions) {
     + getRenderTrailSeconds(prepared)) * WAV_EXPORT_SAMPLE_RATE);
   return {
     // Conservative peak: result, track, send and drum echo buffers, plus runtime.
-    estimatedTrackBytes: frames * 56 + 64 * 1024 * 1024,
+    estimatedTrackBytes: frames * 72 + 64 * 1024 * 1024,
     renderTrack: (index: number) => renderPreparedWavChannels(prepared, index),
   };
 }
@@ -1358,15 +1123,15 @@ function renderPreparedWavChannels(
     const staticTonewheelDrawbars = partialGenerator.type === 'tonewheel' && !hasGenericWavetable
       ? interpolateTonewheelDrawbars(entry.track.tonewheelWavetable, entry.track.tonewheelDrawbars)
       : [];
-    const prepareTonewheelSpectrumOscillator = (drawbars: number[], modulated = false) => (modulated
-      ? prepareModulatedSpectrumOscillator : preparePartialSpectrumOscillator)(
-      resolvePartialSourceSpectrum({
-        partialGenerator: { type: 'tonewheel' },
-        waveform: 'sine',
-        tonewheelDrawbars: drawbars,
-      }),
-      `tonewheel|${drawbars.join(',')}`,
-    );
+    const prepareTonewheelSpectrumOscillator = (drawbars: number[], modulated = false) => {
+      const spectrum = resolvePartialSourceSpectrum({
+        partialGenerator: { type: 'tonewheel' }, waveform: 'sine', tonewheelDrawbars: drawbars,
+      });
+      const oscillator = (modulated ? prepareModulatedSpectrumOscillator : preparePartialSpectrumOscillator)(
+        spectrum, 'tonewheel|' + drawbars.join(','));
+      const peak = getPartialSpectrumGain(spectrum);
+      return (phase: number, frequency = 0, rate = sampleRate) => peak > 0 ? oscillator(phase, frequency, rate) / peak : 0;
+    };
     const staticTonewheelOscillator = partialGenerator.type === 'tonewheel' && !hasGenericWavetable
       ? prepareTonewheelSpectrumOscillator(staticTonewheelDrawbars)
       : null;
@@ -1388,8 +1153,12 @@ function renderPreparedWavChannels(
     const drumParameters = new Map(entry.track.drumLanes.map((lane) => [lane.voiceId, lane.parameters]));
     const drumXorGroups = new Map(entry.track.drumLanes.map((lane) => [lane.voiceId, lane.xorGroup]));
     const nextGroupHitTimes = new Map<number, number[]>();
+    const nextVoiceHitTimes = new Map<DrumVoiceId, number[]>();
     for (const scheduled of events) {
       for (const voiceId of scheduled.drumVoiceIds ?? []) {
+        const voiceTimes = nextVoiceHitTimes.get(voiceId) ?? [];
+        voiceTimes.push(scheduled.time);
+        nextVoiceHitTimes.set(voiceId, voiceTimes);
         const group = drumXorGroups.get(voiceId) ?? 0;
         if (group === 0) {
           continue;
@@ -1401,12 +1170,19 @@ function renderPreparedWavChannels(
     }
     const isMonoTrack = entry.track.trackKind !== 'rhythmic' && isMonophonic(entry.track.polyphony);
     const glideState = createMonoGlideState();
+    const voiceEvents = planNativeVoices(events, entry.track.polyphony, entry.track.monoLegato);
+    const monoPhases = new Map<number, number>();
+    let monoFrame = 0;
+    let monoIncrement = 0;
+    const monoEnvelopes = isMonoTrack ? prepareNativeMonoEnvelopes(voiceEvents, entry.track, sampleRate) : null;
+    let kickState: { time: number; phase: number } | undefined;
 
-    for (const event of events) {
+    for (const [eventIndex, event] of events.entries()) {
       const start = event.time;
+      const pitchEnvelope = createNativePitchEnvelope(entry.track, start, sampleRate);
       const duration = event.duration;
       const notes = event.notes;
-      const noteAmplitude = event.velocity * 0.12;
+      const noteAmplitude = event.velocity;
 
       if (entry.track.trackKind === 'rhythmic') {
         const startFrame = Math.max(0, Math.floor(start * sampleRate));
@@ -1426,6 +1202,12 @@ function renderPreparedWavChannels(
             ? dbToGain(parameters.echoSend) : 0;
           const reverbSend = typeof parameters.reverbSend === 'number' && parameters.reverbSend > -96
             ? dbToGain(parameters.reverbSend) : 0;
+          let oscillatorPhase: number | undefined;
+          if (voiceId === 'kick') {
+            oscillatorPhase = kickState ? kickState.phase + nativeKickCycles(start - kickState.time, parameters)
+              : start * Number(parameters.tune ?? 55);
+            kickState = { time: start, phase: oscillatorPhase % 1 };
+          }
           renderDrumHitIntoBuffers({
             left: trackLeft,
             right: trackRight,
@@ -1435,7 +1217,12 @@ function renderPreparedWavChannels(
             velocity: noteVelocities[noteIndex] ?? event.velocity,
             voiceId,
             parameters,
+            oscillatorPhase,
             chokeUntil: laterGroupHit === undefined ? undefined : laterGroupHit - start,
+            retriggerUntil: (() => {
+              const next = findNextHitTime(nextVoiceHitTimes.get(voiceId), start + 1e-6);
+              return next === undefined ? undefined : next - start;
+            })(),
             onSample: drumEchoLeft || drumReverbLeft ? (frame, leftSample, rightSample) => {
               if (drumEchoLeft && drumEchoRight) {
                 drumEchoLeft[frame] += leftSample * echoSend;
@@ -1453,12 +1240,12 @@ function renderPreparedWavChannels(
 
       const startFrame = Math.max(0, Math.floor(start * sampleRate));
       const voiceRelease = entry.track.release;
-      const endFrame = Math.min(frameCount, Math.ceil((start + duration + voiceRelease) * sampleRate));
+      const voiceEvent = voiceEvents[eventIndex];
       // Timing is shared by every chord/unison voice in this event. Band limits
       // remain per voice when sampling; these caches die at the end of the event.
       const modulatedOscillators = new Map<number, ReturnType<typeof prepareModulatedSpectrumOscillator>>();
       const modulatedWeights = new Map<number, number[]>();
-      const voicedNotes = limitPolyphony(notes, entry.track.polyphony);
+      const voicedNotes = voiceEvent.notes;
       // High-note priority already picked the winner, so the glide follows a single pitch.
       const glidePlan: GlidePlan | null = isMonoTrack && voicedNotes.length > 0
         ? planMonoGlide(
@@ -1476,134 +1263,111 @@ function renderPreparedWavChannels(
         )
         : null;
 
-      for (const midiNote of voicedNotes) {
-      const voiceCount = entry.track.unisonVoices;
+      for (const [noteIndex, midiNote] of voicedNotes.entries()) {
+        const voiceCount = entry.track.unisonVoices;
+        const noteDuration = isMonoTrack ? duration : voiceEvent.noteDurations[noteIndex];
+        const voiceEndFrame = Math.min(frameCount, Math.ceil(Math.min(voiceEvent.stopTime,
+          start + noteDuration + Math.max(0.005, voiceRelease) + (entry.track.filterEnabled ? 2 : 0)) * sampleRate));
 
-          for (let voice = 0; voice < voiceCount; voice += 1) {
-            const detuneOffset = voiceCount === 1 ? 0 : ((voice / (voiceCount - 1)) - 0.5) * entry.track.unisonDetune;
-            const frequency = midiToFrequency(midiNote + detuneOffset / 100, prepared.a4);
-            const usesHalfFundamentalSpectrum = hasGenericWavetable || partialGenerator.type === 'tonewheel';
-            const phaseIncrement = frequency / sampleRate / (usesHalfFundamentalSpectrum ? 2 : 1);
-            const voicePan = voiceCount === 1 ? 0.5 : voice / (voiceCount - 1);
-            const voiceGain = noteAmplitude / Math.sqrt(voiceCount);
-            const leftPan = Math.cos(voicePan * Math.PI / 2);
-            const rightPan = Math.sin(voicePan * Math.PI / 2);
-            let phase = 0;
-            let tonewheelOscillator = staticTonewheelOscillator;
-            let wavetableWeights = staticWavetableWeights;
-            const choir = createChoirProcessor(waveform, sampleRate);
-            for (let frame = startFrame; frame < endFrame; frame += 1) {
-              const t = (frame - startFrame) / sampleRate;
-              if (hasTonewheelModulation && (frame - startFrame) % 64 === 0) {
-                tonewheelOscillator = modulatedOscillators.get(frame) ?? prepareTonewheelSpectrumOscillator(
-                  interpolateModulatedTonewheelDrawbars(
-                    entry.track.tonewheelWavetable,
-                    entry.track.tonewheelDrawbars,
-                    {
-                      timeSeconds: frame / sampleRate,
-                      noteStartSeconds: start,
-                      bpm: prepared.bpm,
-                    },
-                  ), true,
-                );
-                modulatedOscillators.set(frame, tonewheelOscillator);
-              }
-              if (hasGenericWavetableModulation && (frame - startFrame) % 64 === 0) {
-                wavetableWeights = modulatedWeights.get(frame) ?? getPartialWavetableWeights(
+        for (let voice = 0; voice < voiceCount; voice += 1) {
+          const detuneOffset = voiceCount === 1 ? 0 : ((voice / (voiceCount - 1)) - 0.5) * entry.track.unisonDetune;
+          const frequency = midiToFrequency(midiNote + detuneOffset / 100, prepared.a4);
+          const usesHalfFundamentalSpectrum = hasGenericWavetable || partialGenerator.type === 'tonewheel';
+          const phaseIncrement = frequency / sampleRate / (usesHalfFundamentalSpectrum ? 2 : 1);
+          const voiceGain = (isMonoTrack ? 1 : noteAmplitude) * nativeUnisonGain(voiceCount);
+          // All unison sources feed the same mono bus. Tone phases are on the
+          // half-fundamental basis even when the native table uses whole cycles.
+          const initialPhase = -voice / voiceCount * (usesHalfFundamentalSpectrum ? 1 : 2);
+          let phase = isMonoTrack ? ((monoPhases.get(voice) ?? initialPhase) + Math.max(0, startFrame - monoFrame) * monoIncrement) % 1 : initialPhase;
+          let tonewheelOscillator = staticTonewheelOscillator;
+          let wavetableWeights = staticWavetableWeights;
+          const choir = createChoirProcessor(waveform, sampleRate);
+          const [voiceFilter] = createStereoFilter(entry.track, sampleRate);
+          const voiceCutoff = createFilterCutoff(entry.track, [midiNote], noteDuration, prepared.a4, start, prepared.bpm);
+          for (let frame = startFrame; frame < voiceEndFrame; frame += 1) {
+            const t = (frame - startFrame) / sampleRate;
+            if (hasTonewheelModulation && (frame - startFrame) % 64 === 0) {
+              tonewheelOscillator = modulatedOscillators.get(frame) ?? prepareTonewheelSpectrumOscillator(
+                interpolateModulatedTonewheelDrawbars(
                   entry.track.tonewheelWavetable,
-                  getModulatedPartialWavetablePosition(entry.track.tonewheelWavetable, {
+                  entry.track.tonewheelDrawbars,
+                  {
                     timeSeconds: frame / sampleRate,
                     noteStartSeconds: start,
                     bpm: prepared.bpm,
-                  }),
-                );
-                modulatedWeights.set(frame, wavetableWeights);
-              }
-              const releaseTime = duration - t;
+                  },
+                ), true,
+              );
+              modulatedOscillators.set(frame, tonewheelOscillator);
+            }
+            if (hasGenericWavetableModulation && (frame - startFrame) % 64 === 0) {
+              wavetableWeights = modulatedWeights.get(frame) ?? getPartialWavetableWeights(
+                entry.track.tonewheelWavetable,
+                getModulatedPartialWavetablePosition(entry.track.tonewheelWavetable, {
+                  timeSeconds: frame / sampleRate,
+                  noteStartSeconds: start,
+                  bpm: prepared.bpm,
+                }),
+              );
+              modulatedWeights.set(frame, wavetableWeights);
+            }
+            const env = monoEnvelopes ? monoEnvelopes.amplitude.sample(frame / sampleRate) : sampleAmplitudeEnvelope(t, noteDuration, entry.track);
 
-              let env = 1;
-              if (entry.track.attack > 0 && t < entry.track.attack) {
-                env = t / entry.track.attack;
-              } else if (entry.track.decay > 0) {
-                const decayElapsed = t - entry.track.attack;
-                if (decayElapsed >= 0 && decayElapsed < entry.track.decay) {
-                  env = 1 - ((decayElapsed / entry.track.decay) * (1 - entry.track.sustain));
-                } else if (t >= entry.track.attack + entry.track.decay) {
-                  env = entry.track.sustain;
-                }
-              } else if (t >= entry.track.attack) {
-                env = entry.track.sustain;
-              }
-              if (releaseTime < voiceRelease) {
-                env = Math.min(env, Math.max(0, (releaseTime + voiceRelease) / Math.max(voiceRelease, 0.001)));
-              }
-              if (t > duration + voiceRelease) {
-                env = 0;
-              }
+            const pitchEnvelopeRatio = hasPitchEnvelope
+              ? Math.pow(
+                2,
+                getPitchEnvelopeMidiOffset(entry.track, monoEnvelopes ? monoEnvelopes.pitch.sample(frame / sampleRate)
+                  : pitchEnvelope(t, noteDuration)) / 12,
+              )
+              : 1;
+            const glideRatio = glidePlan && glidePlan.seconds > 0
+              ? getGlideFrequency(glidePlan, t) / glidePlan.toFrequency : 1;
+            const playbackFrequency = frequency * pitchEnvelopeRatio * glideRatio;
+            const oscillatorSample = genericWavetableOscillators.length > 0
+              ? genericWavetableOscillators.reduce((sum, oscillator, configurationIndex) => (
+                sum + oscillator(phase, playbackFrequency / 2, sampleRate) * (wavetableWeights[configurationIndex] ?? 0)
+              ), 0)
+              : partialOscillator
+                ? partialOscillator(phase, playbackFrequency, sampleRate)
+                : tonewheelOscillator?.(phase, playbackFrequency / 2, sampleRate) ?? 0;
+            const sample = choir(voiceFilter(oscillatorSample * voiceGain * env, voiceCutoff(t)));
+            trackLeft[frame] += sample;
+            trackRight[frame] += sample;
 
-              const vibrato = entry.track.vibratoEnabled
-                ? Math.pow(2, Math.sin(2 * Math.PI * entry.track.vibratoFrequency * t) * entry.track.vibratoDepth / 12)
-                : 1;
-              const pitchEnvelopeRatio = hasPitchEnvelope
-                ? Math.pow(
-                  2,
-                  getPitchEnvelopeMidiOffset(entry.track, getPitchEnvelopeLevel(entry.track, t, duration)) / 12,
-                )
-                : 1;
-              const glideRatio = glidePlan && glidePlan.seconds > 0
-                ? getGlideFrequency(glidePlan, t) / glidePlan.toFrequency : 1;
-              const playbackFrequency = frequency * vibrato * pitchEnvelopeRatio * glideRatio;
-              const oscillatorSample = genericWavetableOscillators.length > 0
-                ? genericWavetableOscillators.reduce((sum, oscillator, configurationIndex) => (
-                  sum + oscillator(phase, playbackFrequency / 2, sampleRate) * (wavetableWeights[configurationIndex] ?? 0)
-                ), 0)
-                : partialOscillator
-                  ? partialOscillator(phase, playbackFrequency, sampleRate)
-                  : tonewheelOscillator?.(phase, playbackFrequency / 2, sampleRate) ?? 0;
-              const sample = choir(oscillatorSample * voiceGain * env);
-              trackLeft[frame] += sample * leftPan;
-              trackRight[frame] += sample * rightPan;
-
-              phase += phaseIncrement * vibrato * pitchEnvelopeRatio * glideRatio;
-              if (phase >= 1) {
-                phase -= Math.floor(phase);
-              }
+            phase += phaseIncrement * pitchEnvelopeRatio * glideRatio;
+            if (phase >= 1) {
+              phase -= Math.floor(phase);
             }
           }
+          if (isMonoTrack) monoPhases.set(voice, phase);
         }
-        if (entry.track.breathEnabled && voicedNotes.length > 0) {
-          renderBreathNoise(
-            trackLeft,
-            trackRight,
-            startFrame,
-            endFrame,
-            sampleRate,
-            duration,
-            entry.track,
-            voicedNotes,
-            prepared.a4,
-            0x9E3779B9 ^ event.order ^ (trackIndex << 12),
-          );
-        }
+        if (isMonoTrack) monoFrame = voiceEndFrame;
+      }
+      if (isMonoTrack) {
+        monoIncrement = midiToFrequency(voicedNotes[0], prepared.a4) / sampleRate
+          / (hasGenericWavetable || partialGenerator.type === 'tonewheel' ? 2 : 1);
+      }
+
     }
 
+    if (!isDrumTrack && entry.track.breathEnabled) {
+      renderBreathNoise(trackLeft, trackRight, sampleRate, entry.track, events, prepared.a4,
+        0x9e3779b9 ^ (trackIndex << 12));
+    }
     const echoDelaySeconds = getEchoDelaySeconds(prepared.bpm, entry.track.echoDelay);
     if (drumEchoLeft && drumEchoRight) {
-      applyDrumEchoReturn(drumEchoLeft, drumEchoRight, entry.track, sampleRate, echoDelaySeconds, trackLeft, trackRight);
+      applyNativeEcho(drumEchoLeft, drumEchoRight, entry.track, sampleRate, echoDelaySeconds, trackLeft, trackRight);
     }
     const shapeLeft = createWaveshaperProcessor(entry.track.waveshaper, sampleRate);
     const shapeRight = createWaveshaperProcessor(entry.track.waveshaper, sampleRate);
     const limiterGain = dbToGain(entry.track.limiterGain);
     for (let frame = 0; frame < frameCount; frame += 1) {
-      const elapsed = frame / sampleRate;
-      const tremolo = entry.track.tremoloEnabled
-        ? 1 - entry.track.tremoloDepth * (0.5 + 0.5 * Math.sin(2 * Math.PI * entry.track.tremoloFrequency * elapsed))
-        : 1;
-      trackLeft[frame] = Math.fround(lookupTransferCurve(TANH_CURVE, Math.fround(shapeLeft(trackLeft[frame]) * limiterGain))) * trackGain * tremolo;
-      trackRight[frame] = Math.fround(lookupTransferCurve(TANH_CURVE, Math.fround(shapeRight(trackRight[frame]) * limiterGain))) * trackGain * tremolo;
+      trackLeft[frame] = Math.fround(lookupTransferCurve(TANH_CURVE, Math.fround(shapeLeft(trackLeft[frame]) * limiterGain))) * trackGain;
+      trackRight[frame] = Math.fround(lookupTransferCurve(TANH_CURVE, Math.fround(shapeRight(trackRight[frame]) * limiterGain))) * trackGain;
     }
-    if (!isDrumTrack) applyFeedbackEcho(trackLeft, trackRight, entry.track, sampleRate, echoDelaySeconds);
-    const [filterLeft, filterRight] = createStereoFilter(entry.track, sampleRate);
+    applyNativeTrackEffects(trackLeft, trackRight, entry.track, sampleRate, prepared.bpm, prepared.a4);
+    if (!isDrumTrack) applyNativeEcho(trackLeft, trackRight, entry.track, sampleRate, echoDelaySeconds);
+    const [filterLeft, filterRight] = createStereoFilter({ ...entry.track, filterEnabled: isDrumTrack && entry.track.filterEnabled }, sampleRate);
     const filterEvents = events.slice().sort((left, right) => left.time - right.time || left.order - right.order);
     let filterEventIndex = 0;
     let filterStart = 0;
@@ -1617,7 +1381,7 @@ function renderPreparedWavChannels(
     const sendWet = hasReverbSend ? dbToGain(entry.track.reverbWet) : 0;
     // With no filter or fade, mixing needs no event scheduling, cutoff evaluation
     // or per-channel callbacks. Keep Float32 writes and send summation unchanged.
-    if (!entry.track.filterEnabled && !hasTrackFade) {
+    if ((!entry.track.filterEnabled || !isDrumTrack) && !hasTrackFade) {
       for (let frame = 0; frame < frameCount; frame += 1) {
         left[frame] += trackLeft[frame];
         right[frame] += trackRight[frame];
@@ -1635,7 +1399,7 @@ function renderPreparedWavChannels(
         filterStart = event.time;
         filterCutoff = createFilterCutoff(entry.track,
           entry.track.trackKind === 'rhythmic' ? event.notes : limitPolyphony(event.notes, entry.track.polyphony),
-          event.duration, prepared.a4);
+          event.duration, prepared.a4, event.time, prepared.bpm);
       }
       const cutoff = filterCutoff(time - filterStart);
       const fadeGain = hasTrackFade

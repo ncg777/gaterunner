@@ -12,6 +12,22 @@ interface BenchmarkFixture {
 
 const fixtures: BenchmarkFixture[] = [
   {
+    name: 'full-audio-chain',
+    options: {
+      bpm: 132,
+      tracks: [{
+        sequence: '3 5 9 17', denominator: 8, repeats: 2, phase: 0.25,
+        partialGenerator: { type: 'waveform' }, waveform: 'sawtooth', unisonVoices: 3,
+        filterEnabled: true, filterRolloff: -48, filterLfoEnabled: true,
+        filterEnvelopeAmount: 12, filterFrequency: 80,
+        vibratoEnabled: true, tremoloEnabled: true, chorusEnabled: true,
+        flangerEnabled: true, phaserEnabled: true, echoEnabled: true,
+        echoFeedback: 0.4, echoWet: -12, reverbWet: -18, gain: -12,
+      }],
+      reverb: { enabled: true, decay: 0.5, preDelay: 0.02 },
+    },
+  },
+  {
     name: 'sine-polyphonic',
     options: {
       bpm: 132,

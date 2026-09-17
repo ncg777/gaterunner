@@ -324,12 +324,30 @@ track source sum -> optional waveshaper -> limiterGain (Tanh Drive) -> tanh look
   including when the effect is off. Waveshaping does not change MIDI output.
 
 Browser playback and browser WAV export use the same audio graph. Native CLI WAV
-rendering implements the same nonlinear stages and DC-filter coefficients, but it
-is not the full browser synth/effects graph and is not promised to sound identical.
-**CLI WAV compatibility:** previous CLI rendering omitted the legacy tanh stage.
-It now always runs, even at 0 dB Tanh Drive with the new waveshaper disabled. Old
-CLI WAV renders therefore change; refresh audio/hash references deliberately.
-This does not change MIDI generation.
+rendering retains the browser's saved effect controls: bus vibrato, stereo tremolo,
+chorus, flanger, phaser, echo, filter LFO and rolloff, and convolution reverb. Melodic
+voices have independent filters before track distortion; drum filters follow the
+track effects, and per-drum drive, filters and sends are applied at the lane output.
+Both engines use the same deterministic, calibrated pink-noise reverb impulse.
+Native amplitude and pitch envelopes follow the browser's curves and smoothing;
+unison uses the same oscillator gain and phase offsets on a mono bus. Drum voices
+use the browser's tone, noise, FM, transient and wash layers with matching trigger
+durations, layer filters and velocity gain ramps.
+Overlapping melodic notes use the browser's voice-stealing policy, and mono legato
+preserves envelope timing and oscillator phase. Track phase offsets also survive
+preset import and affect both MIDI and WAV timing.
+
+Native synthesis uses its own oscillator and noise implementations;
+sample-identical browser output is not guaranteed. In particular, Web Audio's
+control signals affect off-grid oscillator starts, and phaser feedback traversal
+can shift its forward path by a render quantum. Browser comparison checks cover
+envelopes, quantum-aligned unison synthesis and deterministic effect paths,
+including zero-feedback phaser sweeps. **CLI WAV compatibility:** synthesis levels,
+envelopes, unison, drum layers, effect routing, echo repeats, stereo modulation,
+lane processing and reverb have changed; refresh audio/hash references
+deliberately. Audio-only settings leave MIDI unchanged; phase now affects timing.
+Browser drum routing now sends each layer through its intended gain and filter;
+this also changes browser percussion output and restores those layer controls.
 
 ### Import And Export
 
@@ -458,6 +476,10 @@ For the browser-specific clock equivalence and context-restoration checks, start
 
 ```js
 const checks = await import('/gaterunner/src/__tests__/offlineRender.browser.ts');
+await checks.runNativeEffectChecks();
+await checks.runNativeSynthesisChecks();
+await checks.runNativeDrumChecks();
+await checks.runReverbImpulseLifecycleChecks();
 await checks.runVoiceFilterChecks();
 await checks.runOfflineRenderChecks();
 await checks.runPeriodicWavePreparationChecks();
@@ -473,6 +495,9 @@ timings to `dist/browser-profile`. Set `CHROME_PATH` for another Chromium instal
 `PROFILE_OUTPUT` to keep separate runs, or `PROFILE_BASELINE=1` to compare the
 previous periodic-wave preparation and scheduling behavior. This benchmark does
 not use your browser's saved projects.
+
+Run `node cli/profileBrowser.mjs runNativeEffectChecks runNativeSynthesisChecks runNativeDrumChecks runReverbImpulseLifecycleChecks`
+to compare native DSP against the browser nodes in that disposable profile.
 Set `PROFILE_MODES=steady` to measure sustained playback after warmup, and
 `PROFILE_POLL_BASELINE=1` to compare against the former 200 ms realtime polling.
 Realtime playback now polls every 10 ms while retaining its 400 ms note lookahead;
@@ -504,7 +529,7 @@ the source of truth when behavior must match between browser and CLI output.
 | :--- | :--- |
 | `yarn dev` | Start the Vite development server on port 3000 |
 | `yarn type-check` | Run `vue-tsc` across the application |
-| `yarn node --import tsx --test cli/*.test.ts src/__tests__/*.test.ts` | Run Node-compatible tests |
+| `yarn node --import tsx --test --experimental-test-module-mocks cli/*.test.ts src/__tests__/*.test.ts` | Run Node-compatible tests |
 | `yarn build` | Type-check and create the production browser build |
 | `yarn build:cli` | Compile the CLI to `dist-cli/` |
 | `yarn bench:wav` | Run the WAV renderer benchmark |
@@ -534,7 +559,7 @@ where they share a documented behavior.
 
 ```sh
 yarn type-check
-yarn node --import tsx --test cli/*.test.ts src/__tests__/*.test.ts
+yarn node --import tsx --test --experimental-test-module-mocks cli/*.test.ts src/__tests__/*.test.ts
 yarn build
 ```
 

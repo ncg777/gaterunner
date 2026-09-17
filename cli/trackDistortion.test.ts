@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createSkewLfoState, sampleLfoAtTime } from '../src/audio/lfo.js';
 import ToneMidi from '@tonejs/midi';
 import { createWaveshaperProcessor, lookupTransferCurve, TANH_CURVE } from '../src/audio/trackDistortion.js';
 import { normalizeWaveshaperSettings } from '../src/audio/waveshaper.js';
@@ -56,7 +57,7 @@ function referenceLowpass(sampleRate: number): (sample: number, frequency: numbe
   return (sample, frequency) => {
     const omega = 2 * Math.PI * frequency / sampleRate;
     const cosine = Math.cos(omega);
-    const alpha = Math.sin(omega) / 2;
+    const alpha = Math.sin(omega) / (2 * 10 ** (1 / 20));
     const output = ((1 - cosine) / 2 * (sample + 2 * inputs[0] + inputs[1])
       + 2 * cosine * outputs[0] - (1 - alpha) * outputs[1]) / (1 + alpha);
     inputs[1] = inputs[0];
@@ -108,11 +109,11 @@ test('track gain scales the shaped sum including breath without changing its dri
   assertSamples(quieter.left, Float32Array.from(unity.left, sample => sample * gain(-12)));
   const oscillator = await renderWavChannels({ bpm: 240, tracks: [source] });
   const breath = await renderWavChannels({ bpm: 240, tracks: [{ ...source,
-    breathEnabled: true, breathLevel: 0, velocityMultiplier: 0 }] });
+    breathEnabled: true, breathLevel: 0, partialGenerator: { type: 'tonewheel' }, tonewheelDrawbars: [0, 0, 0, 0, 0, 0, 0, 0, 0] }] });
   assert.ok(breath.left.some(sample => Math.abs(sample) > 0.0001));
   const shape = createWaveshaperProcessor(shaped, unity.sampleRate);
   assertSamples(unity.left, Float32Array.from(oscillator.left, (sample, frame) =>
-    tanh(shape(Math.fround(recoverSource(sample) + recoverSource(breath.left[frame]))) * gain(12))));
+    tanh(shape(Math.fround(recoverSource(sample) + recoverSource(breath.left[frame]))) * gain(12))), 2e-6);
 });
 
 test('stereo waveshaper state is independent and processes silent tails', async () => {
@@ -144,56 +145,73 @@ test('limiter bounds, defaults, invalid curves and zero mix have deterministic f
   assert.deepEqual(stereo.left, stereo.right);
 });
 
-test('melodic tremolo, echo, stereo filter and fade follow track distortion', async () => {
-  const track = { ...source, sequence: '1 2', unisonVoices: 3, unisonDetune: 70, limiterGain: 18, waveshaper: shaped };
+function referenceEcho(left: Float32Array, right: Float32Array, feedback: number, pingPong: boolean, delay: number) {
+  const wetLeft = new Float32Array(left.length);
+  const wetRight = new Float32Array(right.length);
+  for (let frame = delay; frame < left.length; frame++) {
+    const source = frame - delay;
+    const prior = source - 128;
+    wetLeft[frame] = left[source] + (prior < 0 ? 0 : (pingPong ? wetRight[prior] : wetLeft[prior]) * feedback);
+    wetRight[frame] = (pingPong ? right[frame - 2 * delay] ?? 0 : right[source])
+      + (prior < 0 ? 0 : (pingPong ? wetLeft[prior] : wetRight[prior]) * feedback);
+  }
+  return [wetLeft, wetRight];
+}
+
+test('melodic voice filtering precedes distortion, followed by stereo tremolo, echo and fade', async () => {
+  const track = { ...source, sequence: '1 2', unisonVoices: 3, unisonDetune: 70,
+    limiterGain: 18, waveshaper: shaped, filterEnabled: true, filterFrequency: 55, filterQ: 1 };
   const clean = await renderWavChannels({ bpm: 240, tracks: [track] });
   const result = await renderWavChannels({ bpm: 240, tracks: [{ ...track,
-    tremoloEnabled: true, tremoloDepth: 0.6, tremoloFrequency: 7,
+    tremoloEnabled: true, tremoloDepth: 0.6, tremoloFrequency: 7, tremoloSpread: 180,
     echoEnabled: true, echoDelay: 0.01, echoWet: -6, echoFeedback: 0.4, echoPingPong: true,
-    filterEnabled: true, filterFrequency: 55, filterQ: 1, fadeIn: 0.05, fadeOut: 0.025,
+    fadeIn: 0.05, fadeOut: 0.025,
   }] });
-  const expectedLeft = Float32Array.from(clean.left, (sample, frame) => sample * (1 - 0.6 * (0.5 + 0.5 * Math.sin(2 * Math.PI * 7 * frame / clean.sampleRate))));
-  const expectedRight = Float32Array.from(clean.right, (sample, frame) => sample * (1 - 0.6 * (0.5 + 0.5 * Math.sin(2 * Math.PI * 7 * frame / clean.sampleRate))));
-  const delay = Math.round(0.01 * clean.sampleRate);
-  for (let frame = delay; frame < expectedLeft.length; frame += 1) {
-    expectedLeft[frame] += expectedRight[frame - delay] * 0.4 * gain(-6);
-    expectedRight[frame] += expectedLeft[frame - delay] * 0.4 * gain(-6);
-  }
-  for (const [actual, expected] of [[result.left, expectedLeft], [result.right, expectedRight]]) {
-    const filter = referenceLowpass(clean.sampleRate);
-    const frequency = 440 * Math.pow(2, (55 - 69) / 12);
-    for (let frame = 0; frame < expected.length; frame += 1) {
-      expected[frame] = filter(expected[frame], frequency) * getTrackFadeGain(frame / clean.sampleRate, 0.125, 0.05, 0.025);
-    }
-    assertSamples(actual, expected);
+  const left = Float32Array.from(clean.left, (sample, frame) => sample * 0.5 * (1 - 0.6 * Math.sin(2 * Math.PI * 7 * frame / clean.sampleRate)));
+  const right = Float32Array.from(clean.right, (sample, frame) => sample * 0.5 * (1 + 0.6 * Math.sin(2 * Math.PI * 7 * frame / clean.sampleRate)));
+  const returns = referenceEcho(left, right, 0.4, true, Math.round(0.01 * clean.sampleRate));
+  const mix = gain(-6) * Math.PI / 2;
+  for (const [index, channel] of [left, right].entries()) {
+    const expected = Float32Array.from(channel, (sample, frame) =>
+      Math.fround(sample * Math.cos(mix) + returns[index][frame] * Math.sin(mix))
+      * getTrackFadeGain(frame / clean.sampleRate, 0.125, 0.05, 0.025));
+    assertSamples(index === 0 ? result.left : result.right, expected);
   }
 });
 
-test('track filter uses the latest event elapsed time with stable same-time ordering', async () => {
+test('drum track filter uses the latest event with stable same-time ordering and Hz envelope ramps', async () => {
   for (const collide of [false, true]) {
-    const track = { ...source, sequence: '1 2', lengthFactor: 200, limiterGain: 18,
+  for (const filterLfoEnabled of [false, true]) {
+    const track = { ...source, trackKind: 'rhythmic' as const, sequence: '1 2', lengthFactor: 200, limiterGain: 18,
       timeWarpEnabled: collide, timeWarpCurve: 'custom', timeWarpExpression: '0', timeWarpNoteLengths: false };
     const clean = await renderWavChannels({ bpm: 240, tracks: [track] });
     const result = await renderWavChannels({ bpm: 240, tracks: [{ ...track,
-      filterEnabled: true, filterFrequency: 45, filterQ: 1, filterKeyFollow: 100,
+      filterEnabled: true, filterRolloff: -12, filterFrequency: 45, filterQ: 1, filterKeyFollow: 100,
       filterEnvelopeAttack: 0.03, filterEnvelopeDecay: 0.04, filterEnvelopeSustain: 0.25,
       filterEnvelopeRelease: 0.1, filterEnvelopeAmount: 12,
+      filterLfoEnabled, filterLfoSync: false, filterLfoRateHz: 7, filterLfoAmount: 12,
     }] });
     const midi = new ToneMidi.Midi(await generateMidi({ bpm: 240, tracks: [track] }));
     const notes = midi.tracks[0].notes;
     const filter = referenceLowpass(clean.sampleRate);
     const expected = new Float32Array(clean.left.length);
-    for (let frame = 0; frame < expected.length; frame += 1) {
+    for (let frame = 0; frame < expected.length; frame++) {
       const time = frame / clean.sampleRate;
       const event = notes.filter(note => note.time <= time).at(-1)!;
       const elapsed = time - event.time;
       const held = Math.min(elapsed, event.duration);
-      let envelope = held < 0.03 ? held / 0.03 : held < 0.07 ? 1 - (held - 0.03) / 0.04 * 0.75 : 0.25;
-      if (elapsed > event.duration) envelope *= Math.max(0, 1 - (elapsed - event.duration) / 0.1);
-      const pitch = Math.max(0, Math.min(127, 45 + event.midi - 69 + 12 * envelope));
-      expected[frame] = filter(clean.left[frame], 440 * Math.pow(2, (pitch - 69) / 12));
+      const pitch = Math.max(0, Math.min(127, 45 + event.midi - 69));
+      const base = 440 * 2 ** ((pitch - 69) / 12);
+      const peak = 440 * 2 ** ((Math.min(127, pitch + 12) - 69) / 12);
+      const sustain = 440 * 2 ** ((Math.min(127, pitch + 3) - 69) / 12);
+      let cutoff = held < 0.03 ? base + (peak - base) * held / 0.03
+        : held < 0.07 ? peak + (sustain - peak) * (held - 0.03) / 0.04 : sustain;
+      if (elapsed > event.duration) cutoff += (base - cutoff) * Math.min(1, (elapsed - event.duration) / 0.1);
+      if (filterLfoEnabled) cutoff *= 2 ** sampleLfoAtTime(createSkewLfoState(), time, 7, 'sine');
+      expected[frame] = filter(clean.left[frame], cutoff);
     }
     assertSamples(result.left, expected);
+  }
   }
 });
 
@@ -211,28 +229,26 @@ test(`drum returns apply wet=${echoWet} once with feedback=${echoFeedback} and p
   const raw = new Float32Array(result.left.length);
   const rawRight = new Float32Array(raw.length);
   const echo = new Float32Array(raw.length);
+  const echoRight = new Float32Array(raw.length);
   const reverb = new Float32Array(raw.length);
   for (const lane of lanes) {
     renderDrumHitIntoBuffers({ left: raw, right: rawRight, startFrame: 0, sampleRate: result.sampleRate,
       duration: 0.0625, velocity: 1, voiceId: lane.voiceId, parameters: lane.parameters,
-      onSample: (frame, sample) => {
+      onSample: (frame, sample, rightSample) => {
+        echoRight[frame] += rightSample * gain(lane.parameters.echoSend as number);
         echo[frame] += sample * gain(lane.parameters.echoSend as number);
         reverb[frame] += sample * gain(lane.parameters.reverbSend as number);
       } });
   }
   const delay = Math.round(0.01 * result.sampleRate);
-  for (let frame = delay; frame < raw.length; frame += 1) {
-    let returned = 0;
-    for (let tap = 1; tap * delay <= frame; tap += 1) {
-      returned += echo[frame - tap * delay] * Math.pow(echoFeedback, tap - 1);
-    }
-    raw[frame] += returned * gain(echoWet);
+  const returns = referenceEcho(echo, echoRight, echoFeedback, true, delay);
+  for (const [index, channel] of [raw, rawRight].entries()) {
+    for (let frame = 0; frame < channel.length; frame++) channel[frame] += returns[index][frame] * gain(echoWet);
+    const shape = createWaveshaperProcessor(shaped, result.sampleRate);
+    const expected = Float32Array.from(channel, (sample, frame) =>
+      Math.fround(tanh(shape(sample) * gain(18)) * gain(-6)) * getTrackFadeGain(frame / result.sampleRate, 0.0625, 0.02, 0));
+    assertSamples(index === 0 ? result.left : result.right, expected, 3e-6);
   }
-  const shape = createWaveshaperProcessor(shaped, result.sampleRate);
-  const expected = Float32Array.from(raw, (sample, frame) =>
-    Math.fround(tanh(shape(sample) * gain(18)) * gain(-6)) * getTrackFadeGain(frame / result.sampleRate, 0.0625, 0.02, 0));
-  assertSamples(result.left, expected, 3e-6);
-  assertSamples(result.right, expected, 3e-6);
   assertSamples(result.reverbLeft!, Float32Array.from(reverb, (sample, frame) =>
     sample * gain(-6) * getTrackFadeGain(frame / result.sampleRate, 0.0625, 0.02, 0) * gain(-8)));
   const unshaped = await renderWavChannels({ bpm: 240, tracks: [{ ...track, limiterGain: -48,

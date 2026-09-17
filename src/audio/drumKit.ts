@@ -408,9 +408,12 @@ export function createDrumInstrument(voiceId: DrumVoiceId, rawParameters: DrumPa
       const noiseGain = new Tone.Gain(mix);
       const snapGain = new Tone.Gain(snap);
       register(owned, tone, toneGain, noiseGain, snapGain);
-      tone.connect(toneGain).connect(inputGain);
-      noise.connect(noiseGain).connect(inputGain);
-      snapSynth.connect(snapGain).connect(inputGain);
+      tone.connect(toneGain);
+      toneGain.connect(inputGain);
+      noise.connect(noiseGain);
+      noiseGain.connect(inputGain);
+      snapSynth.connect(snapGain);
+      snapGain.connect(inputGain);
       const live = { tune, snap };
       return finish({
         node: postVca, filter, preGain: inputGain, voice: tone, voice2: noise, voice3: snapSynth, live,
@@ -459,9 +462,12 @@ export function createDrumInstrument(voiceId: DrumVoiceId, rawParameters: DrumPa
       const noiseFilter = new Tone.Filter({ type: 'highpass', frequency: Math.max(1400, color * 1.5), Q: 0.8 });
       const snapFilter = new Tone.Filter({ type: 'highpass', frequency: Math.max(3200, color * 2.3), Q: 0.7 });
       register(owned, toneFilter, noiseFilter, snapFilter);
-      body.connect(toneFilter).connect(inputGain);
-      tail.connect(noiseFilter).connect(inputGain);
-      snapSynth.connect(snapFilter).connect(inputGain);
+      body.connect(toneFilter);
+      toneFilter.connect(inputGain);
+      tail.connect(noiseFilter);
+      noiseFilter.connect(inputGain);
+      snapSynth.connect(snapFilter);
+      snapFilter.connect(inputGain);
       const burstOffsets = [0, 0.012, 0.024, 0.041];
       return finish({
         node: postVca, filter, preGain: inputGain, voice: body, voice2: tail, voice3: snapSynth,
@@ -555,7 +561,9 @@ export function createDrumInstrument(voiceId: DrumVoiceId, rawParameters: DrumPa
       const noiseGain = new Tone.Gain(wash);
       register(owned, noiseFilter, noiseGain);
       metal.connect(inputGain);
-      washNoise.connect(noiseFilter).connect(noiseGain).connect(inputGain);
+      washNoise.connect(noiseFilter);
+      noiseFilter.connect(noiseGain);
+      noiseGain.connect(inputGain);
       const live = { tune, wash };
       return finish({
         node: postVca, filter, preGain: inputGain, voice: metal, voice2: washNoise, live,
@@ -592,8 +600,11 @@ export function createDrumInstrument(voiceId: DrumVoiceId, rawParameters: DrumPa
       const snapFilter = new Tone.Filter({ type: 'bandpass', frequency: Number(parameters.color ?? 4800), Q: 2.8 });
       register(owned, toneGain, noiseGain, snapFilter);
       low.connect(toneGain);
-      high.connect(toneGain).connect(inputGain);
-      stick.connect(snapFilter).connect(noiseGain).connect(inputGain);
+      high.connect(toneGain);
+      toneGain.connect(inputGain);
+      stick.connect(snapFilter);
+      snapFilter.connect(noiseGain);
+      noiseGain.connect(inputGain);
       return finish({
         node: postVca, filter, preGain: inputGain, voice: low, voice2: high, voice3: stick,
         trigger(time, velocity) {
@@ -627,7 +638,8 @@ export function createDrumInstrument(voiceId: DrumVoiceId, rawParameters: DrumPa
       const toneGain = new Tone.Gain(0.22);
       register(owned, toneGain);
       body.connect(inputGain);
-      shell.connect(toneGain).connect(inputGain);
+      shell.connect(toneGain);
+      toneGain.connect(inputGain);
       return finish({
         node: postVca, filter, preGain: inputGain, voice: body, voice2: shell,
         trigger(time, velocity, duration) {
@@ -658,7 +670,9 @@ export function createDrumInstrument(voiceId: DrumVoiceId, rawParameters: DrumPa
       const snapGain = new Tone.Gain(snap);
       register(owned, snapFilter, snapGain);
       body.connect(inputGain);
-      slap.connect(snapFilter).connect(snapGain).connect(inputGain);
+      slap.connect(snapFilter);
+      snapFilter.connect(snapGain);
+      snapGain.connect(inputGain);
       return finish({
         node: postVca, filter, preGain: inputGain, voice: body, voice2: slap,
         trigger(time, velocity, duration) {
@@ -686,7 +700,9 @@ export function createDrumInstrument(voiceId: DrumVoiceId, rawParameters: DrumPa
       const toneGain = new Tone.Gain(clamp(Number(parameters.snap ?? 0.3), 0, 0.55));
       register(owned, toneFilter, toneGain);
       body.connect(inputGain);
-      shell.connect(toneFilter).connect(toneGain).connect(inputGain);
+      shell.connect(toneFilter);
+      toneFilter.connect(toneGain);
+      toneGain.connect(inputGain);
       return finish({
         node: postVca, filter, preGain: inputGain, voice: body, voice2: shell,
         trigger(time, velocity, duration) {
@@ -713,7 +729,9 @@ export function createDrumInstrument(voiceId: DrumVoiceId, rawParameters: DrumPa
       const toneGain = new Tone.Gain(0.48);
       register(owned, toneFilter, toneGain);
       low.connect(toneFilter);
-      high.connect(toneFilter).connect(toneGain).connect(inputGain);
+      high.connect(toneFilter);
+      toneFilter.connect(toneGain);
+      toneGain.connect(inputGain);
       return finish({
         node: postVca, filter, preGain: inputGain, voice: low, voice2: high,
         trigger(time, velocity) {
@@ -745,7 +763,8 @@ export function createDrumInstrument(voiceId: DrumVoiceId, rawParameters: DrumPa
       register(owned, toneGain);
       fundamental.connect(toneGain);
       partialA.connect(toneGain);
-      partialB.connect(toneGain).connect(inputGain);
+      partialB.connect(toneGain);
+      toneGain.connect(inputGain);
       return finish({
         node: postVca, filter, preGain: inputGain, voice: fundamental, voice2: partialA, voice3: partialB,
         trigger(time, velocity, duration) {
@@ -774,7 +793,8 @@ export function createDrumInstrument(voiceId: DrumVoiceId, rawParameters: DrumPa
       const toneGain = new Tone.Gain(0.56);
       register(owned, toneGain);
       ring.connect(toneGain);
-      overtone.connect(toneGain).connect(inputGain);
+      overtone.connect(toneGain);
+      toneGain.connect(inputGain);
       return finish({
         node: postVca, filter, preGain: inputGain, voice: ring, voice2: overtone,
         trigger(time, velocity, duration) {
@@ -812,7 +832,9 @@ export function createDrumInstrument(voiceId: DrumVoiceId, rawParameters: DrumPa
       const noiseGain = new Tone.Gain(wash);
       register(owned, noiseFilter, noiseGain);
       bow.connect(inputGain);
-      washNoise.connect(noiseFilter).connect(noiseGain).connect(inputGain);
+      washNoise.connect(noiseFilter);
+      noiseFilter.connect(noiseGain);
+      noiseGain.connect(inputGain);
       return finish({
         node: postVca, filter, preGain: inputGain, voice: bow, voice2: washNoise,
         trigger(time, velocity, duration) {
@@ -839,7 +861,8 @@ export function createDrumInstrument(voiceId: DrumVoiceId, rawParameters: DrumPa
       );
       const noiseFilter = new Tone.Filter({ type: 'bandpass', frequency: color, Q: 1.25 });
       register(owned, noiseFilter);
-      noise.connect(noiseFilter).connect(inputGain);
+      noise.connect(noiseFilter);
+      noiseFilter.connect(inputGain);
       return finish({
         node: postVca, filter, preGain: inputGain, voice: noise,
         trigger(time, velocity) {

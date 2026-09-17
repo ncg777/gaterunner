@@ -354,12 +354,8 @@ import {
   type WaveshaperAudioChain,
 } from './audio/waveshaperEffect';
 import { setTremoloSpread } from './audio/tremolo';
-import {
-  createSkewLfoState,
-  getLfoFrequencyHz,
-  sampleLfoAtTime,
-  type LfoWaveform,
-} from './audio/lfo';
+import { getLfoFrequencyHz, type LfoWaveform } from './audio/lfo';
+import { FilterLfo } from './audio/filterLfo';
 import { CHOIR_FORMANT_BANDS, getChoirFormantBandGainLinear, type FormantBand } from './audio/choir';
 import { PitchEnvelopeSynth } from './audio/pitchEnvelopeSynth';
 import { MonoGlideSynth } from './audio/monoGlideSynth';
@@ -445,6 +441,7 @@ interface TrackAudioChain {
   breathFilter: Tone.Filter | null;
   breathGain: Tone.Gain | null;
   filter: Tone.Filter | null;
+  filterLfo: FilterLfo | null;
   choir: ChoirFormantBank | null;
   sourceBus: Tone.Gain;
   waveshaper: WaveshaperAudioChain | null;
@@ -490,8 +487,6 @@ const CHOIR_FORMANT_FILTER_COUNT = 5;
 /** Upper bound for the flanger delay line; the sweep never exceeds twice the 20 ms maximum base delay. */
 const FLANGER_MAX_DELAY_SECONDS = 0.05;
 const WAV_EXPORT_SAMPLE_RATE = 48000;
-/** Deterministic S&H seed for the filter-cutoff LFO (sampled per note start). */
-const FILTER_LFO_STATE = createSkewLfoState();
 
 /** Reusable static spectra, keyed by waveform and normalized generator settings. */
 const partialSpectrumCache = new Map<string, number[]>();
@@ -1670,6 +1665,7 @@ export default defineComponent({
         breathFilter: null,
         breathGain: null,
         filter: null,
+        filterLfo: null,
         choir: null,
         sourceBus,
         waveshaper: null,
@@ -1794,6 +1790,7 @@ export default defineComponent({
     ensureTrackFilter(chain: TrackAudioChain): Tone.Filter {
       if (!chain.filter) {
         chain.filter = markRaw(new Tone.Filter());
+        chain.filterLfo = markRaw(new FilterLfo(chain.filter));
         chain.routingSignature = '';
       }
       return chain.filter;
@@ -2182,25 +2179,6 @@ export default defineComponent({
     getTrackFilterFrequency(track: PresetTrackData, notes: number[] = []): number {
       return this.midiToFrequency(this.getTrackFilterMidi(track, notes));
     },
-    /** Bipolar cutoff offset in MIDI pitches from the filter LFO, sampled at an absolute time. */
-    getFilterLfoOffsetMidi(track: PresetTrackData, timeSeconds: number): number {
-      if (!track.filterLfoEnabled || track.filterLfoAmount === 0) {
-        return 0;
-      }
-      const frequencyHz = getLfoFrequencyHz({
-        sync: track.filterLfoSync,
-        rateHz: track.filterLfoRateHz,
-        syncRate: track.filterLfoRate,
-        bpm: this.bpm,
-      });
-      return sampleLfoAtTime(
-        FILTER_LFO_STATE,
-        timeSeconds,
-        frequencyHz,
-        track.filterLfoWaveform as LfoWaveform,
-        track.filterLfoInitPhase,
-      ) * track.filterLfoAmount;
-    },
     scheduleFilterEnvelope(
       track: PresetTrackData,
       notes: number[],
@@ -2219,13 +2197,13 @@ export default defineComponent({
 
       const filter = this.ensureTrackFilter(chain);
       const startTime = typeof when === 'number' ? when : Tone.Time(when).toSeconds();
-      const baseMidi = Math.max(0, Math.min(127,
-        this.getTrackFilterMidi(track, notes) + this.getFilterLfoOffsetMidi(track, startTime)));
+      const baseMidi = this.getTrackFilterMidi(track, notes);
       const baseFrequency = this.midiToFrequency(baseMidi);
       filter.frequency.cancelAndHoldAtTime(startTime);
 
       if (track.filterEnvelopeAmount === 0) {
         filter.frequency.linearRampToValueAtTime(baseFrequency, startTime + ENVELOPE_SMOOTHING_SECONDS);
+        chain.filterLfo?.refresh(startTime);
         return;
       }
 
@@ -2246,6 +2224,7 @@ export default defineComponent({
       filter.frequency.linearRampToValueAtTime(sustainFrequency, decayEnd);
       filter.frequency.cancelAndHoldAtTime(gateTime);
       filter.frequency.linearRampToValueAtTime(baseFrequency, gateTime + release);
+      chain.filterLfo?.refresh(startTime);
     },
     getEchoDelaySeconds(delay: EchoDelayValue): number {
       const match = delay.match(/^1\/(\d+)([DT])?$/);
@@ -2290,6 +2269,7 @@ export default defineComponent({
       chain.noiseSynth?.dispose();
       chain.breathFilter?.dispose();
       chain.breathGain?.dispose();
+      chain.filterLfo?.dispose();
       chain.filter?.dispose();
       if (chain.choir) {
         chain.choir.formants.forEach((path) => {
@@ -2552,6 +2532,17 @@ export default defineComponent({
           gain: track.filterGain,
         });
       }
+      chain.filterLfo?.set({
+        enabled: track.filterEnabled && track.trackKind === 'rhythmic' && track.filterLfoEnabled,
+        frequencyHz: getLfoFrequencyHz({
+          sync: track.filterLfoSync, rateHz: track.filterLfoRateHz,
+          syncRate: track.filterLfoRate, bpm: this.bpm,
+        }),
+        amount: track.filterLfoAmount,
+        waveform: track.filterLfoWaveform as LfoWaveform,
+        initPhase: track.filterLfoInitPhase,
+        a4: this.a4,
+      });
       chain.limiterGain.gain.value = this.dbToGain(track.limiterGain);
       if (track.tremoloEnabled) {
         const tremolo = this.ensureTrackTremolo(chain, track);

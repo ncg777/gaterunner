@@ -1,4 +1,6 @@
 import * as Tone from 'tone';
+export { runFilterLfoChecks } from './filterLfo.browser';
+export { runNativeEffectChecks, runNativeSynthesisChecks, runNativeDrumChecks, runReverbImpulseLifecycleChecks } from './nativeEffects.browser';
 import { markRaw } from 'vue';
 import { renderOfflineAudio } from '../audio/offlineRender';
 import { disposeReverbAudioChain } from '../audio/reverb';

@@ -92,6 +92,7 @@ export class Phaser extends Tone.ToneAudioNode<PhaserOptions> {
   readonly mix: Tone.CrossFade;
   readonly stagesCount: number;
   readonly centerFrequency: number;
+  private feedbackConnected = true;
 
   constructor(options?: Partial<PhaserOptions>) {
     super(options as PhaserOptions);
@@ -149,6 +150,13 @@ export class Phaser extends Tone.ToneAudioNode<PhaserOptions> {
     this.lfo.min = -sweepOctaves;
     this.lfo.max = sweepOctaves;
     this.feedbackGain.gain.value = -clampSetting(settings.feedback, 0, 0.95, 0);
+    // A zero-gain cycle can still make Web Audio insert a render quantum of latency.
+    const feedbackEnabled = this.feedbackGain.gain.value !== 0;
+    if (feedbackEnabled !== this.feedbackConnected) {
+      if (feedbackEnabled) this.feedbackDelay.connect(this.input);
+      else this.feedbackDelay.disconnect(this.input);
+      this.feedbackConnected = feedbackEnabled;
+    }
     const stageQ = clampSetting(settings.Q, 0.0001, MAX_STAGE_Q, 0.0001);
     this.stages.forEach((stage) => {
       stage.Q.value = stageQ;

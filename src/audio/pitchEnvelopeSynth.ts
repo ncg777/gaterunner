@@ -1,6 +1,7 @@
 ﻿import * as Tone from 'tone';
 import { buildPitchEnvelopeCurve } from './pitchEnvelope';
-import { createSkewLfoState, sampleLfoAtTime, type LfoWaveform } from './lfo';
+import type { LfoWaveform } from './lfo';
+import { FilterLfo } from './filterLfo';
 
 type SynthOptions = Tone.SynthOptions;
 
@@ -48,7 +49,7 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   readonly pitchEnvelope: Tone.Envelope;
   readonly filter: Tone.Filter;
   private readonly pitchCents: Tone.Multiply;
-  private readonly filterLfoState = createSkewLfoState();
+  private filterLfo: FilterLfo | null = null;
   private _pitchEnvelopeAmount = 0;
   private _pitchEnvelopeShape = 0;
   private voiceFilterOptions: VoiceFilterOptions;
@@ -102,6 +103,7 @@ export class PitchEnvelopeSynth extends Tone.Synth {
       gain: this.voiceFilterOptions.gain,
     });
     this.routeFilter();
+    this.syncFilterLfo();
     this.pitchEnvelopeAmount = options?.pitchEnvelopeAmount ?? defaults.pitchEnvelopeAmount;
     this.pitchEnvelopeShape = options?.pitchEnvelopeShape ?? defaults.pitchEnvelopeShape;
   }
@@ -197,6 +199,7 @@ export class PitchEnvelopeSynth extends Tone.Synth {
         gain: this.voiceFilterOptions.gain,
       });
       this.routeFilter();
+      this.syncFilterLfo();
     }
     return this;
   }
@@ -220,25 +223,31 @@ export class PitchEnvelopeSynth extends Tone.Synth {
     }
   }
 
+  private syncFilterLfo(): void {
+    const options = this.voiceFilterOptions;
+    if (options.enabled && options.lfoEnabled && options.lfoAmount !== 0) {
+      this.filterLfo ??= new FilterLfo(this.filter);
+    }
+    this.filterLfo?.set({
+      enabled: options.enabled && options.lfoEnabled,
+      frequencyHz: options.lfoFrequencyHz,
+      amount: options.lfoAmount,
+      waveform: options.lfoWaveform,
+      initPhase: options.lfoInitPhase,
+    });
+  }
+
   protected scheduleFilterAttack(note: Tone.Unit.Frequency | Tone.FrequencyClass, startTime: number): void {
     const options = this.voiceFilterOptions;
     const noteMidi = Tone.Frequency(note).toMidi() + 12;
     const keyFollowMidi = (noteMidi - 69) * options.keyFollow / 100;
-    const lfoOffsetMidi = options.lfoEnabled && options.lfoAmount !== 0
-      ? sampleLfoAtTime(
-        this.filterLfoState,
-        startTime,
-        options.lfoFrequencyHz,
-        options.lfoWaveform,
-        options.lfoInitPhase,
-      ) * options.lfoAmount
-      : 0;
-    const baseMidi = this.clampMidi(options.frequencyMidi + keyFollowMidi + lfoOffsetMidi);
+    const baseMidi = this.clampMidi(options.frequencyMidi + keyFollowMidi);
     this.filterBaseFrequency = this.midiToFrequency(baseMidi);
     this.filter.frequency.cancelAndHoldAtTime(startTime);
 
     if (options.amount === 0) {
       this.filter.frequency.linearRampToValueAtTime(this.filterBaseFrequency, startTime + this.sampleTime);
+      this.filterLfo?.refresh(startTime);
       return;
     }
 
@@ -249,6 +258,7 @@ export class PitchEnvelopeSynth extends Tone.Synth {
     );
     this.filter.frequency.linearRampToValueAtTime(frequencyForLevel(1), attackEnd);
     this.filter.frequency.linearRampToValueAtTime(frequencyForLevel(options.sustain), decayEnd);
+    this.filterLfo?.refresh(startTime);
   }
 
   private clampMidi(midi: number): number {
@@ -273,10 +283,12 @@ export class PitchEnvelopeSynth extends Tone.Synth {
         this.filterBaseFrequency,
         time + Math.max(this.voiceFilterOptions.release, this.sampleTime),
       );
+      this.filterLfo?.refresh(time);
     }
   }
 
   dispose(): this {
+    this.filterLfo?.dispose();
     this.pitchEnvelope.dispose();
     this.pitchCents.dispose();
     this.filter.dispose();
