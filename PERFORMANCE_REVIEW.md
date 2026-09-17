@@ -66,6 +66,44 @@ sample rate, harmonics, unison, oversampling, modulation cadence and tails are u
 
 ## Browser profiling and implementation
 
+### Unison sound and active waveform processing
+
+Unison voices now start at a common phase and diverge at their separately detuned
+frequencies. Tone's evenly spaced starting phases canceled harmonics at low/zero
+detune, particularly with sparse tonewheel spectra. This is an intentional sound
+correction in live playback, browser export and CLI rendering. New tracks default
+to 12 cents of detune; explicitly saved values, including zero, remain intact.
+
+`src/audio/unisonPartials.ts` shares one prepared wave per context, spectrum and
+common phase across all Unison members and pooled notes. Previously each unison
+phase needed its own native wave. Idle voices still defer preparation until attack;
+raw audio time keeps release tails and future-scheduled notes included. Coefficient
+buffers contain only the actual spectrum. Structural settings are applied before
+the final shared wave, avoiding redundant partial updates. Unexpected Tone private
+internals fall back to the public setter.
+
+`node cli/profileBrowser.mjs runUnisonSoundChecks runActiveUnisonPerformanceChecks
+runUnisonOptimizationChecks runNativeSynthesisChecks` verifies independent detuned
+single-synth references, actual two-voice beating, zero-detune reinforcement, live
+count/phase/spread edits, signed/zero spectra, rests and voice reuse. The independent
+2/3/8-voice references differ by at most **4.47e-8** PCM. Ninety waveform updates
+of sounding eight-voice Unison require **90 native waves instead of 720**, shared
+across eight sounding notes. This measures active waveform preparation, not just
+idle work. Unison retains its full set of detuned oscillators.
+
+The six-track `PROFILE_MODES=steady,export` fixture in `dist/unison-coherent`
+spent approximately **285 ms** of sampled native waveform CPU time versus
+**870 ms** in `dist/unison-before`, about **67% less**. Export took **12,621 ms**
+versus **16,242 ms**, about **22% less**. Steady playback had no tasks over 50 ms;
+the largest timer gap was 45.1 ms. These are synthetic fixture measurements,
+not hardware audio-thread CPU percentages. Export hashes change with the corrected
+starting phases; the acceptance reference is the independent detuned voice bank.
+The equal-size eight-note bank benchmark measured 90 active updates at
+**604.1 ms -> 66.9 ms** with eight Unison oscillators per note. The full Node
+suite passed (255 tests), as did the subsequently expanded zero-detune/default
+regressions, native browser sound/lifecycle/modulation checks, Vue and CLI
+TypeScript checks, and the production Vite/PWA build in `dist/unison-build`.
+
 ### Realtime polling correction
 
 The next investigation isolated sustained playback from startup with

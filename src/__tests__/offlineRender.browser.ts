@@ -1,4 +1,5 @@
 import * as Tone from 'tone';
+export { runUnisonSoundChecks, runActiveUnisonPerformanceChecks } from './unison.browser';
 export { runFilterLfoChecks } from './filterLfo.browser';
 export { runNativeEffectChecks, runNativeSynthesisChecks, runNativeDrumChecks, runReverbImpulseLifecycleChecks } from './nativeEffects.browser';
 import { markRaw } from 'vue';
@@ -25,6 +26,128 @@ import { prewarmVoicePool, retainVoicePool } from '../audio/voicePool';
 import type App from '../App.vue';
 import { preparePeriodicWaveContext } from '../audio/periodicWave';
 import { configureRealtimeScheduling } from '../audio/realtimeScheduling';
+import { setSharedUnisonPartials } from '../audio/unisonPartials';
+
+export async function runUnisonOptimizationChecks() {
+  let maxDifference = 0;
+  let cases = 0;
+  const differences: unknown[] = [];
+  for (const count of [1, 2, 3, 8]) {
+    for (const sampleRate of [44100, 48000]) {
+      const render = async (optimized: boolean) => {
+        let synth: Tone.PolySynth<PitchEnvelopeSynth> | undefined;
+        // Tone's global cache otherwise reuses a wave prepared at a different
+        // sample rate/context, invalidating a reference-versus-adapter comparison.
+        const cache = Tone.Oscillator as unknown as { _periodicWaveCache: unknown[] };
+        const previous = cache._periodicWaveCache;
+        cache._periodicWaveCache = [];
+        try {
+          return await renderOfflineAudio(context => {
+            preparePeriodicWaveContext(context);
+            synth = new Tone.PolySynth(PitchEnvelopeSynth, {
+              oscillator: { type: count === 1 ? 'custom' : 'fatcustom',
+                count, spread: 70, partials: [1, -0.3, 0.15] },
+              envelope: { attack: 0.005, decay: 0.01, sustain: 0.7, release: 0.12 },
+            }).toDestination();
+            synth.volume.value = -18;
+            retainVoicePool(synth as unknown as Tone.PolySynth, 8);
+            prewarmVoicePool(synth as unknown as Tone.PolySynth, 8);
+            {
+              const voices = synth as unknown as { _voices: PitchEnvelopeSynth[]; _dummyVoice: PitchEnvelopeSynth };
+              for (const voice of [...voices._voices, voices._dummyVoice]) {
+                const set = voice.set;
+                voice.set = function (props) {
+                  if (props.oscillator && 'partials' in props.oscillator && props.oscillator.partials
+                    && Object.keys(props).length === 1) {
+                    if (optimized) {
+                      if (!setSharedUnisonPartials(this.oscillator, props.oscillator.partials)) {
+                        throw new Error('Tone adapter fell back during PCM comparison');
+                      }
+                      this.oscillator.volume.value = props.oscillator.volume ?? 0;
+                      return this;
+                    }
+                    this.oscillator.set(props.oscillator);
+                    return this;
+                  }
+                  return set.call(this, props);
+                };
+              }
+            }
+            // Include modulation before the first attack, voice reuse, rests,
+            // signed/zero spectra, release tails, and notes scheduled in advance.
+            for (let tick = 0; tick < 18; tick++) {
+              context.transport.schedule(() => {
+                const partials = tick === 9 ? [0, 0, 0] : [0.5 + tick / 40, -0.25, tick % 3 / 10];
+                synth!.set({ oscillator: { partials, volume: -3 } });
+              }, tick / 30);
+            }
+            for (const [time, notes] of [[0.04, [220, 330]], [0.21, [275]], [0.42, [440, 550]]] as const) {
+              context.transport.schedule(when => synth!.triggerAttackRelease([...notes], 0.08, when), time);
+            }
+            context.transport.start(0);
+          }, 0.8, 1, sampleRate);
+        } finally {
+          synth?.dispose();
+          cache._periodicWaveCache = previous;
+        }
+      };
+      const expected = await render(false);
+      const actual = await render(true);
+      try {
+        const reference = expected.getChannelData(0);
+        if (!reference.some(value => Math.abs(value) > 1e-3)) throw new Error('Unison reference is silent');
+        let caseDifference = 0;
+        let firstDifference = -1;
+        for (let frame = 0; frame < reference.length; frame++) {
+          const delta = Math.abs(reference[frame] - actual.getChannelData(0)[frame]);
+          if (delta && firstDifference === -1) firstDifference = frame;
+          caseDifference = Math.max(caseDifference, delta);
+        }
+        maxDifference = Math.max(maxDifference, caseDifference);
+        differences.push({ count, sampleRate, caseDifference, firstDifference });
+        cases++;
+      } finally {
+        expected.dispose(); actual.dispose();
+      }
+    }
+  }
+  if (maxDifference > 1e-7) throw new Error(`Unison PCM changed: ${JSON.stringify(differences)}`);
+
+  const context = new Tone.Context({ clockSource: 'offline' });
+  let voice: PitchEnvelopeSynth | undefined;
+  try {
+    voice = new PitchEnvelopeSynth({ context,
+      oscillator: { type: 'fatcustom', count: 8, spread: 45, partials: [1] } });
+    const oscillator = voice.oscillator;
+    const original = context.createPeriodicWave;
+    let prepared = 0;
+    context.createPeriodicWave = function (real, imag, constraints) {
+      prepared++;
+      return original.call(this, real, imag, constraints);
+    };
+    const baselineStarted = performance.now();
+    for (let tick = 0; tick < 30; tick++) oscillator.partials = [1, tick / 30];
+    const baselineMilliseconds = performance.now() - baselineStarted;
+    const baselineIdleWaves = prepared;
+    prepared = 0;
+    const optimizedStarted = performance.now();
+    for (let tick = 0; tick < 30; tick++) {
+      voice.set({ oscillator: { partials: [1, tick / 30], volume: -3 } });
+    }
+    const optimizedMilliseconds = performance.now() - optimizedStarted;
+    if (prepared !== 0) throw new Error(`Idle unison prepared ${prepared} waves`);
+    voice.triggerAttack(220, context.currentTime + 0.1);
+    if (prepared !== 1) throw new Error(`Unison start prepared ${prepared} waves instead of 1`);
+    oscillator.set({ count: 3, phase: 37 });
+    if (!setSharedUnisonPartials(oscillator, [0.3, -0.2])) throw new Error('Unison count/phase edit fell back');
+    return { equivalentPcmCases: cases, maxDifference, idleUpdates: 30, baselineIdleWaves,
+      idleWavesPrepared: 0, baselineMilliseconds, optimizedMilliseconds,
+      wavesPreparedOnStart: 1, structuralEditsSupported: true };
+  } finally {
+    voice?.dispose();
+    await context.close(); context.dispose();
+  }
+}
 
 export async function runRealtimeSchedulingChecks() {
   const context = new Tone.Context({ clockSource: 'offline' });

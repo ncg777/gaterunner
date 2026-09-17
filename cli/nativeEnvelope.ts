@@ -55,7 +55,7 @@ export function createNativePitchEnvelope(track: PitchEnvelopeParams, startTime 
   };
 }
 
-/** FatOscillator applies this gain to each phase-offset oscillator. */
+/** Per-oscillator Unison gain, matching the browser voice bus. */
 export function nativeUnisonGain(count: number): number {
   return count > 1 ? 10 ** ((-6 - count * 1.1) / 20) : 1;
 }

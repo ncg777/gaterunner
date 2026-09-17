@@ -1288,9 +1288,9 @@ function renderPreparedWavChannels(
           const usesHalfFundamentalSpectrum = hasGenericWavetable || partialGenerator.type === 'tonewheel';
           const phaseIncrement = frequency / sampleRate / (usesHalfFundamentalSpectrum ? 2 : 1);
           const voiceGain = (isMonoTrack ? 1 : noteAmplitude) * nativeUnisonGain(voiceCount);
-          // All unison sources feed the same mono bus. Tone phases are on the
-          // half-fundamental basis even when the native table uses whole cycles.
-          const initialPhase = -voice / voiceCount * (usesHalfFundamentalSpectrum ? 1 : 2);
+          // Voices start together and diverge at their detuned frequencies.
+          // Spreading initial phases evenly cancels harmonics at low/zero detune.
+          const initialPhase = 0;
           let phase = isMonoTrack ? ((monoPhases.get(voice) ?? initialPhase) + Math.max(0, startFrame - monoFrame) * monoIncrement) % 1 : initialPhase;
           let tonewheelOscillator = staticTonewheelOscillator;
           let wavetableWeights = staticWavetableWeights;

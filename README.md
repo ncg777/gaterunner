@@ -342,7 +342,9 @@ voices have independent filters before track distortion; drum filters follow the
 track effects, and per-drum drive, filters and sends are applied at the lane output.
 Both engines use the same deterministic, calibrated pink-noise reverb impulse.
 Native amplitude and pitch envelopes follow the browser's curves and smoothing;
-unison uses the same oscillator gain and phase offsets on a mono bus. Drum voices
+unison uses the same oscillator gain and coherent starting phases on a mono bus.
+Each voice then diverges at its own detuned frequency. New tracks default to
+12 cents of Unison detune; an explicitly saved zero remains zero. Drum voices
 use the browser's tone, noise, FM, transient and wash layers with matching trigger
 durations, layer filters and velocity gain ramps.
 Overlapping melodic notes use the browser's voice-stealing policy, and mono legato

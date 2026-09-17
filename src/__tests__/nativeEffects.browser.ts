@@ -3,6 +3,7 @@ import { normalizePresetTrackData, PHASER_MAX_SWEEP_OCTAVES, type PresetTrackDat
 import { Phaser } from '../audio/phaser';
 import { getLfoSyncRateHz } from '../audio/lfo';
 import { renderOfflineAudio } from '../audio/offlineRender';
+import { PitchEnvelopeSynth } from '../audio/pitchEnvelopeSynth';
 import { applyNativeTrackEffects, applyNativeEcho } from '../../cli/nativeTrackEffects';
 import { createStereoFilter } from '../../cli/biquad';
 import { createPinkNoiseImpulseChannels } from '../audio/reverbImpulse';
@@ -153,12 +154,12 @@ export async function runNativeSynthesisChecks() {
       for (let voice = 0; voice < count; voice++) {
         const detune = count === 1 ? 0 : (voice / (count - 1) - 0.5) * 20;
         const frequency = 440 * 2 ** (detune / 1200);
-        sample += oscillator(t * frequency - voice / count * 2, frequency, sampleRate) * nativeUnisonGain(count);
+        sample += oscillator(t * frequency, frequency, sampleRate) * nativeUnisonGain(count);
       }
       return sample * sampleAmplitudeEnvelope(t, duration, envelope) * 0.7;
     });
     const browser = await renderOfflineAudio(context => {
-      const synth = new Tone.Synth({ oscillator: { type: count > 1 ? 'fatcustom' : 'custom',
+      const synth = new PitchEnvelopeSynth({ oscillator: { type: count > 1 ? 'fatcustom' : 'custom',
         partials, count, spread: 20, volume: Tone.gainToDb(getPartialSpectrumGain(partials)) } as Tone.SynthOptions['oscillator'],
       envelope: { ...envelope, attackCurve: 'exponential', decayCurve: 'exponential', releaseCurve: 'exponential' } });
       synth.connect(context.destination).triggerAttackRelease(220, duration, startFrame / sampleRate, 0.7);

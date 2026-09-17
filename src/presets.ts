@@ -427,7 +427,7 @@ export const DEFAULT_PRESET_TRACK_DATA: PresetTrackData = {
   glideCurve: 'exponential',
   monoLegato: true,
   unisonVoices: 1,
-  unisonDetune: 0,
+  unisonDetune: 12,
   tonewheelDrawbars: DEFAULT_TONEWHEEL_DRAWBARS.slice(),
   tonewheelWavetable: {
     enabled: false,

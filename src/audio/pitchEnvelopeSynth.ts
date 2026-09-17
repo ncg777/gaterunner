@@ -4,6 +4,7 @@ import { normalizeSynthEngine, type SynthEngineSettings } from './synthEngine';
 import { buildPitchEnvelopeCurve } from './pitchEnvelope';
 import type { LfoWaveform } from './lfo';
 import { FilterLfo } from './filterLfo';
+import { setSharedUnisonPartials } from './unisonPartials';
 
 type SynthOptions = Tone.SynthOptions;
 type EngineEvent =
@@ -84,6 +85,11 @@ export class PitchEnvelopeSynth extends Tone.Synth {
         ...(options?.oscillator ?? {}),
       },
     });
+
+    const initialOscillator = options?.oscillator;
+    if (initialOscillator && 'partials' in initialOscillator && initialOscillator.partials) {
+      setSharedUnisonPartials(this.oscillator, initialOscillator.partials);
+    }
 
     this.pitchEnvelope = new Tone.Envelope({
       context: this.context,
@@ -190,8 +196,25 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   }
 
   set(props: Partial<PitchEnvelopeSynthOptions>): this {
-    const { engine, pitchEnvelope, pitchEnvelopeAmount, pitchEnvelopeShape, voiceFilter, ...rest } = props;
+    const { engine, pitchEnvelope, pitchEnvelopeAmount, pitchEnvelopeShape, voiceFilter, oscillator, ...rest } = props;
     if (engine) this.setEngine(engine);
+    if (oscillator) {
+      if ('partials' in oscillator && oscillator.partials) {
+        const { partials, ...settings } = oscillator;
+        // Apply topology/detune first, then prepare the final spectrum once.
+        // Sending partials through Tone first builds all the phase-offset waves
+        // that the shared Unison wave replaces immediately afterwards.
+        if (Object.keys(settings).length) this.oscillator.set(settings);
+        if (!setSharedUnisonPartials(this.oscillator, partials)) this.oscillator.partials = partials;
+      } else {
+        this.oscillator.set(oscillator);
+        // Count and phase edits create/rephase Tone children; restore the shared
+        // starting phase before their next note or waveform update.
+        if (this.oscillator.type === 'fatcustom') {
+          setSharedUnisonPartials(this.oscillator, this.oscillator.partials);
+        }
+      }
+    }
     if (Object.keys(rest).length > 0) {
       super.set(rest);
     }

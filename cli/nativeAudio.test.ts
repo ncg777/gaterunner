@@ -48,13 +48,18 @@ test('mono legato cancels future ramps and releases while preserving an active t
   assert.ok(retrigger.sample(0.07) < previous);
 });
 
-test('unison uses a mono bus, browser phase offsets and per-oscillator gain', async () => {
-  const options: GenerateTrackOptions = { ...source, partialGenerator: { type: 'waveform' }, waveform: 'sine',
-    limiterGain: -48, unisonDetune: 0 };
-  const plain = await renderWavChannels({ bpm: 240, tracks: [options] });
-  const pair = await renderWavChannels({ bpm: 240, tracks: [{ ...options, unisonVoices: 2 }] });
-  assert.deepEqual(pair.left, pair.right);
-  assertSamples(pair.left, Float32Array.from(plain.left, value => value * 2 * nativeUnisonGain(2)), 1e-7);
+test('unison uses a mono bus, coherent starting phases and per-oscillator gain', async () => {
+  for (const type of ['waveform', 'tonewheel'] as const) {
+    const options: GenerateTrackOptions = { ...source, partialGenerator: { type }, waveform: 'sine',
+      tonewheelDrawbars: [0, 0, 8, 0, 0, 0, 0, 0, 0], limiterGain: -48, unisonDetune: 0 };
+    const plain = await renderWavChannels({ bpm: 240, tracks: [options] });
+    assert.ok(plain.left.some(sample => Math.abs(sample) > 1e-5));
+    for (const count of [2, 3, 8]) {
+      const unison = await renderWavChannels({ bpm: 240, tracks: [{ ...options, unisonVoices: count }] });
+      assert.deepEqual(unison.left, unison.right);
+      assertSamples(unison.left, Float32Array.from(plain.left, value => value * count * nativeUnisonGain(count)), 1e-7);
+    }
+  }
 });
 
 test('breath and noise percussion keep deterministic independent stereo channels and obey note velocity', async () => {
