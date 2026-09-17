@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "gaterunner": {
-      "command": "node",
-      "args": ["${workspaceFolder}/dist-cli/mcp.js"],
-      "description": "GateRunner MCP server — generate MIDI files from binary-encoded note sequences using Forte number pitch-class sets."
-    }
-  }
-}

@@ -9,12 +9,10 @@
     "preview": "vite preview",
     "type-check": "vue-tsc --build --force",
     "bench:wav": "tsx cli/bench.ts",
-    "cli": "tsx cli/cli.ts",
-    "mcp": "tsx cli/mcp.ts"
+    "cli": "tsx cli/cli.ts"
   },
   "dependencies": {
     "@mdi/font": "7.4.47",
-    "@modelcontextprotocol/sdk": "^1.27.1",
     "@tonejs/midi": "^2.0.28",
     "commander": "^14.0.3",
     "register-service-worker": "^1.7.2",
