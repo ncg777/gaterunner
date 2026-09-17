@@ -2,9 +2,12 @@ import * as Tone from 'tone';
 import { markRaw } from 'vue';
 import { renderOfflineAudio } from '../audio/offlineRender';
 import { disposeReverbAudioChain } from '../audio/reverb';
-import { createWaveshaperProcessor, lookupTransferCurve, TANH_CURVE } from '../audio/trackDistortion';
+import { getWaveshaperHighpassCoefficients, getWaveshaperLevels, lookupTransferCurve, TANH_CURVE } from '../audio/trackDistortion';
 import { setTremoloSpread } from '../audio/tremolo';
-import { normalizeWaveshaperSettings, type WaveshaperSettings } from '../audio/waveshaper';
+import { normalizeWaveshaperSettings, resolveWaveshaperCurve, type WaveshaperSettings } from '../audio/waveshaper';
+import { encodeWavFromChannelsSync } from '../audio/wav';
+import { encodeWavInWorker } from '../audio/wavWorker';
+import { WAV_WORKER_CHUNK_FRAMES } from '../audio/wavWorkerProtocol';
 import {
   createWaveshaperAudioChain,
   disposeWaveshaperAudioChain,
@@ -18,6 +21,45 @@ import { blendPartialWavetableSpectra } from '../audio/partialWavetable';
 import { PitchEnvelopeSynth } from '../audio/pitchEnvelopeSynth';
 import { prewarmVoicePool, retainVoicePool } from '../audio/voicePool';
 import type App from '../App.vue';
+import { preparePeriodicWaveContext } from '../audio/periodicWave';
+
+export async function runPeriodicWavePreparationChecks() {
+  const cases = [0, 1, 8, 16, 64, 128];
+  let maxDifference = 0;
+  const timings = { padded: 0, trimmed: 0 };
+  for (const count of cases) {
+    for (const sampleRate of [44100, 48000, 96000]) {
+      for (const disableNormalization of [false, true]) {
+        const real = new Float32Array(2048);
+        const imag = new Float32Array(2048);
+        for (let index = 1; index <= count; index++) {
+          real[index] = Math.sin(index * 1.2) / index;
+          imag[index] = Math.cos(index * 0.7) / index;
+        }
+        const render = async (trim: boolean) => {
+          const context = new OfflineAudioContext(1, 4096, sampleRate);
+          if (trim) preparePeriodicWaveContext(context);
+          const started = performance.now();
+          const wave = context.createPeriodicWave(real, imag, { disableNormalization });
+          timings[trim ? 'trimmed' : 'padded'] += performance.now() - started;
+          const oscillator = context.createOscillator();
+          oscillator.frequency.value = 1379;
+          oscillator.setPeriodicWave(wave);
+          oscillator.connect(context.destination);
+          oscillator.start();
+          return (await context.startRendering()).getChannelData(0);
+        };
+        const padded = await render(false);
+        const trimmed = await render(true);
+        for (let index = 0; index < padded.length; index++) {
+          maxDifference = Math.max(maxDifference, Math.abs(padded[index] - trimmed[index]));
+        }
+      }
+    }
+  }
+  if (maxDifference !== 0) throw new Error(`Periodic wave PCM changed: ${maxDifference}`);
+  return { maxDifference, timings };
+}
 
 export async function runOfflineVoiceLifecycleChecks() {
   const eventInterval = 0.08;
@@ -380,6 +422,55 @@ export async function runWaveshaperChecks(app: InstanceType<typeof App>) {
   };
 
   const cases: { label: string; settings: WaveshaperSettings }[] = [];
+  // The native browser path uses 4x oversampling, unlike the CLI's scalar LUT.
+  // Compare against an independent single-shaper graph at the same quality.
+  const renderReference = (settings: WaveshaperSettings, track = false) => render((context, source) => {
+    const nodes: AudioNode[] = [];
+    const gain = (value: number) => {
+      const node = context.createGain();
+      node.gain.value = value;
+      nodes.push(node);
+      return node;
+    };
+    const output = new Tone.Gain(1).toDestination();
+    const { drive, mix } = getWaveshaperLevels(settings);
+    const { curve } = resolveWaveshaperCurve(settings);
+    const wetMix = settings.enabled && curve ? mix : 0;
+    const sum = gain(1);
+    const dry = gain(1 - wetMix);
+    source.connect(dry);
+    dry.connect(sum);
+    if (wetMix > 0 && curve) {
+      const inputGain = gain(drive);
+      const wet = gain(wetMix);
+      const shaper = context.createWaveShaper();
+      shaper.oversample = '4x';
+      shaper.curve = Float32Array.from(curve);
+      nodes.push(shaper);
+      source.connect(inputGain);
+      inputGain.connect(shaper);
+      if (settings.dcBlock) {
+        const c = getWaveshaperHighpassCoefficients(sampleRate);
+        const filter = context.createIIRFilter([c.b0, c.b1, c.b2], [1, c.a1, c.a2]);
+        nodes.push(filter);
+        shaper.connect(filter);
+        filter.connect(wet);
+      } else shaper.connect(wet);
+      wet.connect(sum);
+    }
+    if (track) {
+      const drive = gain(Math.pow(10, -7 / 20));
+      const level = gain(Math.pow(10, -4 / 20));
+      const limiter = context.createWaveShaper();
+      limiter.curve = Float32Array.from(TANH_CURVE);
+      nodes.push(limiter);
+      sum.connect(drive);
+      drive.connect(limiter);
+      limiter.connect(level);
+      Tone.connect(level, output);
+    } else Tone.connect(sum, output);
+    return () => { nodes.forEach(node => node.disconnect()); output.dispose(); };
+  });
   for (const dcBlock of [false, true]) {
     for (const curve of ['sine-fold', 'custom', 'asymmetric-power']) {
       cases.push({
@@ -402,10 +493,7 @@ export async function runWaveshaperChecks(app: InstanceType<typeof App>) {
   );
 
   for (const { label, settings } of cases) {
-    const expected = inputs.map(samples => {
-      const process = createWaveshaperProcessor(settings, sampleRate);
-      return Float32Array.from(samples, sample => process(sample));
-    });
+    const expected = await renderReference(settings);
     const actual = await render((context, source) => {
       let adapter: Adapter | undefined;
       try {
@@ -517,14 +605,7 @@ export async function runWaveshaperChecks(app: InstanceType<typeof App>) {
   });
 
   for (const { label, settings } of cases) {
-    const expected = inputs.map(samples => {
-      const process = createWaveshaperProcessor(settings, sampleRate);
-      return Float32Array.from(samples, sample => {
-        const shaped = Math.fround(process(sample));
-        const driven = Math.fround(shaped * Math.pow(10, -7 / 20));
-        return Math.fround(lookupTransferCurve(TANH_CURVE, driven)) * Math.pow(10, -4 / 20);
-      });
-    });
+    const expected = await renderReference(settings, true);
     const direct = await renderTrack(settings, false);
     const rerouted = await renderTrack(settings, true);
     const tolerance = settings.enabled && settings.mix !== 0 && settings.dcBlock ? 1e-5 : 1e-6;
@@ -671,4 +752,116 @@ export async function runModulationChecks(app: InstanceType<typeof App>) {
     }
   }
   return { phaseContinuity: true, tremoloSpreadAndDepthCases: 15 };
+}
+
+export async function runWavWorkerChecks() {
+  const context = new OfflineAudioContext(2, 1, 48000);
+  const audio = context.createBuffer(2, WAV_WORKER_CHUNK_FRAMES * 4 + 17, 48000);
+  const channels = [audio.getChannelData(0), audio.getChannelData(1)];
+  channels.forEach((channel, index) => {
+    for (let frame = 0; frame < channel.length; frame += 1) channel[frame] = Math.sin(frame * 0.031 + index) * 1.4;
+  });
+  let heartbeat = 0;
+  const timer = setInterval(() => { heartbeat += 1; }, 0);
+  const started = performance.now();
+  try {
+    for (const dither of [true, false]) {
+      const progress: number[] = [];
+      const expected = encodeWavFromChannelsSync(channels, 48000, { dither });
+      const actual = await encodeWavInWorker(channels, 48000, { dither, onProgress: value => progress.push(value) });
+      if (actual.length !== expected.length || !actual.every((value, index) => value === expected[index])) {
+        throw new Error(`Worker encoding changed WAV bytes, dither=${dither}`);
+      }
+      if (progress[0] !== 0 || progress.at(-1) !== 1 || progress.length !== 6) {
+        throw new Error('Expected worker acknowledgements for five chunks');
+      }
+      if (channels[0].byteLength === 0 || audio.getChannelData(1)[0] !== Math.fround(Math.sin(1) * 1.4)) {
+        throw new Error('AudioBuffer channels were detached or modified');
+      }
+    }
+    if (heartbeat === 0) throw new Error('Worker export did not yield to the main thread');
+    return { byteIdentical: true, ditherCases: 2, heartbeat, milliseconds: performance.now() - started };
+  } finally {
+    clearInterval(timer);
+  }
+  const controller = new AbortController();
+  let cancelledTicks = 0;
+  try {
+    await renderOfflineAudio(context => {
+      context.on('tick', () => {
+        if (++cancelledTicks === 3) controller.abort();
+      });
+    }, 1, 2, 48000, controller.signal);
+    throw new Error('Clock cancellation was ignored.');
+  } catch (error) {
+    if (error !== controller.signal.reason) throw error;
+  }
+  if (cancelledTicks !== 3 || Tone.getContext() !== originalContext) {
+    throw new Error('Clock cancellation did not stop ticks and restore context.');
+  }
+}
+
+/** Compare the optimized fixed graph with the previous two-fed-shaper graph. */
+export async function runPerformanceOptimizationChecks(app: InstanceType<typeof App>) {
+  let cases = 0;
+  for (const curve of ['sine-fold', 'asymmetric-power', 'custom']) {
+    for (const dcBlock of [false, true]) {
+      const settings = normalizeWaveshaperSettings({
+        enabled: true, curve, dcBlock, inputDriveDb: 5, mix: 73,
+        expression: '0.7*x+0.3*x^2',
+      });
+      const render = async (legacy: boolean) => {
+        let chain: ReturnType<typeof createWaveshaperAudioChain> | undefined;
+        let source: Tone.Oscillator | undefined;
+        try {
+          return await renderOfflineAudio(() => {
+            chain = createWaveshaperAudioChain(settings);
+            if (legacy) chain.drive.connect(chain.shapers[1]);
+            chain.output.toDestination();
+            source = new Tone.Oscillator({ frequency: 317, volume: 6 })
+              .connect(chain.input).start(0).stop(0.09);
+          }, 0.12, 2, 48000);
+        } finally {
+          source?.dispose();
+          if (chain) disposeWaveshaperAudioChain(chain);
+        }
+      };
+      const reference = await render(true);
+      const actual = await render(false);
+      try {
+        for (let channel = 0; channel < 2; channel += 1) {
+          const expected = reference.getChannelData(channel);
+          if (!actual.getChannelData(channel).every((sample, index) => sample === expected[index])) {
+            throw new Error(`Offline standby branch changed audio: ${curve}, dcBlock=${dcBlock}`);
+          }
+        }
+        cases += 1;
+      } finally {
+        reference.dispose();
+        actual.dispose();
+      }
+    }
+  }
+  const calls: Array<{ oscillator: Record<string, unknown> }> = [];
+  const chain = {
+    synth: { set: (options: { oscillator: Record<string, unknown> }) => calls.push(options) },
+    lastAppliedPartials: null, preparedWavetable: null, modulationNoteStartSeconds: 0,
+  } as unknown as ReturnType<typeof app.createTrackAudioChain>;
+  const track = normalizePresetTrackData({
+    unisonVoices: 3,
+    tonewheelWavetable: {
+      enabled: true, dimensions: [{ name: 'X', value: 0.5 }],
+      configurations: [
+        { position: [0], drawbars: [8, 0, 0, 0, 0, 0, 0, 0, 0] },
+        { position: [1], drawbars: [0, 0, 8, 0, 0, 0, 0, 0, 0] },
+      ],
+      lfos: [{ enabled: true, waveform: 'sine', rateHz: 1, depth: 0.3, routes: [1] }],
+    },
+  });
+  app.applyTonewheelModulation(track, chain, 0);
+  app.applyTonewheelModulation(track, chain, 0);
+  if (calls.length !== 1 || Object.keys(calls[0].oscillator).sort().join(',') !== 'partials,volume') {
+    throw new Error('Modulation must skip equal spectra and avoid structural oscillator updates');
+  }
+  return { identicalOversampledRenders: cases, modulationUpdatesDeduplicated: true };
 }

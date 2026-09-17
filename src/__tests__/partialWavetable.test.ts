@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   blendPartialWavetableSpectra,
+  preparePartialWavetable,
   getPartialWavetableWeights,
   resolvePartialSourceSpectrum,
   type PartialSourceSnapshot,
@@ -42,6 +43,19 @@ function mixedTable(value: number): PartialWavetable {
     lfos: [],
   };
 }
+
+test('prepared blending matches source spectra and snapshots later edits', () => {
+  const table = mixedTable(0.5);
+  const blend = preparePartialWavetable(table, tonewheel);
+  for (const position of [[0], [0.25], [0.5], [1]]) {
+    assert.deepEqual(blend(position), blendPartialWavetableSpectra(table, tonewheel, position));
+  }
+  const original = blend();
+  table.dimensions[0].value = 1;
+  table.configurations[0].position[0] = 0.9;
+  assert.deepEqual(blend(), original);
+  assert.notDeepEqual(preparePartialWavetable(table, tonewheel)(), original);
+});
 
 test('returns exact sparse-configuration weights at endpoints', () => {
   assert.deepEqual(getPartialWavetableWeights(mixedTable(0)), [1, 0]);

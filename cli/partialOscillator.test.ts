@@ -4,7 +4,44 @@ import { generatePartialSpectrum, normalizePartialGenerator } from '../src/audio
 import { normalizePresetData } from '../src/presets.js';
 import { presetDataToGeneratorInput } from './cli.js';
 import { generateMidi, generateWav, type GenerateTrackOptions } from './generate.js';
-import { preparePartialOscillator, preparePartialSpectrumOscillator } from './partialOscillator.js';
+import { preparePartialOscillator, preparePartialSpectrumOscillator, prepareModulatedSpectrumOscillator } from './partialOscillator.js';
+
+test('oscillator band reuse follows repeated pitches, sample-rate changes and silent bands', () => {
+  const generator = normalizePartialGenerator({ type: 'waveform', harmonicCount: 16 });
+  if (generator.type === 'tonewheel') throw new Error('Expected waveform generator');
+  const factories = [
+    () => preparePartialOscillator(generator, 'sawtooth'),
+    () => preparePartialSpectrumOscillator([1, 0.5, 0, -0.25], 'band-reuse-test'),
+  ];
+  for (const create of factories) {
+    const reused = create();
+    for (const [frequency, sampleRate] of [
+      [440, 48000], [440, 48000], [24000, 48000], [24000, 48000],
+      [440, 48000], [24000, 96000], [24000, 48000], [0, 44100], [440, 44100],
+    ]) {
+      const fresh = create();
+      for (const phase of [0.125, 0.3333, 0.99999]) {
+        assert.equal(reused(phase, frequency, sampleRate), fresh(phase, frequency, sampleRate));
+        if (frequency >= sampleRate / 2) assert.equal(reused(phase, frequency, sampleRate), 0);
+      }
+    }
+  }
+});
+
+test('modulated sparse sampling is exactly equal to combined tables across Nyquist crossings', () => {
+  for (const [caseIndex, spectrum] of [[], [0], [1], [0.5, 0, -0.25, 0.125],
+    Array.from({ length: 16 }, (_, index) => Math.sin(index * 1.7))].entries()) {
+    const reference = preparePartialSpectrumOscillator(spectrum, `modulated-reference-${caseIndex}`);
+    const actual = prepareModulatedSpectrumOscillator(spectrum);
+    for (const sampleRate of [44100, 48000, 96000]) {
+      for (const frequency of [0, 110, 3000, sampleRate / 16, sampleRate / 2, 440]) {
+        for (const phase of [-1.2, 0, 0.123456, 0.5, 0.99999999, 1, 3.25]) {
+          assert.equal(actual(phase, frequency, sampleRate), reference(phase, frequency, sampleRate));
+        }
+      }
+    }
+  }
+});
 
 test('CLI oscillators sample the shared browser spectrum at the musical fundamental', () => {
   const configs = [

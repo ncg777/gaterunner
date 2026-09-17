@@ -19,11 +19,13 @@ test('rebinds Tone garbage collection so pooled voices are retained', () => {
   let clearedTimer = -1;
   let scheduledCollector: (() => void) | null = null;
   let disposed = 0;
+  let scheduled = 0;
   const availableVoice = { dispose: () => { disposed += 1; } };
   const synth = {
     context: {
       clearInterval: (id: number) => { clearedTimer = id; },
       setInterval: (callback: () => void, _interval: number) => {
+        scheduled += 1;
         scheduledCollector = callback;
         return 11;
       },
@@ -43,6 +45,12 @@ test('rebinds Tone garbage collection so pooled voices are retained', () => {
   (scheduledCollector as () => void)();
   assert.equal(disposed, 0);
   assert.equal(synth._voices.length, 2);
+  retainVoicePool(synth as never, 2);
+  assert.equal(scheduled, 1, 'unchanged track edits reuse the timer');
+  retainVoicePool(synth as never, 1);
+  assert.equal(scheduled, 1, 'pool size changes reuse the collector');
+  (scheduledCollector as () => void)();
+  assert.equal(disposed, 1, 'the retained collector observes the new pool size');
 });
 
 test('prewarms the requested pool without consuming already available voices', () => {

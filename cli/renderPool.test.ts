@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { renderWavChannels, type GenerateOptions } from './generate.js';
-import { iterateWavChannelRenders, renderWavChannelsInPool } from './renderPool.js';
+import { renderWavChannels, createWavRenderSession, type GenerateOptions } from './generate.js';
+import { iterateWavChannelRenders, renderWavChannelsInPool, resolvedThreadCount } from './renderPool.js';
 import { normalizeWaveshaperSettings } from '../src/audio/waveshaper.js';
 
 const options: GenerateOptions = {
@@ -16,6 +16,24 @@ const options: GenerateOptions = {
   })),
   reverb: { enabled: true, decay: 0.1, preDelay: 0, wet: -16 },
 };
+
+test('worker concurrency respects buffer memory including the bounded queue', () => {
+  assert.equal(resolvedThreadCount(8, 8, 128 * 1024 ** 2, 4 * 1024 ** 3), 4);
+  assert.equal(resolvedThreadCount(8, 8, 512 * 1024 ** 2, 512 * 1024 ** 2), 1);
+  assert.equal(resolvedThreadCount(2, 8, 1, 4 * 1024 ** 3), 2);
+});
+
+test('prepared sessions isolate edits and omit unused per-track reverb buffers', async () => {
+  const project = structuredClone(options);
+  project.tracks![0].sequence = '0';
+  const session = await createWavRenderSession(project);
+  const expected = await renderWavChannels(project, 0);
+  project.tracks![0].sequence = '7';
+  assert.deepEqual(session.renderTrack(0), expected);
+  assert.equal(expected.reverbLeft, null);
+  assert.equal(expected.reverbRight, null);
+  assert.ok(session.renderTrack(1).reverbLeft);
+});
 
 test('source workers render more tracks than workers in order without a serial fallback', async () => {
   const results = await renderWavChannelsInPool(options, 5, 2);

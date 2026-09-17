@@ -254,6 +254,7 @@
         :format="exportFormat"
         :progress="exportProgress"
         :status="exportStatus"
+        @cancel="cancelWavExport"
       />
 
       <v-dialog v-model="showConfirmDialog" max-width="460px" persistent>
@@ -337,8 +338,9 @@ import {
   setReverbOutputEnabled,
   type ReverbAudioChain,
 } from './audio/reverb';
-import { encodeWavFromChannels } from './audio/wav';
+import { encodeWavInWorker } from './audio/wavWorker';
 import { renderOfflineAudio } from './audio/offlineRender';
+import { preparePeriodicWaveContext } from './audio/periodicWave';
 import { getMasterBus, disposeMasterBus, setMasterGainDb } from './audio/masterBus';
 import { buildTrackFadeEnvelope } from './audio/trackFade';
 import { getStepDurations } from './audio/stepDurations';
@@ -372,7 +374,7 @@ import { createDrumInstrument, type DrumInstrument } from './audio/drumKit';
 import { interpolateModulatedTonewheelDrawbars } from './audio/tonewheelWavetable';
 import { generatePartialSpectrum, getEffectiveWaveform, normalizePartialGenerator } from './audio/partialGenerator';
 import { getPartialSpectrumGain, getRealtimePartialSpectrumGain } from './audio/partialSpectrumGain';
-import { blendModulatedPartialWavetableSpectra } from './audio/partialWavetable';
+import { blendModulatedPartialWavetableSpectra, preparePartialWavetable, getModulatedPartialWavetablePosition } from './audio/partialWavetable';
 import {
   BREATH_FILTER_Q,
 } from './audio/spectra';
@@ -475,6 +477,7 @@ interface TrackAudioChain {
   voiceSignature: string;
   wavetableLfoLoop: Tone.Loop | null;
   lastAppliedPartials: number[] | null;
+  preparedWavetable: ReturnType<typeof preparePartialWavetable> | null;
   modulationTrack: PresetTrackData | null;
   modulationNoteStartSeconds: number;
   /** Notes the polyphonic engine is currently holding, oldest first, for voice stealing. */
@@ -593,6 +596,7 @@ export default defineComponent({
       exportFormat: null as 'midi' | 'wav' | null,
       exportProgress: 0,
       exportStatus: '',
+      wavExportController: null as AbortController | null,
       transportMenuOpen: false,
       controlDeckHeight: 0,
       controlDeckCollapsed: false,
@@ -1207,6 +1211,7 @@ export default defineComponent({
       return this.clampNormalRange(this.dbToGain(db));
     },
     setWavExportProgress(progress: number, status: string) {
+      if (this.wavExportController?.signal.aborted) return;
       this.exportProgress = progress < 0 ? -1 : Math.max(0, Math.min(100, Math.round(progress)));
       this.exportStatus = status;
     },
@@ -1217,10 +1222,15 @@ export default defineComponent({
       this.exportStatus = status;
     },
     finishExport() {
+      this.wavExportController = null;
       this.isExporting = false;
       this.exportFormat = null;
       this.exportProgress = 0;
       this.exportStatus = '';
+    },
+    cancelWavExport() {
+      this.wavExportController?.abort();
+      this.exportStatus = 'Cancelling WAV export...';
     },
     updateControlDeckHeight() {
       const deck = this.$refs.controlDeck as HTMLElement | undefined;
@@ -1250,6 +1260,7 @@ export default defineComponent({
       offlineContext: Tone.OfflineContext,
       renderDuration: number,
       onProgress: (ratio: number) => void | Promise<void>,
+      signal?: AbortSignal,
     ) {
       const contextProxy = offlineContext.rawContext as unknown as {
         suspend?: (when: number) => Promise<void>;
@@ -1278,9 +1289,12 @@ export default defineComponent({
 
         const ratio = step / steps;
         suspend.call(rawContext, quantumIndex * quantum).then(() => {
+          // A cancelled native render stays suspended while its graph is disposed.
+          if (signal?.aborted) return;
           try {
             void onProgress(ratio);
           } finally {
+            if (signal?.aborted) return;
             return resume.call(rawContext);
           }
         }).catch(() => {
@@ -1288,9 +1302,11 @@ export default defineComponent({
         });
       }
     },
-    async renderMixWav(): Promise<Uint8Array> {
+    async renderMixWav(signal?: AbortSignal): Promise<Uint8Array> {
+      signal?.throwIfAborted();
       this.setWavExportProgress(8, 'Preparing render...');
       await this.$nextTick();
+      signal?.throwIfAborted();
 
       const loopDuration = this.getLoopDurationSecondsFromTrackLengths();
       const renderDuration = this.getRenderDurationSeconds();
@@ -1322,7 +1338,7 @@ export default defineComponent({
                 RENDER_PROGRESS_START + (RENDER_PROGRESS_END - RENDER_PROGRESS_START) * ratio,
                 'Rendering audio...',
               );
-            });
+            }, signal);
 
             this.reverbChain = null;
             this.trackSynths = markRaw({});
@@ -1400,7 +1416,7 @@ export default defineComponent({
             this.reverbChain = liveReverbChain;
             this.trackSynths = liveTrackSynths;
           }
-        }, renderDuration, 2, WAV_EXPORT_SAMPLE_RATE);
+        }, renderDuration, 2, WAV_EXPORT_SAMPLE_RATE, signal);
       } finally {
         this.reverbChain = liveReverbChain;
         this.trackSynths = liveTrackSynths;
@@ -1426,6 +1442,7 @@ export default defineComponent({
 
       this.setWavExportProgress(ENCODE_PROGRESS_START, 'Encoding WAV...');
       await this.$nextTick();
+      signal?.throwIfAborted();
 
       const audioBuffer = (rendered as { get?: () => AudioBuffer }).get
         ? (rendered as { get: () => AudioBuffer }).get()
@@ -1437,7 +1454,8 @@ export default defineComponent({
       }
 
       let lastReportedProgress = ENCODE_PROGRESS_START;
-      return encodeWavFromChannels(channels, audioBuffer.sampleRate, {
+      return encodeWavInWorker(channels, audioBuffer.sampleRate, {
+        signal,
         onProgress: (ratio) => {
           const progress = ENCODE_PROGRESS_START + (ENCODE_PROGRESS_END - ENCODE_PROGRESS_START) * ratio;
           if (progress - lastReportedProgress < 1) {
@@ -1617,6 +1635,7 @@ export default defineComponent({
       return Math.max(1, this.getEchoDelaySeconds(track.echoDelay));
     },
     createTrackAudioChain(options: { echoPingPong?: boolean; maxDelay?: number; phaserStages?: number; phaserCenterFrequency?: number } = {}): TrackAudioChain {
+      preparePeriodicWaveContext(Tone.getContext());
       const echoPingPong = options.echoPingPong ?? true;
       const maxDelay = options.maxDelay ?? 1;
       const phaserStages = options.phaserStages ?? DEFAULT_PRESET_TRACK_DATA.phaserStages;
@@ -1683,6 +1702,7 @@ export default defineComponent({
         voiceSignature: '',
         wavetableLfoLoop: null,
         lastAppliedPartials: null,
+        preparedWavetable: null,
         modulationTrack: null,
         modulationNoteStartSeconds: 0,
         soundingNotes: [],
@@ -2049,7 +2069,8 @@ export default defineComponent({
           ? getRealtimePartialSpectrumGain(partials)
           : getPartialSpectrumGain(partials));
     },
-    getTonewheelPartials(track: PresetTrackData, timeSeconds = 0, noteStartSeconds = 0): number[] {
+    getTonewheelPartials(track: PresetTrackData, timeSeconds = 0, noteStartSeconds = 0,
+      preparedWavetable?: ReturnType<typeof preparePartialWavetable> | null): number[] {
       const generator = normalizePartialGenerator(track.partialGenerator);
       const hasGenericWavetable = track.tonewheelWavetable.enabled
         && track.tonewheelWavetable.configurations.some((configuration) => configuration.source);
@@ -2073,7 +2094,7 @@ export default defineComponent({
           bpm: this.bpm,
         },
       ) : undefined;
-      const key = [
+      const key = animated ? '' : [
         this.getEffectiveTrackWaveform(track),
         JSON.stringify(generator),
         drawbars?.join(',') ?? '',
@@ -2084,12 +2105,11 @@ export default defineComponent({
         return cached;
       }
 
+      const timing = { timeSeconds, noteStartSeconds, bpm: this.bpm };
       const partials = hasGenericWavetable
-        ? blendModulatedPartialWavetableSpectra(track.tonewheelWavetable, fallbackSource, {
-          timeSeconds,
-          noteStartSeconds,
-          bpm: this.bpm,
-        })
+        ? preparedWavetable
+          ? preparedWavetable(getModulatedPartialWavetablePosition(track.tonewheelWavetable, timing))
+          : blendModulatedPartialWavetableSpectra(track.tonewheelWavetable, fallbackSource, timing)
         : generatePartialSpectrum(generator, track.waveform, drawbars);
       // Trailing silent partials only make the periodic wave more expensive to build.
       let length = partials.length;
@@ -2436,13 +2456,19 @@ export default defineComponent({
         const voiceSignature = this.getTrackVoiceSignature(track);
         if (voiceSignature !== chain.voiceSignature) {
           chain.voiceSignature = voiceSignature;
+          chain.preparedWavetable = track.tonewheelWavetable.enabled
+            && track.tonewheelWavetable.configurations.some(configuration => configuration.source)
+            ? preparePartialWavetable(track.tonewheelWavetable, {
+              partialGenerator: normalizePartialGenerator(track.partialGenerator), waveform: track.waveform,
+              tonewheelDrawbars: track.tonewheelDrawbars,
+            }) : null;
           if (track.breathEnabled) {
             this.ensureTrackNoiseSynth(chain).set({
               envelope,
               noise: { type: 'pink' },
             });
           }
-          const partials = this.getTonewheelPartials(track);
+          const partials = this.getTonewheelPartials(track, 0, 0, chain.preparedWavetable);
           const oscillatorOptions = {
             type: this.getOscillatorType(track) as Tone.ToneOscillatorType,
             count: track.unisonVoices,
@@ -2660,14 +2686,12 @@ export default defineComponent({
       if (!chain.synth) {
         return;
       }
-      const partials = this.getTonewheelPartials(track, timeSeconds, chain.modulationNoteStartSeconds);
-      if (partials === chain.lastAppliedPartials) {
+      const partials = this.getTonewheelPartials(track, timeSeconds, chain.modulationNoteStartSeconds, chain.preparedWavetable);
+      if (partials === chain.lastAppliedPartials || (partials.length === chain.lastAppliedPartials?.length
+        && partials.every((value, index) => value === chain.lastAppliedPartials![index]))) {
         return;
       }
       const oscillator = {
-        type: this.getOscillatorType(track) as Tone.ToneOscillatorType,
-        count: track.unisonVoices,
-        spread: track.unisonDetune,
         partials,
         volume: this.getPartialOscillatorVolume(track, partials),
       };
@@ -3046,14 +3070,18 @@ export default defineComponent({
 
       this.transportMenuOpen = false;
       this.startExport('wav', 'Preparing WAV export...');
-      await this.$nextTick();
-      // Vue has flushed here, but the browser still needs a frame to paint the dialog.
-      await new Promise<void>((resolve) => {
-        window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
-      });
-
+      const controller = markRaw(new AbortController());
+      this.wavExportController = controller;
       try {
-        const data = await this.renderMixWav();
+        await this.$nextTick();
+        // Vue has flushed here, but the browser still needs a frame to paint the dialog.
+        await new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
+        });
+
+        controller.signal.throwIfAborted();
+        const data = await this.renderMixWav(controller.signal);
+        controller.signal.throwIfAborted();
         this.setWavExportProgress(98, 'Finalizing download...');
         const blob = new Blob([data.buffer as ArrayBuffer], { type: 'audio/wav' });
         const url = URL.createObjectURL(blob);
@@ -3066,6 +3094,10 @@ export default defineComponent({
         URL.revokeObjectURL(url);
         this.setWavExportProgress(100, 'WAV export complete.');
       } catch (error) {
+        if (controller.signal.aborted) {
+          this.showNotice('WAV export cancelled.', 'info');
+          return;
+        }
         console.error('Failed to export WAV:', error);
         this.showNotice('WAV export failed. Please try again.', 'error');
       } finally {
@@ -3081,6 +3113,7 @@ export default defineComponent({
       this.applyRealtimeSettings();
   },
   beforeUnmount() {
+    this.wavExportController?.abort();
     window.removeEventListener('resize', this.updateControlDeckHeight);
     this.controlDeckResizeObserver?.disconnect();
     if (this.audioContextResumeHandler) {

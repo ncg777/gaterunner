@@ -131,16 +131,33 @@ export function blendPartialWavetableSpectra(
   fallback: PartialSourceSnapshot,
   position?: number[],
 ): number[] {
-  const weights = getPartialWavetableWeights(wavetable, position);
-  if (weights.length === 0) return resolvePartialSourceSpectrum(fallback);
+  return preparePartialWavetable(wavetable, fallback)(position);
+}
 
-  const spectra = wavetable.configurations.map((configuration) => resolvePartialSourceSpectrum(
+/** Compile source spectra once per settings change, outside modulation callbacks. */
+export function preparePartialWavetable(
+  wavetable: PartialWavetable,
+  fallback: PartialSourceSnapshot,
+): (position?: number[]) => number[] {
+  const snapshot = {
+    enabled: wavetable.enabled,
+    dimensions: wavetable.dimensions.map(dimension => ({ ...dimension })),
+    configurations: wavetable.configurations.map(configuration => ({
+      ...configuration, position: configuration.position.slice(),
+    })),
+  };
+  const fallbackSpectrum = resolvePartialSourceSpectrum(fallback);
+  const spectra = wavetable.configurations.map(configuration => resolvePartialSourceSpectrum(
     resolvePartialWavetableConfigurationSource(configuration, fallback),
   ));
-  const length = Math.max(1, ...spectra.map((spectrum) => spectrum.length));
-  return Array.from({ length }, (_, partialIndex) => spectra.reduce((sum, spectrum, configurationIndex) => (
-    sum + (spectrum[partialIndex] ?? 0) * weights[configurationIndex]
-  ), 0));
+  const length = Math.max(1, ...spectra.map(spectrum => spectrum.length));
+  return (position) => {
+    const weights = getPartialWavetableWeights(snapshot, position);
+    if (weights.length === 0) return fallbackSpectrum;
+    return Array.from({ length }, (_, partialIndex) => spectra.reduce((sum, spectrum, configurationIndex) => (
+      sum + (spectrum[partialIndex] ?? 0) * weights[configurationIndex]
+    ), 0));
+  };
 }
 
 export function getModulatedPartialWavetablePosition(

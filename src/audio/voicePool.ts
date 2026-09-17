@@ -84,6 +84,8 @@ interface PolySynthInternals {
   _getNextAvailableVoice(): { dispose(): void } | undefined;
 }
 
+const retainedPools = new WeakMap<PolySynthInternals, { size: number }>();
+
 /** Allocate the requested voices before playback so offline renders capture every native voice graph. */
 export function prewarmVoicePool(synth: Tone.PolySynth, voiceCount: number): void {
   const internals = synth as unknown as PolySynthInternals;
@@ -117,10 +119,17 @@ export function prewarmVoicePool(synth: Tone.PolySynth, voiceCount: number): voi
 export function retainVoicePool(synth: Tone.PolySynth, poolSize = MAX_POOLED_VOICES): void {
   const internals = synth as unknown as PolySynthInternals;
   const boundedPoolSize = Math.max(1, Math.min(MAX_POOLED_VOICES, Math.round(poolSize)));
+  const previous = retainedPools.get(internals);
+  if (previous) {
+    previous.size = boundedPoolSize;
+    return;
+  }
+  const retention = { size: boundedPoolSize };
+  retainedPools.set(internals, retention);
 
   internals._collectGarbage = function collectPooledGarbage(this: PolySynthInternals) {
     this._averageActiveVoices = Math.max(this._averageActiveVoices * 0.95, this.activeVoices);
-    if (this._voices.length <= boundedPoolSize || this._availableVoices.length === 0) {
+    if (this._voices.length <= retention.size || this._availableVoices.length === 0) {
       return;
     }
 

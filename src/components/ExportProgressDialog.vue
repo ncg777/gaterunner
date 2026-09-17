@@ -8,6 +8,8 @@ const props = defineProps<{
   status: string;
 }>();
 
+defineEmits<{ cancel: [] }>();
+
 const formatLabel = computed(() => {
   if (props.format === 'wav') {
     return 'WAV mix';
@@ -44,6 +46,10 @@ const formatLabel = computed(() => {
           rounded
         />
       </v-card-text>
+      <v-card-actions v-if="format === 'wav'">
+        <v-spacer />
+        <v-btn variant="text" @click="$emit('cancel')">Cancel</v-btn>
+      </v-card-actions>
     </v-card>
   </v-dialog>
 </template>

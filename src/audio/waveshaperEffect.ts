@@ -165,7 +165,9 @@ export function createWaveshaperAudioChain(settings: WaveshaperSettings): Wavesh
   Tone.connect(dry, output);
   shapers.forEach((shaper, index) => {
     shaper.oversample = '4x';
-    drive.connect(shaper);
+    // A fixed offline graph never crossfades curves; leave its standby branch
+    // unfed. Live branches remain warm to preserve oversampling-filter state.
+    if (!context.isOffline || index === 0) drive.connect(shaper);
     shaper.connect(fades[index]);
     fades[index].connect(shaped);
   });

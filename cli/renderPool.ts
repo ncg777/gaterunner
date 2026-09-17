@@ -1,7 +1,7 @@
-import { availableParallelism } from 'node:os';
+import { availableParallelism, freemem } from 'node:os';
 import { Worker } from 'node:worker_threads';
 import {
-  renderWavChannels,
+  createWavRenderSession,
   type GenerateOptions,
   type WavChannelRenderResult,
 } from './generate.js';
@@ -11,12 +11,16 @@ interface WorkerResultMessage {
   error?: string;
 }
 
-function resolvedThreadCount(requestedThreads: number | undefined, trackCount: number): number {
+export function resolvedThreadCount(requestedThreads: number | undefined, trackCount: number,
+  estimatedTrackBytes = 1, availableBytes = freemem()): number {
   const automatic = Math.max(1, availableParallelism() - 1);
   const requested = Number.isFinite(requestedThreads)
     ? Math.max(1, Math.floor(requestedThreads as number))
     : automatic;
-  return Math.min(trackCount, requested);
+  // Allow two outstanding tracks per worker, retaining source-order mixing.
+  const budget = Math.min(1024 ** 3, availableBytes / 2);
+  const memoryLimit = Math.max(1, Math.floor(budget / (2 * estimatedTrackBytes)));
+  return Math.min(trackCount, requested, memoryLimit);
 }
 
 function createRenderWorker(options: GenerateOptions): Worker {
@@ -65,42 +69,57 @@ export async function* iterateWavChannelRenders(
   trackCount: number,
   requestedThreads?: number,
 ): AsyncGenerator<WavChannelRenderResult> {
-  const threadCount = resolvedThreadCount(requestedThreads, trackCount);
+  const snapshot = structuredClone(options);
+  const session = await createWavRenderSession(snapshot);
+  const threadCount = resolvedThreadCount(requestedThreads, trackCount, session.estimatedTrackBytes);
   if (threadCount <= 1) {
     for (let trackIndex = 0; trackIndex < trackCount; trackIndex += 1) {
-      yield await renderWavChannels(options, trackIndex);
+      yield session.renderTrack(trackIndex);
     }
     return;
   }
 
   const workers: Worker[] = [];
-  const pending: Array<Promise<WorkerResultMessage> | undefined> = [];
-  const dispatch = (worker: Worker, trackIndex: number): Promise<WorkerResultMessage> => (
-    renderTrackInWorker(worker, trackIndex).then(
-      (result) => ({ result }),
-      (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }),
-    )
-  );
+  const pending = new Map<number, Promise<WorkerResultMessage>>();
+  const idle = new Set<Worker>();
+  let nextTrack = 0;
+  let consumed = 0;
+  let stopped = false;
+  const dispatch = (worker: Worker): void => {
+    if (stopped || nextTrack >= trackCount || nextTrack >= consumed + 2 * threadCount) {
+      idle.add(worker);
+      return;
+    }
+    idle.delete(worker);
+    const index = nextTrack++;
+    const task = renderTrackInWorker(worker, index).then(
+      (result): WorkerResultMessage => ({ result }),
+      (error: unknown): WorkerResultMessage => ({ error: error instanceof Error ? error.message : String(error) }),
+    ).then(message => {
+      // Refill on completion, without waiting for earlier tracks to finish mixing.
+      dispatch(worker);
+      return message;
+    });
+    pending.set(index, task);
+  };
   try {
     for (let trackIndex = 0; trackIndex < threadCount; trackIndex += 1) {
-      const worker = createRenderWorker(options);
+      const worker = createRenderWorker(snapshot);
       workers.push(worker);
-      pending.push(dispatch(worker, trackIndex));
+      dispatch(worker);
     }
     for (let trackIndex = 0; trackIndex < trackCount; trackIndex += 1) {
-      const slot = trackIndex % threadCount;
-      const message = await pending[slot];
-      pending[slot] = undefined;
+      const message = await pending.get(trackIndex);
+      pending.delete(trackIndex);
       if (!message?.result) {
         throw new Error(message?.error ?? 'WAV render worker returned no result.');
       }
       yield message.result;
-      const nextTrackIndex = trackIndex + threadCount;
-      if (nextTrackIndex < trackCount) {
-        pending[slot] = dispatch(workers[slot], nextTrackIndex);
-      }
+      consumed = trackIndex + 1;
+      for (const worker of [...idle]) dispatch(worker);
     }
   } finally {
+    stopped = true;
     await Promise.all(workers.map((worker) => worker.terminate()));
   }
 }

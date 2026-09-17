@@ -411,11 +411,12 @@ inline rendering or `--threads N` to set an explicit worker count. `--verbose` p
 separate render and WAV-encoding timings. Track results are mixed in source order, so
 thread counts produce the same deterministic WAV bytes.
 
-Workers are reused across tracks, including when running from TypeScript. Export mixes
-results incrementally in track order with at most one outstanding result per worker,
+Workers and prepared project data are reused across tracks, including when running from TypeScript. Export mixes
+results incrementally in track order with a bounded queue of at most two tracks per worker,
 instead of retaining every track's full-song buffers. Long pieces still require
 full-length audio buffers; use a smaller `--threads` value to reduce concurrent memory
-use. The render timing includes mixing and reverb, not just track synthesis.
+use. Concurrency also respects an estimated buffer-memory budget (at most half of
+available memory, capped at 1 GiB for the worker queue). The render timing includes mixing and reverb, not just track synthesis.
 
 The WAV benchmark can capture reference files and compare later renders by hash and
 decoded 24-bit PCM error:
@@ -429,18 +430,27 @@ Add `--long --threads 2` to include long filtered and twelve-track fixtures. Cap
 references with the same `--long` selection before comparing. No sample-rate, bit-depth,
 envelope-resolution, or synthesis-quality settings are reduced for speed.
 
+Run `node cli/benchHotspots.mjs` for isolated peak-recovery and animated-oscillator
+benchmarks that also assert exact numerical equivalence. Animated tonewheel voices
+reuse harmonic samples rather than rebuilding full waveform tables each block.
+
 ### Browser WAV Export
 
-Offline rendering uses Tone's original audio graph and clock, without the per-second
-timer waits in its default offline scheduler. Progress checkpoints resume rendering
+Offline rendering uses Tone's original audio graph and 128-frame clock ticks,
+yielding after about 8 ms of scheduling work to keep the UI responsive. Progress checkpoints resume rendering
 without waiting for animation frames, so a hidden tab cannot stall export on a missing
-frame callback. Scheduling runs synchronously and can briefly block the UI on dense
-pieces; native audio rendering and chunked WAV encoding follow it.
+frame callback. Native audio rendering follows scheduling, then a worker encodes
+24-bit WAV data with deterministic dither. Only one bounded PCM chunk (2 MiB for
+stereo) is transferred at a time, keeping the source AudioBuffer intact. Browsers
+that cannot run the worker fall back to the yielding main-thread encoder.
+
+Choose **Cancel** in the WAV export progress dialog to stop an export without
+downloading a file. You can start another export after cancellation completes.
 
 Audio regressions can be checked with:
 
 ```sh
-yarn node --import tsx --test cli/*.test.ts src/__tests__/*.test.ts
+yarn node --import tsx --test --experimental-test-module-mocks cli/*.test.ts src/__tests__/*.test.ts
 ```
 
 For the browser-specific clock equivalence and context-restoration checks, start
@@ -450,8 +460,19 @@ For the browser-specific clock equivalence and context-restoration checks, start
 const checks = await import('/gaterunner/src/__tests__/offlineRender.browser.ts');
 await checks.runVoiceFilterChecks();
 await checks.runOfflineRenderChecks();
+await checks.runPeriodicWavePreparationChecks();
+await checks.runWavWorkerChecks();
+await checks.runWaveshaperChecks(document.querySelector('#app').__vue_app__._instance.proxy);
 await checks.runModulationChecks(document.querySelector('#app').__vue_app__._instance.proxy);
+await checks.runPerformanceOptimizationChecks(document.querySelector('#app').__vue_app__._instance.proxy);
 ```
+
+`node cli/profileBrowser.mjs` profiles a six-track animated wavetable project in
+a disposable headless Chrome profile. It writes playback/export CPU profiles and
+timings to `dist/browser-profile`. Set `CHROME_PATH` for another Chromium install,
+`PROFILE_OUTPUT` to keep separate runs, or `PROFILE_BASELINE=1` to compare the
+previous periodic-wave preparation and scheduling behavior. This benchmark does
+not use your browser's saved projects.
 
 ## Developer Guide
 
