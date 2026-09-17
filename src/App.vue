@@ -1706,13 +1706,18 @@ export default defineComponent({
         soundingNotes: [],
       });
     },
+    getTrackSynthVoiceCount(track: PresetTrackData, lookAhead: number): number {
+      const notesPerEvent = this.computeActualNotes(track).reduce((count, notes) => Math.max(count, notes.length), 1);
+      return getSynthVoiceCount(track.polyphony, track.release, this.getTrackQuant(track), lookAhead, notesPerEvent);
+    },
     ensureTrackSynth(chain: TrackAudioChain, track: PresetTrackData): TrackSynth {
       if (!chain.synth) {
         if (isMonophonic(track.polyphony)) {
           chain.synth = markRaw(new MonoGlideSynth());
         } else {
           const synth = markRaw(new Tone.PolySynth(PitchEnvelopeSynth));
-          const voiceCount = getSynthVoiceCount(track.polyphony, track.release, this.getTrackQuant(track));
+          configureRealtimeScheduling(synth.context);
+          const voiceCount = this.getTrackSynthVoiceCount(track, synth.context.lookAhead);
           synth.maxPolyphony = voiceCount;
           // Reuse voices instead of letting Tone dispose and rebuild them every second.
           retainVoicePool(synth as unknown as Tone.PolySynth, voiceCount);
@@ -1738,7 +1743,8 @@ export default defineComponent({
       if (isMono === isMonophonic(track.polyphony)) {
         if (!isMono) {
           const synth = chain.synth as Tone.PolySynth;
-          const voiceCount = getSynthVoiceCount(track.polyphony, track.release, this.getTrackQuant(track));
+          configureRealtimeScheduling(synth.context);
+          const voiceCount = this.getTrackSynthVoiceCount(track, synth.context.lookAhead);
           synth.maxPolyphony = voiceCount;
           retainVoicePool(synth as unknown as Tone.PolySynth, voiceCount);
           prewarmVoicePool(synth as unknown as Tone.PolySynth, voiceCount);

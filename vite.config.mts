@@ -12,6 +12,30 @@ import { fileURLToPath, URL } from 'node:url'
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
+    {
+      name: 'retire-production-worker-in-dev',
+      apply: 'serve',
+      configureServer(server) {
+        // A production PWA previously opened on this origin can otherwise serve
+        // its cached index.html instead of Vite's entry point, hiding source fixes.
+        server.middlewares.use((request, response, next) => {
+          const path = request.url?.split('?')[0];
+          const base = server.config.base;
+          if (path !== `${base}sw.js` && path !== `${base}service-worker.js`) return next();
+          response.setHeader('Content-Type', 'application/javascript');
+          response.setHeader('Cache-Control', 'no-store');
+          response.end(`
+self.addEventListener('install', event => event.waitUntil(self.skipWaiting()));
+self.addEventListener('activate', event => event.waitUntil((async () => {
+  await self.clients.claim();
+  await self.registration.unregister();
+  const pages = await self.clients.matchAll({ type: 'window' });
+  await Promise.allSettled(pages.map(page => page.navigate(page.url)));
+})()));
+`);
+        });
+      },
+    },
     Vue({
       template: { transformAssetUrls },
     }),

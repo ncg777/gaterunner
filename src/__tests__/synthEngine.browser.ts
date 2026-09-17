@@ -5,9 +5,123 @@ import { normalizeSynthEngine } from '../audio/synthEngine';
 import { renderOfflineAudio } from '../audio/offlineRender';
 import { normalizePresetTrackData } from '../presets';
 import { disposeReverbAudioChain } from '../audio/reverb';
+import { getMasterBus } from '../audio/masterBus';
 import type App from '../App.vue';
 import type EditorSurface from '../components/EditorSurface.vue';
 import type { ComponentInternalInstance } from 'vue';
+
+/** Check every sounding step, rather than accepting any audio somewhere in a loop. */
+export async function runFourNoteSequencerChecks(app: InstanceType<typeof App>) {
+  const results = [];
+  const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  const playStep = app.playTrackStep;
+  const warn = console.warn;
+  const context = Tone.getContext();
+  const meterName = `four-note-step-meter-${Date.now()}`;
+  // Capture on the audio thread so main-thread pauses cannot skip a note window.
+  const moduleUrl = URL.createObjectURL(new Blob([`
+class StepMeter extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.active = true;
+    this.port.onmessage = () => { this.active = false; };
+  }
+  process(inputs) {
+    let peak = 0;
+    for (const channel of inputs[0] ?? []) for (const value of channel) peak = Math.max(peak, Math.abs(value));
+    this.port.postMessage({ time: currentTime, peak });
+    return this.active;
+  }
+}
+registerProcessor('${meterName}', StepMeter);
+`], { type: 'application/javascript' }));
+  try { await context.addAudioWorkletModule(moduleUrl); } finally { URL.revokeObjectURL(moduleUrl); }
+  for (const synthMode of ['additive', 'choir', 'resonant-noise'] as const) for (const polyphony of [2, 8, 1]) {
+    app.stopSequencer();
+    await wait(500);
+    app.applyDraftData({ ...app.getDraftData(), bpm: 120, forte: '5-35.05', bitmaskSequenceInput: '', masterGain: 0,
+      reverb: { ...app.getDraftData().reverb, enabled: false, dry: 0 },
+      tracks: [normalizePresetTrackData({ id: `four-note-${synthMode}-${polyphony}`, synthMode, polyphony,
+        sequenceInput: '1 2 4 8', repeats: 1, lengthFactor: 60, release: 0 })] });
+    await app.$nextTick();
+    const notes = app.computeActualNotes(app.currentTrack!);
+    if (notes.length !== 4 || notes.some(note => note.length !== 1)) throw new Error('Four-note decoding failed');
+    const meter = context.createAudioWorkletNode(meterName);
+    const master = getMasterBus();
+    master.clipper.connect(meter);
+    Tone.connect(meter, context.destination);
+    const steps: Array<{ step: number; time: number; peak: number; frames: number }> = [];
+    let measuredTime = 0;
+    meter.port.onmessage = (event: MessageEvent<{ time: number; peak: number }>) => {
+      const { time, peak } = event.data;
+      measuredTime = time;
+      for (const step of steps) if (time >= step.time + 0.03 && time <= step.time + 0.065) {
+        step.peak = Math.max(step.peak, peak);
+        step.frames++;
+      }
+    };
+    const warnings: string[] = [];
+    app.playTrackStep = (track, event, time) => {
+      steps.push({ step: event.step, time, peak: 0, frames: 0 });
+      playStep(track, event, time);
+    };
+    console.warn = (...args: unknown[]) => { warnings.push(args.join(' ')); warn(...args); };
+    try {
+      await app.startSequencer();
+      const deadline = performance.now() + 15000;
+      while (performance.now() < deadline) {
+        if (steps.length >= 8 && measuredTime > steps[7].time + 0.15) break;
+        await wait(5);
+      }
+      const first = steps.slice(0, 8);
+      if (first.length !== 8 || first.some((step, i) => step.step !== (first[0].step + i) % 4
+        || !Number.isFinite(step.peak) || step.peak < 1e-4)
+        || warnings.some(warning => warning.includes('Note dropped'))) {
+        throw new Error(`${synthMode}/${polyphony}: incomplete four-note loops ${JSON.stringify({ steps: first, warnings, measuredTime, currentTime: context.currentTime, state: context.state })}`);
+      }
+      results.push({ synthMode, polyphony, steps: first });
+    } finally {
+      console.warn = warn;
+      app.playTrackStep = playStep;
+      app.stopSequencer(); master.clipper.disconnect(meter); meter.disconnect(); meter.port.postMessage('stop'); meter.port.close();
+    }
+  }
+  return results;
+}
+
+/** Measure the final mix, including master gain and clipping, across engine selections. */
+export async function runSynthEngineMasterOutputChecks(app: InstanceType<typeof App>) {
+  const results = [];
+  const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  for (const polyphony of [1, 8]) {
+    app.stopSequencer();
+    app.applyDraftData({ ...app.getDraftData(), masterGain: 0,
+      reverb: { ...app.getDraftData().reverb, enabled: false, dry: 0 },
+      tracks: [normalizePresetTrackData({ id: `master-output-${polyphony}`, polyphony,
+        sequenceInput: '1 2 4 8', repeats: 8, synthMode: 'additive' })] });
+    await app.$nextTick();
+    const meter = new Tone.Analyser({ type: 'waveform', size: 2048 });
+    const master = getMasterBus();
+    master.clipper.connect(meter);
+    try {
+      await app.startSequencer();
+      for (const synthMode of ['additive', 'choir', 'resonant-noise', 'additive'] as const) {
+        app.handleTrackDraftChange(normalizePresetTrackData({ ...app.currentTrack, synthMode }));
+        let peak = 0;
+        for (let i = 0; i < 24; i++) {
+          await wait(50);
+          const samples = meter.getValue() as Float32Array;
+          if (!samples.every(Number.isFinite)) throw new Error(`${synthMode}: invalid master output`);
+          peak = Math.max(peak, ...samples.map(Math.abs));
+        }
+        if (!app.isRunning || peak < 1e-4) throw new Error(`${synthMode}/${polyphony}: silent master output (${peak})`);
+        results.push({ synthMode, polyphony, peak });
+      }
+    } finally { app.stopSequencer(); master.clipper.disconnect(meter); meter.dispose(); }
+    await wait(500);
+  }
+  return results;
+}
 
 /** Choir setup must stay lightweight even when a voice is built by a transport callback. */
 export async function runChoirRealtimeSetupChecks() {

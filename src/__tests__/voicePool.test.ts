@@ -53,6 +53,15 @@ test('rebinds Tone garbage collection so pooled voices are retained', () => {
   assert.equal(disposed, 1, 'the retained collector observes the new pool size');
 });
 
+test('reserves voices for notes scheduled ahead even with zero release', () => {
+  assert.equal(getSynthVoiceCount(2, 0, 0.125, 0.4), 16);
+  assert.equal(getSynthVoiceCount(2, 0.12, 1 / 6, 0.4), 14);
+  assert.equal(getSynthVoiceCount(2, 0, 0.125, 0), 2, 'offline renders have no scheduling cushion');
+  assert.equal(getSynthVoiceCount(8, 0.12, 0.125, 0.4), 32, 'the pool remains bounded');
+  assert.equal(getSynthVoiceCount(2, 0, 0.125, 0.4, 1), 9);
+  assert.equal(getSynthVoiceCount(8, 0, 0.125, 0.4, 1), 15, 'single-note patterns do not reserve full chords');
+});
+
 test('prewarms the requested pool without consuming already available voices', () => {
   const existingVoice = { dispose() {} };
   const voiceCount = getSynthVoiceCount(2, 5.28, 60 / (46 * 2));

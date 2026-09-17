@@ -8,22 +8,29 @@ export const MAX_POOLED_VOICES = 32;
 
 /**
  * Tone voices to allocate for a track that should sound `polyphony` notes at once.
- * Released voices remain allocated for the whole amp-envelope tail, so dense tracks
- * need enough additional voices to cover every note interval crossed by that tail.
+ * Voices are reserved when a note is scheduled, before it actually sounds, and
+ * remain allocated through the amp-envelope tail and Tone's deferred stop callback.
+ * Reserve a scheduling window on either side of that tail. Extra voices follow the
+ * pattern's chord size so single-note tracks do not allocate full chords of headroom.
  */
 export function getSynthVoiceCount(
   polyphony: number,
   releaseSeconds = 0,
   eventIntervalSeconds = Number.POSITIVE_INFINITY,
+  lookAheadSeconds = 0,
+  notesPerEvent = polyphony,
 ): number {
   const musicalVoices = Math.max(1, Math.round(polyphony));
-  const releaseIntervals = Number.isFinite(releaseSeconds)
+  const eventVoices = Math.max(1, Math.min(musicalVoices, Math.round(notesPerEvent)));
+  const reservationSeconds = Math.max(0, Number.isFinite(releaseSeconds) ? releaseSeconds : 0)
+    + 2 * Math.max(0, Number.isFinite(lookAheadSeconds) ? lookAheadSeconds : 0);
+  const reservationIntervals = Number.isFinite(reservationSeconds)
     && Number.isFinite(eventIntervalSeconds)
-    && releaseSeconds > 0
+    && reservationSeconds > 0
     && eventIntervalSeconds > 0
-    ? Math.ceil(releaseSeconds / eventIntervalSeconds)
+    ? Math.ceil(reservationSeconds / eventIntervalSeconds)
     : 0;
-  return Math.min(MAX_POOLED_VOICES, musicalVoices * (releaseIntervals + 1));
+  return Math.min(MAX_POOLED_VOICES, musicalVoices + eventVoices * reservationIntervals);
 }
 
 export interface SoundingNote {
