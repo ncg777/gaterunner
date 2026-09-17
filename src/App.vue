@@ -2143,6 +2143,9 @@ export default defineComponent({
       const frequencies = this.getTrackPlaybackFrequencies(track, notes);
       const synth = this.ensureTrackSynth(chain, track);
       const modulationTime = modulationTimeSeconds ?? Tone.getTransport().getSecondsAtTime(when);
+      if (track.filterEnabled && track.filterLfoEnabled && track.filterLfoRetrigger === 'note') {
+        synth.set({ filterLfoNoteStartSeconds: synth.toSeconds(when) } as Parameters<PitchEnvelopeSynth['set']>[0]);
+      }
       chain.modulationNoteStartSeconds = modulationTime;
       this.applyTonewheelModulation(track, chain, modulationTime);
       if (normalizeSynthEngine(track).synthMode === 'additive' && track.breathEnabled && frequencies.length > 0) {
@@ -2205,6 +2208,7 @@ export default defineComponent({
 
       const filter = this.ensureTrackFilter(chain);
       const startTime = typeof when === 'number' ? when : Tone.Time(when).toSeconds();
+      chain.filterLfo?.triggerNote(startTime);
       const baseMidi = this.getTrackFilterMidi(track, notes);
       const baseFrequency = this.midiToFrequency(baseMidi);
       filter.frequency.cancelAndHoldAtTime(startTime);
@@ -2500,6 +2504,7 @@ export default defineComponent({
                 lfoAmount: track.filterLfoAmount,
                 lfoWaveform: track.filterLfoWaveform as LfoWaveform,
                 lfoInitPhase: track.filterLfoInitPhase,
+                lfoRetrigger: track.filterLfoRetrigger,
             },
           } as Parameters<PitchEnvelopeSynth['set']>[0];
           // PolySynth.set typings only expose base SynthOptions; PitchEnvelopeSynth accepts the extras.
@@ -2550,6 +2555,7 @@ export default defineComponent({
         amount: track.filterLfoAmount,
         waveform: track.filterLfoWaveform as LfoWaveform,
         initPhase: track.filterLfoInitPhase,
+        retrigger: track.filterLfoRetrigger,
         a4: this.a4,
       });
       chain.limiterGain.gain.value = this.dbToGain(track.limiterGain);
@@ -2673,6 +2679,7 @@ export default defineComponent({
         track.filterLfoAmount,
         track.filterLfoWaveform,
         track.filterLfoInitPhase,
+        track.filterLfoRetrigger,
         this.bpm,
         track.polyphony,
         track.glideTime,

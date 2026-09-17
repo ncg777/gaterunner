@@ -15,6 +15,14 @@ export const LFO_WAVEFORM_OPTIONS = [
 
 export type LfoWaveform = typeof LFO_WAVEFORM_OPTIONS[number]['value'];
 
+export const LFO_PHASE_MODE_OPTIONS = [
+  { title: 'Free running', value: 'free' },
+  { title: 'Retrigger on note event (track-wide)', value: 'note' },
+  { title: 'Retrigger when song is played', value: 'song' },
+] as const;
+
+export type LfoPhaseMode = typeof LFO_PHASE_MODE_OPTIONS[number]['value'];
+
 export const LFO_WAVEFORM_VALUES = new Set<string>(LFO_WAVEFORM_OPTIONS.map((option) => option.value));
 
 export const LFO_FREE_RATE_MIN_HZ = 0.01;

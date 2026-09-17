@@ -894,7 +894,8 @@ function midiToFrequency(midi: number, a4 = 440): number {
   return a4 * Math.pow(2, (midi - 69) / 12);
 }
 
-function createFilterCutoff(track: NormalizedTrack, midiNotes: number[], duration: number, a4: number, start = 0, bpm = 120): (elapsed: number) => number {
+function createFilterCutoff(track: NormalizedTrack, midiNotes: number[], duration: number, a4: number, start = 0, bpm = 120,
+  noteStarts: readonly number[] = []): (elapsed: number) => number {
   if (!track.filterEnabled) {
     return () => 0;
   }
@@ -907,9 +908,15 @@ function createFilterCutoff(track: NormalizedTrack, midiNotes: number[], duratio
       rateHz: track.filterLfoRateHz, syncRate: track.filterLfoRate, bpm });
     const minimumFrequency = midiToFrequency(0, a4);
     const maximumFrequency = midiToFrequency(127, a4);
+    let noteIndex = 0;
     return elapsed => {
       const frequency = cutoff(elapsed);
-      const offset = sampleLfoAtTime(state, start + Math.max(0, elapsed), frequencyHz,
+      const time = start + Math.max(0, elapsed);
+      while (noteIndex + 1 < noteStarts.length && noteStarts[noteIndex + 1]! <= time) noteIndex += 1;
+      // Native songs begin at zero; every active voice shares the latest track event.
+      const localTime = track.filterLfoRetrigger === 'note'
+        ? Math.max(0, time - (noteStarts[noteIndex] ?? start)) : time;
+      const offset = sampleLfoAtTime(state, localTime, frequencyHz,
         track.filterLfoWaveform, track.filterLfoInitPhase) * track.filterLfoAmount;
       return clamp(frequency * Math.pow(2, offset / 12), minimumFrequency, maximumFrequency);
     };
@@ -1108,6 +1115,7 @@ function renderPreparedWavChannels(
 
     const trackLeft = new Float32Array(frameCount);
     const trackRight = new Float32Array(frameCount);
+    const filterNoteStarts = events.map(event => event.time).sort((a, b) => a - b);
     const isDrumTrack = entry.track.trackKind === 'rhythmic';
     const drumEchoLeft = isDrumTrack && entry.track.echoEnabled && entry.track.echoWet > -96 ? new Float32Array(frameCount) : null;
     const drumEchoRight = drumEchoLeft ? new Float32Array(frameCount) : null;
@@ -1299,7 +1307,8 @@ function renderPreparedWavChannels(
             ?? createNativeEngineSource(engine, sampleRate, (trackIndex + 1) * 65537 + startFrame + noteIndex * 97 + voice);
           if (isMonoTrack && engineSource) monoEngineSources.set(voice, engineSource);
           const [voiceFilter] = createStereoFilter(entry.track, sampleRate);
-          const voiceCutoff = createFilterCutoff(entry.track, [midiNote], noteDuration, prepared.a4, start, prepared.bpm);
+          const voiceCutoff = createFilterCutoff(entry.track, [midiNote], noteDuration, prepared.a4, start, prepared.bpm,
+            filterNoteStarts);
           for (let frame = startFrame; frame < voiceEndFrame; frame += 1) {
             const t = (frame - startFrame) / sampleRate;
             if (hasTonewheelModulation && (frame - startFrame) % 64 === 0) {
@@ -1390,7 +1399,7 @@ function renderPreparedWavChannels(
     const filterEvents = events.slice().sort((left, right) => left.time - right.time || left.order - right.order);
     let filterEventIndex = 0;
     let filterStart = 0;
-    let filterCutoff = createFilterCutoff(entry.track, [], 0, prepared.a4);
+    let filterCutoff = createFilterCutoff(entry.track, [], 0, prepared.a4, 0, prepared.bpm);
     const barSeconds = entry.track.numerator * (60 / prepared.bpm);
     const trackStartSeconds = getTrackDelaySeconds(prepared.bpm, entry.track);
     const activeDurationSeconds = entry.track.repeats * getTrackRepeatDurationSeconds(prepared.bpm, entry);

@@ -2,7 +2,7 @@
 import { EngineSource } from './engineSource';
 import { normalizeSynthEngine, type SynthEngineSettings } from './synthEngine';
 import { buildPitchEnvelopeCurve } from './pitchEnvelope';
-import type { LfoWaveform } from './lfo';
+import type { LfoWaveform, LfoPhaseMode } from './lfo';
 import { FilterLfo } from './filterLfo';
 import { setSharedUnisonPartials } from './unisonPartials';
 
@@ -29,6 +29,7 @@ export interface VoiceFilterOptions {
   lfoAmount: number;
   lfoWaveform: LfoWaveform;
   lfoInitPhase: number;
+  lfoRetrigger: LfoPhaseMode;
 }
 
 export interface PitchEnvelopeSynthOptions extends SynthOptions {
@@ -44,6 +45,8 @@ export interface PitchEnvelopeSynthOptions extends SynthOptions {
   pitchEnvelopeShape: number;
   voiceFilter: VoiceFilterOptions;
   engine: SynthEngineSettings;
+  /** Track-wide note origin broadcast to all voices, including future allocations. */
+  filterLfoNoteStartSeconds: number;
 }
 
 /**
@@ -57,6 +60,7 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   readonly filter: Tone.Filter;
   private readonly pitchCents: Tone.Multiply;
   private filterLfo: FilterLfo | null = null;
+  private filterLfoNoteStartSeconds = -1;
   private _pitchEnvelopeAmount = 0;
   private _pitchEnvelopeShape = 0;
   private voiceFilterOptions: VoiceFilterOptions;
@@ -111,6 +115,7 @@ export class PitchEnvelopeSynth extends Tone.Synth {
       ...defaults.voiceFilter,
       ...(options?.voiceFilter ?? {}),
     };
+    this.filterLfoNoteStartSeconds = options?.filterLfoNoteStartSeconds ?? -1;
     this.filter = new Tone.Filter({
       context: this.context,
       type: this.voiceFilterOptions.type,
@@ -155,7 +160,9 @@ export class PitchEnvelopeSynth extends Tone.Synth {
         lfoAmount: 0,
         lfoWaveform: 'sine' as LfoWaveform,
         lfoInitPhase: 0,
+        lfoRetrigger: 'song' as LfoPhaseMode,
       },
+      filterLfoNoteStartSeconds: -1,
     });
   }
 
@@ -196,7 +203,12 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   }
 
   set(props: Partial<PitchEnvelopeSynthOptions>): this {
-    const { engine, pitchEnvelope, pitchEnvelopeAmount, pitchEnvelopeShape, voiceFilter, oscillator, ...rest } = props;
+    const { engine, pitchEnvelope, pitchEnvelopeAmount, pitchEnvelopeShape, voiceFilter, oscillator,
+      filterLfoNoteStartSeconds, ...rest } = props;
+    if (filterLfoNoteStartSeconds !== undefined) {
+      this.filterLfoNoteStartSeconds = filterLfoNoteStartSeconds;
+      if (filterLfoNoteStartSeconds >= 0) this.filterLfo?.triggerNote(filterLfoNoteStartSeconds);
+    }
     if (engine) this.setEngine(engine);
     if (oscillator) {
       if ('partials' in oscillator && oscillator.partials) {
@@ -353,10 +365,13 @@ export class PitchEnvelopeSynth extends Tone.Synth {
       amount: options.lfoAmount,
       waveform: options.lfoWaveform,
       initPhase: options.lfoInitPhase,
+      retrigger: options.lfoRetrigger,
     });
+    if (this.filterLfoNoteStartSeconds >= 0) this.filterLfo?.triggerNote(this.filterLfoNoteStartSeconds);
   }
 
   protected scheduleFilterAttack(note: Tone.Unit.Frequency | Tone.FrequencyClass, startTime: number): void {
+    if (this.filterLfoNoteStartSeconds < 0) this.filterLfo?.triggerNote(startTime);
     const options = this.voiceFilterOptions;
     const noteMidi = Tone.Frequency(note).toMidi() + 12;
     const keyFollowMidi = (noteMidi - 69) * options.keyFollow / 100;

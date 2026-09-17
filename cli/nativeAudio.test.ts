@@ -149,6 +149,23 @@ test('filter LFO keeps moving during held notes and release for every waveform',
   }
 });
 
+test('native filter phase defaults to song and note mode starts at a delayed note event', async () => {
+  const track: GenerateTrackOptions = { ...source, phase: 0.5,
+    filterEnabled: true, filterFrequency: 69, filterLfoEnabled: true,
+    filterLfoSync: false, filterLfoRateHz: 3, filterLfoAmount: 12, filterLfoInitPhase: 0.23 };
+  const options = { bpm: 120, tracks: [track], reverb: { enabled: false } };
+  const start = new ToneMidi.Midi(await generateMidi(options)).tracks[0]!.notes[0]!.time;
+  const song = await renderWavChannels(options);
+  const free = await renderWavChannels({ ...options, tracks: [{ ...track, filterLfoRetrigger: 'free' }] });
+  assertSamples(song.left, free.left);
+  const note = await renderWavChannels({ ...options, tracks: [{ ...track, filterLfoRetrigger: 'note' }] });
+  const shiftedPhase = ((0.23 - start * 3) % 1 + 1) % 1;
+  const shifted = await renderWavChannels({ ...options, tracks: [{ ...track,
+    filterLfoRetrigger: 'free', filterLfoInitPhase: shiftedPhase }] });
+  assertSamples(note.left, shifted.left);
+  assert.notDeepEqual(note.left, song.left);
+});
+
 test('chorus, flanger, phaser and vibrato process both kinds of track and leave MIDI unchanged', async () => {
   const cases: GenerateTrackOptions[] = [
     { chorusEnabled: true, chorusFeedback: 0.4 }, { flangerEnabled: true },

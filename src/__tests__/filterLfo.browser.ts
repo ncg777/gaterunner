@@ -15,52 +15,91 @@ export async function runFilterLfoChecks(app: InstanceType<typeof App>) {
   const savedReverb = app.reverbChain;
   try {
     for (const { value: waveform } of SKEW_LFO_WAVEFORM_OPTIONS) {
-      let voice: PitchEnvelopeSynth | undefined;
+      for (const retrigger of ['free', 'note', 'song'] as const) {
+        let voice: PitchEnvelopeSynth | undefined;
+        let chain: ReturnType<typeof app.createTrackAudioChain> | undefined;
+        let reverb: ReturnType<typeof app.getOrCreateReverbChain> | undefined;
+        const track = normalizePresetTrackData({ trackKind: 'rhythmic', filterEnabled: true,
+          filterFrequency: 69, filterEnvelopeAmount: 12, filterEnvelopeSustain: 0.25,
+          filterEnvelopeAttack: 0.05, filterEnvelopeDecay: 0.1, filterEnvelopeRelease: 0.2,
+          filterLfoEnabled: true, filterLfoSync: true, filterLfoRate: '1/4',
+          filterLfoAmount: 12, filterLfoWaveform: waveform, filterLfoInitPhase: 0.13,
+          filterLfoRetrigger: retrigger,
+        });
+        const frequencyHz = getLfoFrequencyHz({ sync: true, rateHz: 1, syncRate: '1/4', bpm: app.bpm });
+        app.reverbChain = null;
+        try {
+          const buffer = await renderOfflineAudio(context => {
+            reverb = app.getOrCreateReverbChain();
+            chain = app.createTrackAudioChain();
+            app.updateTrackChainSettings(track, chain);
+            app.scheduleFilterEnvelope(track, [69], 0.3, 0.4, chain);
+            voice = new PitchEnvelopeSynth({
+              oscillator: { type: 'sawtooth' } as Tone.SynthOptions['oscillator'],
+              voiceFilter: { ...PitchEnvelopeSynth.getDefaults().voiceFilter,
+                enabled: true, frequencyMidi: 69, amount: 12, attack: 0.05, decay: 0.1,
+                sustain: 0.25, release: 0.2, lfoEnabled: true, lfoAmount: 12,
+                lfoFrequencyHz: frequencyHz, lfoWaveform: waveform, lfoInitPhase: 0.13,
+                lfoRetrigger: retrigger,
+              },
+            }).toDestination();
+            voice.triggerAttackRelease(220, 0.4, 0.3);
+            context.transport.schedule(time => {
+              voice!.triggerAttackRelease(440, 0.15, time);
+              app.scheduleFilterEnvelope(track, [81], time, 0.15, chain!);
+            }, 0.65);
+            context.transport.start(0.2);
+          }, 1.2, 1, 48000);
+          for (const time of [0.35, 0.65, 0.75, 0.9, 1.05]) {
+            const origin = retrigger === 'note' ? (time < 0.85 ? 0.3 : 0.85)
+              : retrigger === 'song' ? 0.2 : 0;
+            const expected = sampleLfoAtTime(createSkewLfoState(), time - origin, frequencyHz, waveform, 0.13) * 1200;
+            check(Math.abs(voice!.filter.detune.getValueAtTime(time) - expected) < 1e-5,
+              `${waveform}/${retrigger}: voice follows LFO at ${time}s`);
+            check(Math.abs(chain!.filter!.detune.getValueAtTime(time) - expected) < 1e-5,
+              `${waveform}/${retrigger}: rhythmic filter follows LFO at ${time}s`);
+          }
+          const samples = buffer.getChannelData(0);
+          check(samples.every(Number.isFinite) && samples.some(sample => Math.abs(sample) > 0.001),
+            `${waveform}/${retrigger}: modulated audio is finite and audible`);
+          buffer.dispose();
+        } finally {
+          voice?.dispose();
+          if (chain) app.disposeTrackChain(chain);
+          if (reverb) disposeReverbAudioChain(reverb);
+        }
+      }
+    }
+    for (const retrigger of ['free', 'note', 'song'] as const) {
       let chain: ReturnType<typeof app.createTrackAudioChain> | undefined;
       let reverb: ReturnType<typeof app.getOrCreateReverbChain> | undefined;
-      const track = normalizePresetTrackData({ trackKind: 'rhythmic', filterEnabled: true,
-        filterFrequency: 69, filterEnvelopeAmount: 12, filterEnvelopeSustain: 0.25,
-        filterEnvelopeAttack: 0.05, filterEnvelopeDecay: 0.1, filterEnvelopeRelease: 0.2,
-        filterLfoEnabled: true, filterLfoSync: true, filterLfoRate: '1/4',
-        filterLfoAmount: 12, filterLfoWaveform: waveform, filterLfoInitPhase: 0.13,
-      });
-      const frequencyHz = getLfoFrequencyHz({ sync: true, rateHz: 1, syncRate: '1/4', bpm: app.bpm });
       app.reverbChain = null;
       try {
+        const track = normalizePresetTrackData({ trackKind: 'melodic', polyphony: 4,
+          filterEnabled: true, filterFrequency: 69, filterEnvelopeAmount: 0,
+          filterLfoEnabled: true, filterLfoSync: false, filterLfoRateHz: 1,
+          filterLfoAmount: 12, filterLfoInitPhase: 0.13, filterLfoRetrigger: retrigger,
+        });
         const buffer = await renderOfflineAudio(context => {
           reverb = app.getOrCreateReverbChain();
           chain = app.createTrackAudioChain();
           app.updateTrackChainSettings(track, chain);
-          app.scheduleFilterEnvelope(track, [69], 0, 0.6, chain);
-          voice = new PitchEnvelopeSynth({
-            oscillator: { type: 'sawtooth' } as Tone.SynthOptions['oscillator'],
-            voiceFilter: { ...PitchEnvelopeSynth.getDefaults().voiceFilter,
-              enabled: true, frequencyMidi: 69, amount: 12, attack: 0.05, decay: 0.1,
-              sustain: 0.25, release: 0.2, lfoEnabled: true, lfoAmount: 12,
-              lfoFrequencyHz: frequencyHz, lfoWaveform: waveform, lfoInitPhase: 0.13,
-            },
-          }).toDestination();
-          voice.triggerAttackRelease(220, 0.6, 0);
-          // A second note must retain the absolute LFO phase.
-          context.transport.schedule(time => {
-            voice!.triggerAttackRelease(440, 0.15, time);
-            app.scheduleFilterEnvelope(track, [81], time, 0.15, chain!);
-          }, 0.85);
-          context.transport.start(0);
+          context.transport.schedule(time => app.triggerTrackVoice(track, chain!, [69], 1, time, 0.7), 0.1);
+          context.transport.schedule(time => app.triggerTrackVoice(track, chain!, [76], 0.7, time, 0.7), 0.65);
+          context.transport.start(0.2);
         }, 1.2, 1, 48000);
-        for (const time of [0.1, 0.35, 0.65, 0.75, 0.9, 1.05]) {
-          const expected = sampleLfoAtTime(createSkewLfoState(), time, frequencyHz, waveform, 0.13) * 1200;
-          check(Math.abs(voice!.filter.detune.getValueAtTime(time) - expected) < 1e-5,
-            `${waveform}: voice follows LFO at ${time}s`);
-          check(Math.abs(chain!.filter!.detune.getValueAtTime(time) - expected) < 1e-5,
-            `${waveform}: rhythmic filter follows LFO at ${time}s`);
+        const voices = (chain!.synth as unknown as { _activeVoices: { voice: PitchEnvelopeSynth }[] })
+          ._activeVoices.map(event => event.voice);
+        check(voices.length === 2, `${retrigger}: overlapping notes use two filter voices`);
+        const origin = retrigger === 'note' ? 0.85 : retrigger === 'song' ? 0.2 : 0;
+        const expected = sampleLfoAtTime(createSkewLfoState(), 0.9 - origin, 1, 'sine', 0.13) * 1200;
+        for (const voice of voices) {
+          // Context ticks can offset the 200 Hz control grid; ramps interpolate between samples.
+          check(Math.abs(voice.filter.detune.getValueAtTime(0.9) - expected) < 0.2,
+            `${retrigger}: overlapping voices share the track phase`);
         }
-        const samples = buffer.getChannelData(0);
-        check(samples.every(Number.isFinite) && samples.some(sample => Math.abs(sample) > 0.001),
-          `${waveform}: modulated audio is finite and audible`);
         buffer.dispose();
       } finally {
-        voice?.dispose();
         if (chain) app.disposeTrackChain(chain);
         if (reverb) disposeReverbAudioChain(reverb);
       }

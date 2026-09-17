@@ -593,7 +593,7 @@
                   <v-select v-model="lfo.polarity" label="Polarity" :items="wavetableLfoPolarityOptions" density="compact" variant="outlined" hide-details @update:modelValue="handleTrackDraftChange" />
                 </v-col>
                 <v-col cols="12" md="4">
-                  <v-select v-model="lfo.retrigger" label="Phase mode" :items="wavetableLfoRetriggerOptions" density="compact" variant="outlined" hide-details @update:modelValue="handleTrackDraftChange" />
+                  <v-select v-model="lfo.retrigger" label="Phase mode" :items="lfoPhaseModeOptions" density="compact" variant="outlined" hide-details @update:modelValue="handleTrackDraftChange" />
                 </v-col>
               </v-row>
               <v-row class="compact-row">
@@ -1002,6 +1002,20 @@
             </v-col>
           </v-row>
           <v-row class="compact-row">
+            <v-col cols="12" md="6">
+              <v-select
+                v-model="draftTrack.filterLfoRetrigger"
+                label="Phase mode"
+                :items="lfoPhaseModeOptions"
+                hide-details
+                density="comfortable"
+                variant="outlined"
+                :disabled="!draftTrack.filterLfoEnabled"
+                @update:modelValue="handleTrackDraftChange"
+              />
+            </v-col>
+          </v-row>
+          <v-row class="compact-row">
             <v-col cols="12" md="4">
               <EditableSlider :label="'Filter Env Amount (' + Number(draftTrack.filterEnvelopeAmount).toFixed(1) + ' MIDI)'" :min="-127" :max="127" :step="0.1" v-model="draftTrack.filterEnvelopeAmount" @update:modelValue="handleTrackDraftChange" />
             </v-col>
@@ -1086,7 +1100,7 @@ import {
   type TonewheelWavetableLfo,
 } from '../audio/tonewheelWavetable';
 import type { PartialSourceSnapshot } from '../audio/partialWavetable';
-import { LFO_SYNC_RATE_OPTIONS, LFO_WAVEFORM_OPTIONS } from '../audio/lfo';
+import { LFO_SYNC_RATE_OPTIONS, LFO_WAVEFORM_OPTIONS, LFO_PHASE_MODE_OPTIONS } from '../audio/lfo';
 import { getSpectrumPreview } from '../audio/spectrumPreview';
 import {
   CUSTOM_TIME_WARP_CURVE,
@@ -1207,11 +1221,7 @@ export default defineComponent({
         { title: 'Bipolar (±)', value: 'bipolar' },
         { title: 'Unipolar (+)', value: 'unipolar' },
       ],
-      wavetableLfoRetriggerOptions: [
-        { title: 'Free running', value: 'free' },
-        { title: 'Retrigger on note event (track-wide)', value: 'note' },
-        { title: 'Retrigger when song is played', value: 'song' },
-      ],
+      lfoPhaseModeOptions: LFO_PHASE_MODE_OPTIONS,
       maxWavetableLfos: MAX_WAVETABLE_LFOS,
       pitchEnvelopeShapeMin: PITCH_ENVELOPE_SHAPE_MIN,
       pitchEnvelopeShapeMax: PITCH_ENVELOPE_SHAPE_MAX,

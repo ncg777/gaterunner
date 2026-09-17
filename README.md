@@ -337,7 +337,9 @@ track source sum -> optional waveshaper -> limiterGain (Tanh Drive) -> tanh look
 
 Browser playback and browser WAV export use the same audio graph. Native CLI WAV
 rendering retains the browser's saved effect controls: bus vibrato, stereo tremolo,
-chorus, flanger, phaser, echo, filter LFO and rolloff, and convolution reverb. Melodic
+chorus, flanger, phaser, echo, filter LFO and rolloff, and convolution reverb. The
+filter LFO's **Phase mode** supports free running, retriggering on each track note
+event, and retriggering when the song is played (the default), matching the vector LFO. Melodic
 voices have independent filters before track distortion; drum filters follow the
 track effects, and per-drum drive, filters and sends are applied at the lane output.
 Both engines use the same deterministic, calibrated pink-noise reverb impulse.

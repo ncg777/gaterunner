@@ -5,6 +5,7 @@ import { getLfoSyncRateHz } from '../src/audio/lfo.js';
 const effectKeys = [
   'phase', 'tremoloSpread', 'filterRolloff', 'filterLfoEnabled', 'filterLfoSync',
   'filterLfoRateHz', 'filterLfoRate', 'filterLfoAmount', 'filterLfoWaveform', 'filterLfoInitPhase',
+  'filterLfoRetrigger',
   'chorusEnabled', 'chorusRate', 'chorusDelay', 'chorusDepth', 'chorusSpread', 'chorusFeedback', 'chorusWet',
   'flangerEnabled', 'flangerRate', 'flangerDelay', 'flangerDepth', 'flangerFeedback', 'flangerWet',
   'phaserEnabled', 'phaserRate', 'phaserCenter', 'phaserDepth', 'phaserStages', 'phaserFeedback', 'phaserQ', 'phaserWet',

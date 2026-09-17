@@ -4,6 +4,7 @@ import {
   sampleLfoAtTime,
   type LfoSyncRateValue,
   type LfoWaveform,
+  type LfoPhaseMode,
 } from './lfo.js';
 import type { PartialSourceSnapshot } from './partialWavetable.js';
 
@@ -12,7 +13,7 @@ export const MAX_WAVETABLE_CONFIGURATIONS = 64;
 export const MAX_WAVETABLE_LFOS = 8;
 
 export type TonewheelLfoPolarity = 'bipolar' | 'unipolar';
-export type TonewheelLfoRetrigger = 'free' | 'note' | 'song';
+export type TonewheelLfoRetrigger = LfoPhaseMode;
 
 export interface TonewheelWavetableLfo {
   name: string;

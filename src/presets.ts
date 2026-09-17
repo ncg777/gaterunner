@@ -49,6 +49,7 @@ import {
   LFO_WAVEFORM_VALUES,
   type LfoSyncRateValue,
   type LfoWaveform,
+  type LfoPhaseMode,
 } from './audio/lfo.js';
 export type TrackKind = 'melodic' | 'rhythmic';
 
@@ -151,7 +152,7 @@ export interface PresetTrackData {
   filterEnvelopeSustain: number;
   filterEnvelopeRelease: number;
   filterEnvelopeAmount: number;
-  /** When true, an LFO offsets the filter cutoff, sampled at each note start. */
+  /** When true, an LFO continuously offsets the filter cutoff. */
   filterLfoEnabled: boolean;
   /** Tempo-sync the filter LFO to BPM note divisions when true; otherwise use free Hz. */
   filterLfoSync: boolean;
@@ -165,6 +166,8 @@ export interface PresetTrackData {
   filterLfoWaveform: SkewLfoWaveformValue;
   /** Normalized filter LFO start phase in [0, 1). */
   filterLfoInitPhase: number;
+  /** Phase origin: context clock, track note event, or song playback start. */
+  filterLfoRetrigger: LfoPhaseMode;
   limiterGain: number;
   waveshaper: WaveshaperSettings;
   echoEnabled: boolean;
@@ -464,6 +467,7 @@ export const DEFAULT_PRESET_TRACK_DATA: PresetTrackData = {
   filterLfoAmount: 12,
   filterLfoWaveform: 'sine',
   filterLfoInitPhase: 0,
+  filterLfoRetrigger: 'song',
   limiterGain: 0,
   waveshaper: normalizeWaveshaperSettings(undefined),
   echoEnabled: false,
@@ -932,6 +936,7 @@ export function clonePresetTrackData(track: PresetTrackData): PresetTrackData {
     filterLfoAmount: track.filterLfoAmount,
     filterLfoWaveform: track.filterLfoWaveform,
     filterLfoInitPhase: track.filterLfoInitPhase,
+    filterLfoRetrigger: track.filterLfoRetrigger,
     limiterGain: track.limiterGain,
     waveshaper: cloneWaveshaperSettings(track.waveshaper),
     echoEnabled: track.echoEnabled,
@@ -1048,6 +1053,8 @@ export function normalizePresetTrackData(value: unknown, index = 0): PresetTrack
     filterLfoAmount: clamp(parseNumber(raw.filterLfoAmount, DEFAULT_PRESET_TRACK_DATA.filterLfoAmount), -48, 48),
     filterLfoWaveform: normalizeSkewLfoWaveform(raw.filterLfoWaveform),
     filterLfoInitPhase: clamp(parseNumber(raw.filterLfoInitPhase, DEFAULT_PRESET_TRACK_DATA.filterLfoInitPhase), 0, 0.999999),
+    filterLfoRetrigger: raw.filterLfoRetrigger === 'free' || raw.filterLfoRetrigger === 'note' || raw.filterLfoRetrigger === 'song'
+      ? raw.filterLfoRetrigger : DEFAULT_PRESET_TRACK_DATA.filterLfoRetrigger,
     limiterGain: clamp(parseNumber(raw.limiterGain, DEFAULT_PRESET_TRACK_DATA.limiterGain), -48, 72),
     waveshaper: normalizeWaveshaperSettings(raw.waveshaper),
     echoEnabled: Boolean(raw.echoEnabled ?? DEFAULT_PRESET_TRACK_DATA.echoEnabled),
@@ -1288,6 +1295,7 @@ export function arePresetDataEqual(left: PresetData, right: PresetData): boolean
       || leftTrack.filterLfoAmount !== rightTrack.filterLfoAmount
       || leftTrack.filterLfoWaveform !== rightTrack.filterLfoWaveform
       || leftTrack.filterLfoInitPhase !== rightTrack.filterLfoInitPhase
+      || leftTrack.filterLfoRetrigger !== rightTrack.filterLfoRetrigger
       || leftTrack.limiterGain !== rightTrack.limiterGain
       || JSON.stringify(leftTrack.waveshaper) !== JSON.stringify(rightTrack.waveshaper)
       || leftTrack.echoEnabled !== rightTrack.echoEnabled
