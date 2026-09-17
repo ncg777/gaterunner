@@ -56,6 +56,7 @@ try {
   await evaluate(`(async () => { globalThis.app = document.querySelector('#app').__vue_app__._instance.proxy;
     globalThis.bench = await import('/gaterunner/src/__tests__/performance.browser.ts');
     ${process.env.PROFILE_BASELINE === '1' ? 'bench.installBrowserProfileBaseline();' : ''}
+    ${process.env.PROFILE_POLL_BASELINE === '1' ? 'bench.installRealtimePollingBaseline(app);' : ''}
     await bench.prepareBrowserPerformanceProject(app); })()`);
   const checks = process.argv.slice(2);
   if (checks.length) {

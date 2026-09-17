@@ -2,6 +2,15 @@ import { DEFAULT_PRESET_DATA, DEFAULT_PRESET_TRACK_DATA, normalizePresetData } f
 import type App from '../App.vue';
 import * as Tone from 'tone';
 
+export function installRealtimePollingBaseline(app: InstanceType<typeof App>) {
+  const update = app.updateTrackChainSettings;
+  app.updateTrackChainSettings = (track, chain) => {
+    update(track, chain);
+    const context = chain.sourceBus.context;
+    if (!context.isOffline) (context as Tone.Context).updateInterval = 0.2;
+  };
+}
+
 /** Restore pre-optimization behavior inside this disposable benchmark only. */
 export function installBrowserProfileBaseline() {
   const create = Tone.Context.prototype.createPeriodicWave;
@@ -49,7 +58,11 @@ export async function prepareBrowserPerformanceProject(app: InstanceType<typeof 
   await new Promise(resolve => setTimeout(resolve, 250));
 }
 
-export async function runBrowserPerformance(app: InstanceType<typeof App>, mode: 'playback' | 'export') {
+export async function runBrowserPerformance(app: InstanceType<typeof App>, mode: 'playback' | 'steady' | 'export') {
+  if (mode === 'steady') {
+    await app.startSequencer();
+    await new Promise(resolve => setTimeout(resolve, 3000));
+  }
   const longTasks: number[] = [];
   const observer = new PerformanceObserver(list => {
     for (const entry of list.getEntries()) longTasks.push(entry.duration);
@@ -65,8 +78,8 @@ export async function runBrowserPerformance(app: InstanceType<typeof App>, mode:
   const started = performance.now();
   let hash: string | undefined;
   try {
-    if (mode === 'playback') {
-      await app.startSequencer();
+    if (mode === 'playback' || mode === 'steady') {
+      if (mode === 'playback') await app.startSequencer();
       if (!app.isRunning) throw new Error('Playback did not start');
       await new Promise(resolve => setTimeout(resolve, 8000));
       app.stopSequencer();

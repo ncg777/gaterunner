@@ -66,6 +66,33 @@ sample rate, harmonics, unison, oversampling, modulation cadence and tails are u
 
 ## Browser profiling and implementation
 
+### Realtime polling correction
+
+The next investigation isolated sustained playback from startup with
+`PROFILE_MODES=steady` (three seconds of warmup, then eight measured seconds).
+GateRunner set `context.lookAhead = 0.4`, but Tone's setter also sets
+`updateInterval = lookAhead / 2`. The resulting 200 ms polling interval batched
+approximately six 30 Hz wavetable updates per track into a single scheduler tick.
+Native waveform construction was expensive partly because it arrived in bursts.
+
+`configureRealtimeScheduling` retains the 400 ms scheduling cushion and sets
+polling independently to 10 ms. It does not change event timestamps, harmonics,
+unison, or modulation sample cadence, and leaves offline contexts untouched.
+Realtime waveform changes are delivered more regularly instead of being bunched
+into five main-thread callbacks per second. Repeated control edits do not restart
+the ticker when its settings already match.
+
+In the same six-track sustained-playback fixture, long tasks (>50 ms) fell from
+**32 to 0** over eight seconds. The largest observed task was 105 ms before the
+fix; the maximum timer gap fell from 111.2 to 65.2 ms. Total waveform computation
+remains similar: this corrects its scheduling, not its harmonic resolution.
+These are main-thread measurements, not a measurement of hardware audio underruns.
+
+Use `PROFILE_POLL_BASELINE=1` with `PROFILE_MODES=steady` to reproduce the old
+200 ms polling while retaining the other optimizations. Unit and native Tone
+checks cover the setter interaction and offline isolation; all 223 Node tests
+pass, along with browser audio/phase/lifecycle checks and TypeScript checks.
+
 `node cli/profileBrowser.mjs` profiles a disposable Chrome instance running six
 animated tonewheel tracks, three unison oscillators per voice, and filter
 envelopes. Playback and export have separate CPU profiles. `PROFILE_BASELINE=1`

@@ -341,6 +341,7 @@ import {
 import { encodeWavInWorker } from './audio/wavWorker';
 import { renderOfflineAudio } from './audio/offlineRender';
 import { preparePeriodicWaveContext } from './audio/periodicWave';
+import { configureRealtimeScheduling } from './audio/realtimeScheduling';
 import { getMasterBus, disposeMasterBus, setMasterGainDb } from './audio/masterBus';
 import { buildTrackFadeEnvelope } from './audio/trackFade';
 import { getStepDurations } from './audio/stepDurations';
@@ -2615,9 +2616,7 @@ export default defineComponent({
       chain.dryGain.gain.value = this.dbToGain(this.reverbDry);
       chain.reverbSend.gain.value = this.reverbEnabled ? this.dbToGain(track.reverbWet + this.reverbWet) : 0;
       const context = chain.sourceBus.context;
-      if (!context.isOffline && context.lookAhead !== 0.4) {
-        context.lookAhead = 0.4;
-      }
+      configureRealtimeScheduling(context);
       if (routingSignature !== chain.routingSignature) {
         this.routeTrackAudioChain(track, chain);
         chain.routingSignature = routingSignature;

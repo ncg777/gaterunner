@@ -22,6 +22,23 @@ import { PitchEnvelopeSynth } from '../audio/pitchEnvelopeSynth';
 import { prewarmVoicePool, retainVoicePool } from '../audio/voicePool';
 import type App from '../App.vue';
 import { preparePeriodicWaveContext } from '../audio/periodicWave';
+import { configureRealtimeScheduling } from '../audio/realtimeScheduling';
+
+export async function runRealtimeSchedulingChecks() {
+  const context = new Tone.Context({ clockSource: 'offline' });
+  try {
+    context.lookAhead = 0.4;
+    if (context.updateInterval !== 0.2) throw new Error('Tone clock behavior changed');
+    configureRealtimeScheduling(context);
+    if (context.lookAhead !== 0.4 || context.updateInterval !== 0.01) {
+      throw new Error('Realtime scheduling still batches modulation');
+    }
+    return { lookAhead: context.lookAhead, updateInterval: context.updateInterval };
+  } finally {
+    await context.close();
+    context.dispose();
+  }
+}
 
 export async function runPeriodicWavePreparationChecks() {
   const cases = [0, 1, 8, 16, 64, 128];

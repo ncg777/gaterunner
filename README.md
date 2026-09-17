@@ -473,6 +473,10 @@ timings to `dist/browser-profile`. Set `CHROME_PATH` for another Chromium instal
 `PROFILE_OUTPUT` to keep separate runs, or `PROFILE_BASELINE=1` to compare the
 previous periodic-wave preparation and scheduling behavior. This benchmark does
 not use your browser's saved projects.
+Set `PROFILE_MODES=steady` to measure sustained playback after warmup, and
+`PROFILE_POLL_BASELINE=1` to compare against the former 200 ms realtime polling.
+Realtime playback now polls every 10 ms while retaining its 400 ms note lookahead;
+these are configured separately because Tone's lookahead setter changes both.
 
 ## Developer Guide
 
