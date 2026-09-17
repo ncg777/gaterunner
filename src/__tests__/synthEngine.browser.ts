@@ -6,9 +6,68 @@ import { renderOfflineAudio } from '../audio/offlineRender';
 import { normalizePresetTrackData } from '../presets';
 import { disposeReverbAudioChain } from '../audio/reverb';
 import { getMasterBus } from '../audio/masterBus';
+import { prewarmVoicePool, retainVoicePool } from '../audio/voicePool';
 import type App from '../App.vue';
 import type EditorSurface from '../components/EditorSurface.vue';
 import type { ComponentInternalInstance } from 'vue';
+
+/** Pooled choir voices must do no oscillator work while idle. */
+export async function runChoirResourceChecks() {
+  const original = Tone.getContext();
+  const context = new Tone.Context({ lookAhead: 0.05, updateInterval: 0.01 });
+  Tone.setContext(context);
+  await context.resume();
+  const oscillators: Array<{ start: number; stop: number }> = [];
+  const createOscillator = context.createOscillator;
+  context.createOscillator = () => {
+    const oscillator = createOscillator.call(context);
+    const state = { start: Infinity, stop: Infinity };
+    oscillators.push(state);
+    const start = oscillator.start.bind(oscillator), stop = oscillator.stop.bind(oscillator);
+    oscillator.start = (time = 0) => { state.start = time; start(time); };
+    oscillator.stop = (time = 0) => { state.stop = time; stop(time); };
+    return oscillator;
+  };
+  const active = () => oscillators.filter(source => source.start <= context.currentTime && source.stop > context.currentTime).length;
+  const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  const errors: string[] = [];
+  const onError = (event: ErrorEvent) => errors.push(event.message);
+  window.addEventListener('error', onError);
+  const synth = new Tone.PolySynth(PitchEnvelopeSynth);
+  const meter = new Tone.Analyser({ type: 'waveform', size: 2048 });
+  synth.connect(meter);
+  synth.maxPolyphony = 8;
+  retainVoicePool(synth as unknown as Tone.PolySynth, 8);
+  prewarmVoicePool(synth as unknown as Tone.PolySynth, 8);
+  synth.set({ engine: normalizeSynthEngine({ synthMode: 'choir' }),
+    envelope: { attack: 0.01, decay: 0.02, sustain: 0.7, release: 0.05 } } as Parameters<typeof synth.set>[0]);
+  try {
+    await wait(100);
+    const idleBefore = active();
+    const chord = Array.from({ length: 8 }, (_, i) => 110 * 2 ** (i / 12));
+    let sounding = 0, peak = 0;
+    for (let i = 0; i < 8; i++) {
+      synth.triggerAttackRelease(chord, 0.1, context.now(), 0.25);
+      await wait(100);
+      sounding = Math.max(sounding, active());
+      peak = Math.max(peak, ...(meter.getValue() as Float32Array).map(Math.abs));
+      await wait(150);
+    }
+    await wait(250);
+    const idleAfter = active();
+    const result = { idleBefore, sounding, idleAfter, peak, allocated: oscillators.length, errors };
+    // Three singers require six native oscillators per note. Tone's carrier is
+    // retained for its PolySynth onsilence callback, adding one per sounding voice.
+    if (idleBefore !== 0 || idleAfter !== 0 || sounding > 8 * 7 || !Number.isFinite(peak) || peak < 1e-4 || errors.length) {
+      throw new Error(`Choir oscillator budget exceeded: ${JSON.stringify(result)}`);
+    }
+    return result;
+  } finally {
+    synth.dispose(); meter.dispose();
+    window.removeEventListener('error', onError);
+    await context.close(); context.dispose(); Tone.setContext(original);
+  }
+}
 
 /** Check every sounding step, rather than accepting any audio somewhere in a loop. */
 export async function runFourNoteSequencerChecks(app: InstanceType<typeof App>) {

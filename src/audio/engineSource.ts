@@ -1,4 +1,5 @@
 import * as Tone from 'tone';
+import { ChoirEnsemble } from './choirEnsemble';
 import { choirBands, noiseBands, type SynthEngineSettings } from './synthEngine';
 
 /** A per-note source/filter instrument feeding the existing amp, pitch and effect chain. */
@@ -11,7 +12,7 @@ export class EngineSource {
   private readonly motion: Tone.Envelope;
   private readonly sources: Array<Tone.Noise | Tone.Oscillator> = [];
   private readonly bandGains: Tone.Gain[] = [];
-  private readonly singers: Array<{ gain: Tone.Gain; cents: Tone.Add; vibrato: OscillatorNode; depth: GainNode }> = [];
+  private readonly ensemble: ChoirEnsemble | null;
   private readonly noise: Tone.Noise;
   private readonly noiseGain: Tone.Gain;
   private readonly brightness: BiquadFilterNode;
@@ -50,36 +51,8 @@ export class EngineSource {
     if (settings.synthMode === 'choir') {
       const doubled = own(new Tone.Multiply({ context, value: 2 }));
       connectSignal(frequency, doubled);
-      // Keep topology stable when the ensemble size is edited during scheduled notes.
-      for (let i = 0; i < 8; i++) {
-        const spread = c.voices === 1 ? 0 : (i / (c.voices - 1) - 0.5) * c.detune;
-        const oscillator = own(new Tone.Oscillator({ context, type: 'sawtooth', phase: i * 137.5 }));
-        const singerGain = own(new Tone.Gain({ context, gain: i < c.voices ? (1 - c.breath) / Math.sqrt(c.voices) : 0 }));
-        const cents = own(new Tone.Add({ context, value: spread }));
-        connectSignal(detune, cents);
-        cents.connect(oscillator.detune);
-        doubled.connect(oscillator.frequency);
-        // Symmetric cents modulation only needs a sine and a gain. Tone.LFO adds
-        // always-running zero sources and waveshapers to every pooled singer,
-        // even while its note is silent, and starts those sources implicitly.
-        const vibrato = native(context.createOscillator());
-        vibrato.frequency.value = c.vibratoRate * (1 + i * 0.017);
-        const phase = i * 73 * Math.PI / 180;
-        vibrato.setPeriodicWave(context.createPeriodicWave(
-          new Float32Array([0, -Math.sin(phase)]),
-          new Float32Array([0, Math.cos(phase)]),
-        ));
-        const depth = native(context.createGain());
-        depth.gain.value = c.vibratoDepth;
-        vibrato.connect(depth);
-        // Connect without Signal's override behavior so ensemble detune and pitch envelopes sum.
-        Tone.connect(depth, oscillator.detune);
-        vibrato.start(context.currentTime);
-        oscillator.chain(singerGain, input);
-        this.sources.push(oscillator);
-        this.singers.push({ gain: singerGain, cents, vibrato, depth });
-      }
-    }
+      this.ensemble = new ChoirEnsemble(context, doubled, detune, input, c);
+    } else this.ensemble = null;
     const brightness = native(context.createBiquadFilter());
     this.brightness = brightness;
     brightness.type = 'lowpass';
@@ -148,13 +121,7 @@ export class EngineSource {
     } else {
       this.noiseGain.gain.rampTo(c.breath, ramp, time);
       this.brightness.frequency.setTargetAtTime(Math.min(this.context.sampleRate * 0.45, c.brightness), time, 0.005);
-      this.singers.forEach(({ gain, cents, vibrato, depth }, i) => {
-        cents.addend.rampTo(c.voices === 1 ? 0 : (i / (c.voices - 1) - 0.5) * c.detune, ramp, time);
-        // Linear gain avoids ramping dB from/to -Infinity at fully unvoiced settings.
-        gain.gain.rampTo(i < c.voices ? (1 - c.breath) / Math.sqrt(c.voices) : 0, ramp, time);
-        vibrato.frequency.setTargetAtTime(c.vibratoRate * (1 + i * 0.017), time, 0.005);
-        depth.gain.setTargetAtTime(c.vibratoDepth, time, 0.005);
-      });
+      this.ensemble!.set(c, time);
       choirBands(c).forEach((band, i) => {
         const filter = this.filters[i];
         filter.frequency.cancelScheduledValues(time);
@@ -181,6 +148,7 @@ export class EngineSource {
     this.scheduledSourceEnd = Math.max(this.scheduledSourceEnd, time, stopTime ?? 0);
     if (!mono || !this.monoRunning) {
       this.sources.forEach(source => source.start(time));
+      this.ensemble?.start(time);
       this.lfo?.start(time);
     }
     this.monoRunning = mono;
@@ -204,6 +172,7 @@ export class EngineSource {
   }
   private stopSources(time: number): void {
     this.sources.forEach(source => source.stop(time));
+    this.ensemble?.stop(time);
     this.lfo?.stop(time);
   }
   reset(time: number): void {
@@ -213,7 +182,7 @@ export class EngineSource {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.singers.forEach(singer => singer.vibrato.stop(this.context.currentTime));
+    this.ensemble?.dispose();
     this.output.disconnect();
     this.frequencyConnections.forEach(disconnect => disconnect());
     const cleanup = () => {

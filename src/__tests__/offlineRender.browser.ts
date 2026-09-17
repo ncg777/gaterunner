@@ -889,5 +889,6 @@ export { runSynthEngineChecks, runSynthEngineAppChecks, runSynthEngineUiChecks, 
 
 export { runChoirAudibilityChecks, runSynthEngineScheduledSwitchChecks, runSynthEngineLiveSwitchChecks } from './synthEngine.browser';
 export { runChoirRealtimeSetupChecks } from './synthEngine.browser';
+export { runChoirResourceChecks } from './synthEngine.browser';
 export { runSynthEngineMasterOutputChecks } from './synthEngine.browser';
 export { runFourNoteSequencerChecks } from './synthEngine.browser';
