@@ -1,3 +1,5 @@
+import { normalizeSynthEngine, type SynthMode, type NoiseEngineSettings, type ChoirEngineSettings } from '../src/audio/synthEngine.js';
+import { createNativeEngineSource } from './nativeEngineSource.js';
 import ToneMidi from '@tonejs/midi';
 const { Midi } = ToneMidi;
 import { PCS12 } from 'ultra-mega-enumerator';
@@ -85,6 +87,9 @@ export interface GenerateTrackOptions extends Partial<NativeEffectSettings> {
   /** Time signature denominator (1-16). Controls this track quantization step size. */
   denominator?: number;
   /** Oscillator shape metadata (not used by MIDI export). */
+  synthMode?: SynthMode;
+  noiseEngine?: NoiseEngineSettings;
+  choirEngine?: ChoirEngineSettings;
   waveform?: string;
   /** Independent partial source; defaults to sine tonewheels, except legacy noise selects waveform. */
   partialGenerator?: PartialGenerator;
@@ -244,6 +249,9 @@ export interface GenerateReverbOptions {
 }
 
 export interface GenerateOptions extends Partial<NativeEffectSettings> {
+  synthMode?: SynthMode;
+  noiseEngine?: NoiseEngineSettings;
+  choirEngine?: ChoirEngineSettings;
   /** Tempo in beats per minute (1-499). Default: 90 */
   bpm?: number;
   /** Concert pitch frequency of A4 in Hz (380-500). Default: 440 */
@@ -543,6 +551,7 @@ function normalizeTonewheelDrawbars(value: unknown): number[] {
 
 function normalizeTracks(options: GenerateOptions): NormalizedTrack[] {
   const fallbackTrack: NormalizedTrack = {
+    ...normalizeSynthEngine(options),
     ...normalizeNativeEffectSettings(options),
     name: 'Track 1',
     trackKind: 'melodic',
@@ -686,6 +695,7 @@ function normalizeTracks(options: GenerateOptions): NormalizedTrack[] {
     unisonVoices: clamp(track.unisonVoices ?? fallbackTrack.unisonVoices, 1, 8),
     unisonDetune: clamp(track.unisonDetune ?? fallbackTrack.unisonDetune, 0, 100),
     tonewheelDrawbars: normalizeTonewheelDrawbars(track.tonewheelDrawbars),
+    ...normalizeSynthEngine({ ...track, synthMode: track.synthMode ?? options.synthMode, noiseEngine: track.noiseEngine ?? options.noiseEngine, choirEngine: track.choirEngine ?? options.choirEngine, waveform: track.waveform ?? fallbackTrack.waveform, partialGenerator: track.partialGenerator ?? options.partialGenerator }),
     partialGenerator: normalizeTrackPartialGenerator(track.partialGenerator ?? options.partialGenerator, track.waveform ?? fallbackTrack.waveform),
     tonewheelWavetable: track.tonewheelWavetable ?? fallbackTrack.tonewheelWavetable,
     tremoloEnabled: Boolean(track.tremoloEnabled ?? fallbackTrack.tremoloEnabled),
@@ -1103,13 +1113,16 @@ function renderPreparedWavChannels(
     const drumEchoRight = drumEchoLeft ? new Float32Array(frameCount) : null;
     const drumReverbLeft = isDrumTrack && hasReverbSend && entry.track.reverbWet > -96 ? new Float32Array(frameCount) : null;
     const drumReverbRight = drumReverbLeft ? new Float32Array(frameCount) : null;
+    const engine = normalizeSynthEngine(entry.track);
+    const isAdditive = engine.synthMode === 'additive';
+    const monoEngineSources = new Map<number, ReturnType<typeof createNativeEngineSource>>();
     const partialGenerator = normalizePartialGenerator(entry.track.partialGenerator);
     const fallbackSource = {
       partialGenerator,
       waveform: entry.track.waveform,
       tonewheelDrawbars: entry.track.tonewheelDrawbars,
     };
-    const hasGenericWavetable = entry.track.tonewheelWavetable.enabled
+    const hasGenericWavetable = isAdditive && entry.track.tonewheelWavetable.enabled
       && entry.track.tonewheelWavetable.configurations.some((configuration) => configuration.source);
     const genericWavetableOscillators = hasGenericWavetable
       ? entry.track.tonewheelWavetable.configurations.map((configuration) => {
@@ -1139,7 +1152,7 @@ function renderPreparedWavChannels(
     const partialOscillator = !isDrumTrack && partialGenerator.type !== 'tonewheel' && !hasGenericWavetable
       ? preparePartialOscillator(partialGenerator, waveform)
       : null;
-    const hasTonewheelModulation = partialGenerator.type === 'tonewheel' && !hasGenericWavetable
+    const hasTonewheelModulation = isAdditive && partialGenerator.type === 'tonewheel' && !hasGenericWavetable
       && entry.track.tonewheelWavetable.enabled
       && entry.track.tonewheelWavetable.lfos.some((lfo) => (
         lfo.enabled && lfo.depth !== 0 && lfo.routes.some((route) => route !== 0)
@@ -1264,7 +1277,7 @@ function renderPreparedWavChannels(
         : null;
 
       for (const [noteIndex, midiNote] of voicedNotes.entries()) {
-        const voiceCount = entry.track.unisonVoices;
+        const voiceCount = isAdditive ? entry.track.unisonVoices : 1;
         const noteDuration = isMonoTrack ? duration : voiceEvent.noteDurations[noteIndex];
         const voiceEndFrame = Math.min(frameCount, Math.ceil(Math.min(voiceEvent.stopTime,
           start + noteDuration + Math.max(0.005, voiceRelease) + (entry.track.filterEnabled ? 2 : 0)) * sampleRate));
@@ -1281,7 +1294,10 @@ function renderPreparedWavChannels(
           let phase = isMonoTrack ? ((monoPhases.get(voice) ?? initialPhase) + Math.max(0, startFrame - monoFrame) * monoIncrement) % 1 : initialPhase;
           let tonewheelOscillator = staticTonewheelOscillator;
           let wavetableWeights = staticWavetableWeights;
-          const choir = createChoirProcessor(waveform, sampleRate);
+          const choir = createChoirProcessor(isAdditive ? waveform : 'sine', sampleRate);
+          const engineSource = isAdditive ? null : (isMonoTrack ? monoEngineSources.get(voice) : undefined)
+            ?? createNativeEngineSource(engine, sampleRate, (trackIndex + 1) * 65537 + startFrame + noteIndex * 97 + voice);
+          if (isMonoTrack && engineSource) monoEngineSources.set(voice, engineSource);
           const [voiceFilter] = createStereoFilter(entry.track, sampleRate);
           const voiceCutoff = createFilterCutoff(entry.track, [midiNote], noteDuration, prepared.a4, start, prepared.bpm);
           for (let frame = startFrame; frame < voiceEndFrame; frame += 1) {
@@ -1323,7 +1339,10 @@ function renderPreparedWavChannels(
             const glideRatio = glidePlan && glidePlan.seconds > 0
               ? getGlideFrequency(glidePlan, t) / glidePlan.toFrequency : 1;
             const playbackFrequency = frequency * pitchEnvelopeRatio * glideRatio;
-            const oscillatorSample = genericWavetableOscillators.length > 0
+            const engineElapsed = (frame / sampleRate) - voiceEvent.envelopeStart;
+            const oscillatorSample = engineSource
+              ? engineSource(playbackFrequency, engineElapsed, start + noteDuration - voiceEvent.envelopeStart, frame / sampleRate)
+              : genericWavetableOscillators.length > 0
               ? genericWavetableOscillators.reduce((sum, oscillator, configurationIndex) => (
                 sum + oscillator(phase, playbackFrequency / 2, sampleRate) * (wavetableWeights[configurationIndex] ?? 0)
               ), 0)
@@ -1350,7 +1369,7 @@ function renderPreparedWavChannels(
 
     }
 
-    if (!isDrumTrack && entry.track.breathEnabled) {
+    if (!isDrumTrack && isAdditive && entry.track.breathEnabled) {
       renderBreathNoise(trackLeft, trackRight, sampleRate, entry.track, events, prepared.a4,
         0x9e3779b9 ^ (trackIndex << 12));
     }

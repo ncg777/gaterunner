@@ -354,8 +354,8 @@ export async function runPartialGeneratorChecks(app: InstanceType<typeof App>) {
           chain = app.createTrackAudioChain();
           app.updateTrackChainSettings(source, chain);
           check(!chain.noiseSynth, `${type}/${waveform} does not allocate source noise without breath`);
-          check(Boolean(chain.choir) === (type === 'waveform' && waveform.startsWith('choir-')),
-            `${type}/${waveform} uses only its active choir routing`);
+          check(!chain.choir,
+            `${type}/${waveform} migrates legacy choir to per-voice formants`);
           chain.mixGain.gain.value = 1;
           app.triggerTrackVoice(source, chain, [69], 0.03, 0, 0.5, 0);
         }, 0.04, 1, 48000);
@@ -884,3 +884,8 @@ export async function runPerformanceOptimizationChecks(app: InstanceType<typeof 
   }
   return { identicalOversampledRenders: cases, modulationUpdatesDeduplicated: true };
 }
+
+export { runSynthEngineChecks, runSynthEngineAppChecks, runSynthEngineUiChecks, runSynthEngineLiveParameterChecks, runSynthEngineLiveAppChecks, runSynthEngineScheduledEditChecks } from './synthEngine.browser';
+
+export { runChoirAudibilityChecks, runSynthEngineScheduledSwitchChecks, runSynthEngineLiveSwitchChecks } from './synthEngine.browser';
+export { runChoirRealtimeSetupChecks } from './synthEngine.browser';

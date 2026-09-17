@@ -30,6 +30,7 @@ export class MonoGlideSynth extends PitchEnvelopeSynth {
   resetGlide(): void {
     resetMonoGlideState(this.glideState);
     this.pendingGlide = null;
+    this.resetEngine(this.now());
     if (this.oscillatorRunning) {
       this.oscillatorRunning = false;
       this.oscillator.stop(this.now());
@@ -61,6 +62,7 @@ export class MonoGlideSynth extends PitchEnvelopeSynth {
       // its envelopes running and only move the pitch.
       this.envelope.cancel(startTime);
       this.pitchEnvelope.cancel(startTime);
+      this.cancelEngine(startTime);
       this.setNote(targetFrequency, startTime);
     } else {
       this.triggerAttack(targetFrequency, startTime, velocity);
@@ -83,6 +85,7 @@ export class MonoGlideSynth extends PitchEnvelopeSynth {
     } else {
       this.frequency.exponentialRampToValueAtTime(plan.toFrequency, startTime + plan.seconds);
     }
+    this.engineSource?.note(plan.toFrequency, startTime, plan.fromFrequency, plan.seconds);
     this.scheduleFilterAttack(note, startTime);
     return this;
   }
@@ -95,6 +98,7 @@ export class MonoGlideSynth extends PitchEnvelopeSynth {
   protected _triggerEnvelopeAttack(time: number, velocity: number): void {
     this.envelope.triggerAttack(time, velocity);
     this.pitchEnvelope.triggerAttack(time);
+    this.attackEngine(time, true);
     if (!this.oscillatorRunning) {
       this.oscillatorRunning = true;
       this.oscillator.start(time);
@@ -104,5 +108,6 @@ export class MonoGlideSynth extends PitchEnvelopeSynth {
   protected _triggerEnvelopeRelease(time: number): void {
     this.envelope.triggerRelease(time);
     this.pitchEnvelope.triggerRelease(time);
+    this.releaseEngine(time);
   }
 }

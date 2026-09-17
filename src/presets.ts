@@ -1,3 +1,4 @@
+import { normalizeSynthEngine, LEGACY_NOISE_WAVEFORMS, type SynthMode, type NoiseEngineSettings, type ChoirEngineSettings } from './audio/synthEngine.js';
 import {
   cloneWaveshaperSettings,
   normalizeWaveshaperSettings,
@@ -63,6 +64,9 @@ export interface PresetTrackData {
   numerator: number;
   denominator: number;
   phase: number;
+  synthMode?: SynthMode;
+  noiseEngine?: NoiseEngineSettings;
+  choirEngine?: ChoirEngineSettings;
   waveform: string;
   partialGenerator?: PartialGenerator;
   sequenceInput: string;
@@ -257,21 +261,8 @@ export const WAVEFORM_OPTIONS = [
   { title: 'Square', value: 'square' },
   { title: 'Triangle', value: 'triangle' },
   { title: 'Sawtooth', value: 'sawtooth' },
-  { title: 'Flute', value: 'flute' },
-  { title: 'Oboe', value: 'oboe' },
-  { title: 'Clarinet', value: 'clarinet' },
-  { title: 'Saxophone', value: 'saxophone' },
   { title: 'Pulse 25%', value: 'pulse-25' },
   { title: 'Pulse 12.5%', value: 'pulse-12' },
-  { title: 'Choir Ah', value: 'choir-ah' },
-  { title: 'Choir Oh', value: 'choir-oh' },
-  { title: 'Pink Spectrum', value: 'pink-noise' },
-  { title: 'Brown Spectrum', value: 'brown-noise' },
-  { title: 'Helmholtz Resonator', value: 'helmholtz' },
-  { title: 'Formant Resonance', value: 'formant' },
-  { title: 'Duct Resonance', value: 'duct' },
-  { title: 'Aeolian Turbulence', value: 'aeolian' },
-  { title: 'Stochastic Bandpass', value: 'stochastic-bandpass' },
 ] as const;
 
 export const TONEWHEEL_DRAWBAR_LABELS = ["16'", "5 1/3'", "8'", "4'", "2 2/3'", "2'", "1 3/5'", "1 1/3'", "1'"];
@@ -396,6 +387,7 @@ export const DEFAULT_PRESET_TRACK_DATA: PresetTrackData = {
   numerator: 4,
   denominator: 4,
   phase: 0,
+  ...normalizeSynthEngine({}),
   waveform: 'sine',
   partialGenerator: { type: 'tonewheel' },
   sequenceInput: '1 2 4 8',
@@ -613,7 +605,7 @@ function normalizeWaveform(value: unknown): PresetTrackData['waveform'] {
   if (value === 'tonewheel') {
     return 'sine';
   }
-  return typeof value === 'string' && WAVEFORMS.has(value) ? value : DEFAULT_PRESET_TRACK_DATA.waveform;
+  return typeof value === 'string' && (WAVEFORMS.has(value) || LEGACY_NOISE_WAVEFORMS.includes(value) || value === 'choir-ah' || value === 'choir-oh') ? value : DEFAULT_PRESET_TRACK_DATA.waveform;
 }
 
 function normalizeTonewheelDrawbars(value: unknown): number[] {
@@ -849,6 +841,7 @@ export function clonePresetTrackData(track: PresetTrackData): PresetTrackData {
     numerator: track.numerator,
     denominator: track.denominator,
     phase: track.phase,
+    ...normalizeSynthEngine(track),
     waveform: track.waveform,
     partialGenerator: normalizeTrackPartialGenerator(track.partialGenerator, track.waveform),
     sequenceInput: track.sequenceInput,
@@ -983,6 +976,7 @@ export function normalizePresetTrackData(value: unknown, index = 0): PresetTrack
     numerator: clamp(parseInteger(raw.numerator?.toString(), DEFAULT_PRESET_TRACK_DATA.numerator), 1, 16),
     denominator: clamp(parseInteger(raw.denominator?.toString(), DEFAULT_PRESET_TRACK_DATA.denominator), 1, 16),
     phase: clamp(parseNumber(raw.phase, DEFAULT_PRESET_TRACK_DATA.phase), 0, 1),
+    ...normalizeSynthEngine(raw),
     waveform: normalizeWaveform(raw.waveform),
     partialGenerator: normalizeTrackPartialGenerator(raw.partialGenerator, normalizeWaveform(raw.waveform)),
     sequenceInput: typeof raw.sequenceInput === 'string' ? raw.sequenceInput : DEFAULT_PRESET_TRACK_DATA.sequenceInput,
@@ -1221,6 +1215,7 @@ export function arePresetDataEqual(left: PresetData, right: PresetData): boolean
       || leftTrack.numerator !== rightTrack.numerator
       || leftTrack.denominator !== rightTrack.denominator
       || leftTrack.phase !== rightTrack.phase
+      || JSON.stringify(normalizeSynthEngine(leftTrack)) !== JSON.stringify(normalizeSynthEngine(rightTrack))
       || leftTrack.waveform !== rightTrack.waveform
       || JSON.stringify(normalizeTrackPartialGenerator(leftTrack.partialGenerator, leftTrack.waveform))
         !== JSON.stringify(normalizeTrackPartialGenerator(rightTrack.partialGenerator, rightTrack.waveform))

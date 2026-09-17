@@ -357,6 +357,8 @@
         </v-window-item>
 
         <v-window-item v-if="draftTrack.trackKind !== 'rhythmic'" value="generator" class="control-tab-panel">
+          <SynthEngineControls :track="draftTrack" @change="handleSynthEngineChange" />
+          <template v-if="!draftTrack.synthMode || draftTrack.synthMode === 'additive'">
           <v-row class="compact-row">
             <v-col cols="12">
               <v-switch
@@ -629,6 +631,7 @@
               </v-row>
             </v-card>
           </template>
+          </template>
         </v-window-item>
 
         <v-window-item v-if="draftTrack.trackKind !== 'rhythmic'" value="envelopes" class="control-tab-panel">
@@ -732,8 +735,8 @@
             </v-col>
           </v-row>
 
-          <div class="envelope-section-label envelope-section-label--spaced">Unison</div>
-          <v-row class="compact-row">
+          <div v-if="!draftTrack.synthMode || draftTrack.synthMode === 'additive'" class="envelope-section-label envelope-section-label--spaced">Unison</div>
+          <v-row v-if="!draftTrack.synthMode || draftTrack.synthMode === 'additive'" class="compact-row">
             <v-col cols="12" md="6">
               <EditableSlider :label="'Unison Voices (' + draftTrack.unisonVoices + ')'" :min="1" :max="8" :step="1" v-model="draftTrack.unisonVoices" @update:modelValue="handleTrackDraftChange" />
             </v-col>
@@ -1066,6 +1069,8 @@
 <script lang="ts">
 import { defineComponent, type PropType } from 'vue';
 import EditableSlider from './EditableSlider.vue';
+import SynthEngineControls from './SynthEngineControls.vue';
+import type { SynthEngineSettings } from '../audio/synthEngine';
 import ReverbControls from './ReverbControls.vue';
 import RhythmTrackControls from './RhythmTrackControls.vue';
 import RhythmSoundControls from './RhythmSoundControls.vue';
@@ -1109,6 +1114,7 @@ export default defineComponent({
   name: 'EditorSurface',
   components: {
     EditableSlider,
+    SynthEngineControls,
     ReverbControls,
     RhythmTrackControls,
     RhythmSoundControls,
@@ -1319,6 +1325,13 @@ export default defineComponent({
     },
   },
   methods: {
+    handleSynthEngineChange(settings: SynthEngineSettings) {
+      Object.assign(this.draftTrack, settings);
+      if (settings.synthMode === 'additive' && !WAVEFORM_OPTIONS.some(option => option.value === this.draftTrack.waveform)) {
+        this.draftTrack.waveform = 'sine';
+      }
+      this.handleTrackDraftChange();
+    },
     setPartialSource(type: NormalizedPartialGenerator['type']) {
       this.updatePartialGenerator({ type });
     },

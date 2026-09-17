@@ -1,9 +1,14 @@
 ﻿import * as Tone from 'tone';
+import { EngineSource } from './engineSource';
+import { normalizeSynthEngine, type SynthEngineSettings } from './synthEngine';
 import { buildPitchEnvelopeCurve } from './pitchEnvelope';
 import type { LfoWaveform } from './lfo';
 import { FilterLfo } from './filterLfo';
 
 type SynthOptions = Tone.SynthOptions;
+type EngineEvent =
+  | { type: 'attack'; time: number; mono: boolean; stopTime?: number }
+  | { type: 'release'; time: number; ampRelease?: number };
 
 export interface VoiceFilterOptions {
   enabled: boolean;
@@ -37,6 +42,7 @@ export interface PitchEnvelopeSynthOptions extends SynthOptions {
   /** Exponential steepness for pitch envelope segments (0 = linear). */
   pitchEnvelopeShape: number;
   voiceFilter: VoiceFilterOptions;
+  engine: SynthEngineSettings;
 }
 
 /**
@@ -54,6 +60,11 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   private _pitchEnvelopeShape = 0;
   private voiceFilterOptions: VoiceFilterOptions;
   private filterBaseFrequency = 20000;
+  protected engineSource: EngineSource | null = null;
+  private engineSignature = "";
+  private engineMode: SynthEngineSettings['synthMode'] = 'additive';
+  private engineEvents: EngineEvent[] = [];
+  private retiring = false;
 
   constructor(options?: Partial<PitchEnvelopeSynthOptions>) {
     const defaults = PitchEnvelopeSynth.getDefaults();
@@ -102,6 +113,7 @@ export class PitchEnvelopeSynth extends Tone.Synth {
       Q: this.voiceFilterOptions.Q,
       gain: this.voiceFilterOptions.gain,
     });
+    this.setEngine(options?.engine ?? normalizeSynthEngine({}));
     this.routeFilter();
     this.syncFilterLfo();
     this.pitchEnvelopeAmount = options?.pitchEnvelopeAmount ?? defaults.pitchEnvelopeAmount;
@@ -110,6 +122,7 @@ export class PitchEnvelopeSynth extends Tone.Synth {
 
   static getDefaults(): PitchEnvelopeSynthOptions {
     return Object.assign(Tone.Synth.getDefaults(), {
+      engine: normalizeSynthEngine({}),
       pitchEnvelope: {
         attack: 0.01,
         decay: 0.1,
@@ -177,7 +190,8 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   }
 
   set(props: Partial<PitchEnvelopeSynthOptions>): this {
-    const { pitchEnvelope, pitchEnvelopeAmount, pitchEnvelopeShape, voiceFilter, ...rest } = props;
+    const { engine, pitchEnvelope, pitchEnvelopeAmount, pitchEnvelopeShape, voiceFilter, ...rest } = props;
+    if (engine) this.setEngine(engine);
     if (Object.keys(rest).length > 0) {
       super.set(rest);
     }
@@ -206,10 +220,92 @@ export class PitchEnvelopeSynth extends Tone.Synth {
 
   setNote(note: Tone.Unit.Frequency | Tone.FrequencyClass, time?: Tone.Unit.Time): this {
     super.setNote(note, time);
+    this.engineSource?.note(Tone.Frequency(note).toFrequency(), this.toSeconds(time));
     if (this.voiceFilterOptions.enabled) {
       this.scheduleFilterAttack(note, this.toSeconds(time));
     }
     return this;
+  }
+
+  private setEngine(engine: SynthEngineSettings): void {
+    const signature = JSON.stringify(engine);
+    if (signature === this.engineSignature) return;
+    if (this.engineSource && engine.synthMode === this.engineMode) {
+      this.engineSource.set(engine);
+      this.engineSignature = signature;
+      return;
+    }
+    this.engineSignature = signature;
+    this.engineMode = engine.synthMode;
+    this.engineSource?.dispose();
+    this.engineSource = null;
+    this.oscillator.disconnect();
+    if (engine.synthMode === 'additive') this.oscillator.connect(this.envelope);
+    else {
+      this.engineSource = new EngineSource(this.context, this.frequency, this.detune, engine);
+      this.engineSource.output.connect(this.envelope);
+      this.restoreEngineEvents();
+    }
+  }
+
+  /** Source graphs change independently of the amp envelope's queued notes. */
+  private rememberEngineEvent(event: EngineEvent): void {
+    this.engineEvents.push(event);
+    this.engineEvents.sort((a, b) => a.time - b.time);
+    const now = this.context.currentTime;
+    let lastAttack = -1;
+    this.engineEvents.forEach((entry, i) => {
+      if (entry.type === 'attack' && entry.time <= now) lastAttack = i;
+    });
+    if (lastAttack > 0) this.engineEvents.splice(0, lastAttack);
+  }
+
+  private restoreEngineEvents(): void {
+    const source = this.engineSource!;
+    const now = this.context.currentTime;
+    let active: Extract<EngineEvent, { type: 'attack' }> | undefined;
+    for (const event of this.engineEvents) {
+      if (event.time > now) break;
+      if (event.type === 'attack') active = event;
+    }
+    if (active) {
+      const release = this.engineEvents.find(event => event.type === 'release' && event.time >= active!.time);
+      const stop = Math.min(active.stopTime ?? Infinity,
+        release?.type === 'release' && release.ampRelease !== undefined ? release.time + release.ampRelease : Infinity);
+      if (stop > now) {
+        source.attack(now, active.mono, active.stopTime);
+        if (release && release.time <= now && release.type === 'release') {
+          source.release(now, release.ampRelease === undefined ? undefined : Math.max(0, stop - now));
+        }
+      }
+    }
+    for (const event of this.engineEvents) {
+      if (event.time <= now) continue;
+      if (event.type === 'attack') {
+        source.note(Tone.Frequency(this.frequency.getValueAtTime(event.time)).toFrequency(), event.time);
+        source.attack(event.time, event.mono, event.stopTime);
+      } else source.release(event.time, event.ampRelease);
+    }
+  }
+
+  protected attackEngine(time: number, mono = false, stopTime?: number): void {
+    this.rememberEngineEvent({ type: 'attack', time, mono, stopTime });
+    this.engineSource?.attack(time, mono, stopTime);
+  }
+
+  protected releaseEngine(time: number, ampRelease?: number): void {
+    this.rememberEngineEvent({ type: 'release', time, ampRelease });
+    this.engineSource?.release(time, ampRelease);
+  }
+
+  protected cancelEngine(time: number): void {
+    this.engineEvents = this.engineEvents.filter(event => event.time < time);
+    this.engineSource?.cancel(time);
+  }
+
+  protected resetEngine(time: number): void {
+    this.engineEvents = [];
+    this.engineSource?.reset(time);
   }
 
   private routeFilter(): void {
@@ -272,11 +368,14 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   protected _triggerEnvelopeAttack(time: number, velocity: number): void {
     super._triggerEnvelopeAttack(time, velocity);
     this.pitchEnvelope.triggerAttack(time);
+    this.attackEngine(time, false, this.envelope.sustain === 0
+      ? time + this.toSeconds(this.envelope.attack) + this.toSeconds(this.envelope.decay) : undefined);
   }
 
   protected _triggerEnvelopeRelease(time: number): void {
     super._triggerEnvelopeRelease(time);
     this.pitchEnvelope.triggerRelease(time);
+    this.releaseEngine(time, this.toSeconds(this.envelope.release));
     if (this.voiceFilterOptions.enabled) {
       this.filter.frequency.cancelAndHoldAtTime(time);
       this.filter.frequency.linearRampToValueAtTime(
@@ -288,10 +387,26 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   }
 
   dispose(): this {
-    this.filterLfo?.dispose();
-    this.pitchEnvelope.dispose();
-    this.pitchCents.dispose();
-    this.filter.dispose();
-    return super.dispose();
+    if (this.retiring) return this;
+    this.retiring = true;
+    this.engineSource?.dispose();
+    const cleanup = () => {
+      this.filterLfo?.dispose();
+      this.pitchEnvelope.dispose();
+      this.pitchCents.dispose();
+      this.filter.dispose();
+      super.dispose();
+    };
+    if (this.context.isOffline) cleanup();
+    else {
+      this.disconnect();
+      const now = this.context.currentTime;
+      this.oscillator.stop(now);
+      // Tone's carrier also retains callbacks from previously scheduled notes.
+      const end = Math.max(now, ...this.engineEvents.map(event => event.type === 'attack'
+        ? event.stopTime ?? event.time : event.time + (event.ampRelease ?? 0)));
+      this.context.setTimeout(cleanup, Math.max(this.context.now() - now, end - now) + 0.1);
+    }
+    return this;
   }
 }

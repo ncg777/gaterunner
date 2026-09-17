@@ -297,11 +297,11 @@ test('inactive waveform selections cannot change tonewheel, sequence, or binary 
   }
 });
 
-test('waveform source renders distinct deterministic spectra without drawbars', async () => {
+test('explicit legacy additive spectra remain deterministic and independent of drawbars', async () => {
   let previous: Uint8Array | undefined;
   const midi = await generateMidi({ ...options, tracks: [track] });
   for (const waveform of ['sine', 'square', 'choir-ah', 'choir-oh', 'pink-noise', 'brown-noise']) {
-    const source = { ...track, waveform, partialGenerator: { type: 'waveform' } as const, tonewheelDrawbars: Array(9).fill(0) };
+    const source = { ...track, synthMode: 'additive' as const, waveform, partialGenerator: { type: 'waveform' } as const, tonewheelDrawbars: Array(9).fill(0) };
     const input = { ...options, tracks: [source] };
     const wav = await generateWav(input);
     assert.ok(wav.subarray(44).some(byte => byte !== 0), `${waveform} is audible`);

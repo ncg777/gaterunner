@@ -15,6 +15,7 @@ declare module 'vue' {
     ReverbControls: typeof import('./src/components/ReverbControls.vue')['default']
     RhythmSoundControls: typeof import('./src/components/RhythmSoundControls.vue')['default']
     RhythmTrackControls: typeof import('./src/components/RhythmTrackControls.vue')['default']
+    SynthEngineControls: typeof import('./src/components/SynthEngineControls.vue')['default']
     TimeWarpPreview: typeof import('./src/components/TimeWarpPreview.vue')['default']
     TrackStrip: typeof import('./src/components/TrackStrip.vue')['default']
     WaveshaperControls: typeof import('./src/components/WaveshaperControls.vue')['default']

@@ -357,6 +357,7 @@ import { setTremoloSpread } from './audio/tremolo';
 import { getLfoFrequencyHz, type LfoWaveform } from './audio/lfo';
 import { FilterLfo } from './audio/filterLfo';
 import { CHOIR_FORMANT_BANDS, getChoirFormantBandGainLinear, type FormantBand } from './audio/choir';
+import { normalizeSynthEngine } from './audio/synthEngine';
 import { PitchEnvelopeSynth } from './audio/pitchEnvelopeSynth';
 import { MonoGlideSynth } from './audio/monoGlideSynth';
 import { isMonophonic, limitPolyphony, type GlideCurve, type GlideMode } from './audio/glide';
@@ -1967,6 +1968,7 @@ export default defineComponent({
     getTrackRoutingSignature(track: PresetTrackData): string {
       return [
         track.trackKind,
+        normalizeSynthEngine(track).synthMode,
         this.getEffectiveTrackWaveform(track),
         track.breathEnabled,
         track.vibratoEnabled,
@@ -2028,7 +2030,7 @@ export default defineComponent({
         && track.tonewheelWavetable.configurations.some((configuration) => configuration.source)) {
         return 'sine';
       }
-      return getEffectiveWaveform(track.partialGenerator, track.waveform);
+      return normalizeSynthEngine(track).synthMode === 'additive' ? getEffectiveWaveform(track.partialGenerator, track.waveform) : 'sine';
     },
     isChoirWaveform(waveform: string): waveform is ChoirWaveform {
       return waveform === 'choir-ah' || waveform === 'choir-oh';
@@ -2057,7 +2059,7 @@ export default defineComponent({
       });
     },
     getOscillatorType(track: PresetTrackData): string {
-      return track.unisonVoices > 1 ? 'fatcustom' : 'custom';
+      return normalizeSynthEngine(track).synthMode === 'additive' && track.unisonVoices > 1 ? 'fatcustom' : 'custom';
     },
     getPartialOscillatorVolume(track: PresetTrackData, partials: number[]): number {
       const hasGenericWavetable = track.tonewheelWavetable.enabled
@@ -2137,7 +2139,7 @@ export default defineComponent({
       const modulationTime = modulationTimeSeconds ?? Tone.getTransport().getSecondsAtTime(when);
       chain.modulationNoteStartSeconds = modulationTime;
       this.applyTonewheelModulation(track, chain, modulationTime);
-      if (track.breathEnabled && frequencies.length > 0) {
+      if (normalizeSynthEngine(track).synthMode === 'additive' && track.breathEnabled && frequencies.length > 0) {
         const averageFrequency = frequencies.reduce((sum, frequency) => sum + frequency, 0) / frequencies.length;
         const maximumFrequency = chain.sourceBus.context.sampleRate * 0.45;
         this.ensureTrackBreathFilter(chain).frequency.setValueAtTime(
@@ -2362,7 +2364,7 @@ export default defineComponent({
         if (isChoir) {
           chain.choir!.output.connect(chain.sourceBus);
         }
-        if (track.breathEnabled) {
+        if (normalizeSynthEngine(track).synthMode === 'additive' && track.breathEnabled) {
           this.ensureTrackNoiseSynth(chain).connect(this.ensureTrackBreathFilter(chain));
           chain.breathFilter!.connect(this.ensureTrackBreathGain(chain));
           chain.breathGain!.connect(chain.sourceBus);
@@ -2443,7 +2445,7 @@ export default defineComponent({
               partialGenerator: normalizePartialGenerator(track.partialGenerator), waveform: track.waveform,
               tonewheelDrawbars: track.tonewheelDrawbars,
             }) : null;
-          if (track.breathEnabled) {
+          if (normalizeSynthEngine(track).synthMode === 'additive' && track.breathEnabled) {
             this.ensureTrackNoiseSynth(chain).set({
               envelope,
               noise: { type: 'pink' },
@@ -2458,6 +2460,7 @@ export default defineComponent({
             volume: this.getPartialOscillatorVolume(track, partials),
           } as unknown as Tone.PolySynthOptions<Tone.Synth<Tone.SynthOptions>>['options']['oscillator'];
           const voiceOptions = {
+            engine: normalizeSynthEngine(track),
             envelope,
             oscillator: oscillatorOptions,
             pitchEnvelope: {
@@ -2511,7 +2514,7 @@ export default defineComponent({
           if (this.isChoirWaveform(this.getEffectiveTrackWaveform(track))) {
             this.updateChoirFormantBank(this.getEffectiveTrackWaveform(track), this.ensureTrackChoirBank(chain).formants);
           }
-          if (track.breathEnabled) {
+          if (normalizeSynthEngine(track).synthMode === 'additive' && track.breathEnabled) {
             this.ensureTrackBreathGain(chain).gain.value = this.dbToGain(track.breathLevel);
           }
         }
@@ -2626,6 +2629,7 @@ export default defineComponent({
         && track.tonewheelWavetable.configurations.some((configuration) => configuration.source);
       return [
         this.getEffectiveTrackWaveform(track),
+        JSON.stringify(normalizeSynthEngine(track)),
         JSON.stringify(generator),
         generator.type === 'tonewheel' ? track.tonewheelDrawbars : '',
         generator.type === 'tonewheel' || hasGenericWavetable ? JSON.stringify(track.tonewheelWavetable) : '',
@@ -2673,7 +2677,7 @@ export default defineComponent({
       ].join('|');
     },
     applyTonewheelModulation(track: PresetTrackData, chain: TrackAudioChain, timeSeconds: number) {
-      if (!chain.synth) {
+      if (!chain.synth || normalizeSynthEngine(track).synthMode !== 'additive') {
         return;
       }
       const partials = this.getTonewheelPartials(track, timeSeconds, chain.modulationNoteStartSeconds, chain.preparedWavetable);
@@ -2700,7 +2704,7 @@ export default defineComponent({
         && (track.tonewheelWavetable.lfos ?? []).some((lfo) => (
           lfo.enabled && lfo.depth > 0 && lfo.routes.some((amount) => amount !== 0)
         ));
-      if (!hasActiveRoutes || track.trackKind === 'rhythmic') {
+      if (!hasActiveRoutes || track.trackKind === 'rhythmic' || normalizeSynthEngine(track).synthMode !== 'additive') {
         chain.wavetableLfoLoop?.dispose();
         chain.wavetableLfoLoop = null;
         return;

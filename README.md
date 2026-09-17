@@ -186,20 +186,32 @@ wavetable from the **Generator** tab.
 
 ### Melodic Sound Palette
 
-Each melodic track uses one bounded-cost tonewheel engine.
+Choose **Additive**, **Resonant noise**, or **Vocal choir** in the Generator tab.
 
-- Source shapes include sine, triangle, sawtooth, square, choir vowels, colored noise,
-  resonant spectra, flute, oboe, clarinet, saxophone, and fixed 25% and 12.5% pulse spectra.
-  The reed-inspired shapes offer a bright, nasal oboe, an odd-harmonic-led clarinet,
-  and a full, buzzy saxophone.
-- Nine Hammond-style drawbars and the multidimensional wavetable apply across pitched
-  source shapes, with polyphony, unison, glide, envelopes, filters, and effects downstream.
-- **Breath noise** adds one filtered pink-noise layer per track event. Its level and
-  filter harmonic provide air without multiplying noise graphs by voice count.
-- Browser playback and CLI WAV export share the woodwind and pulse harmonic definitions.
-  CLI breath noise is seeded, so repeated exports of the same input are byte-identical.
-- Imported presets that contain retired FM or virtual-analog fields remain loadable.
-  Those fields are silently discarded and the track keeps its tonewheel-compatible settings.
+- **Additive** keeps tonewheel drawbars, classic Fourier waveforms, sequence and binary
+  partial sources, spectrum transforms, unison, and multidimensional wavetable morphing.
+- **Resonant noise** uses real white, pink or brown noise through 1-8 parallel bandpass
+  resonators. Controls include A4-reference frequency, pitch tracking, Q, harmonic spacing,
+  odd/even balance, tilt, dry blend, an independent resonator ADSR and a frequency LFO.
+- **Vocal choir** combines band-limited saw sources and breath through five formants per
+  note. Choose Ah/Eh/Ee/Oh/Oo, a target vowel and blend, transition duration, vocal tract
+  shift, bandwidth, brightness, breath, 1-8 ensemble singers, detune and vibrato. Each
+  formant also has its own tuning offset and gain. Zero transition time fixes the blend;
+  otherwise every attack starts at the first vowel and moves toward the target blend.
+- All three engines use the shared amp/pitch envelopes, polyphony, mono glide, track
+  filter, modulation, waveshaper and effects. Resonator and formant motion is per voice.
+  Choir ensemble controls replace additive unison. Breath controls in Additive remain
+  a separate legacy layer; the new engines have their own noise/breath controls.
+- Active legacy wind/resonance/noise waveforms migrate to Resonant noise; Choir Ah/Oh
+  migrate to Vocal choir. Explicit modes and inactive waveform metadata are preserved.
+  Old additive wavetable snapshots retain their original spectra for compatibility.
+- Settings are stored as `synthMode`, `noiseEngine` and `choirEngine` in presets,
+  shared URLs and CLI `--tracks` JSON. Both browser WAV export and native CLI rendering
+  support the engines. Native exports use seeded noise; browser and native rendering
+  share parameter definitions but do not produce identical noise samples or oscillator phases.
+
+These are controllable source/filter instruments, not sampled woodwind or choir libraries.
+The formant architecture follows the [source/filter model](https://dsprelated.com/freebooks/pasp/Formant_Synthesis_Models.html).
 
 ### Procedural Partial Sources
 

@@ -45,11 +45,12 @@ test('reed spectra are finite, bounded and distinct', () => {
   assert.ok(getReedHarmonicAmplitude('saxophone', 2) > getReedHarmonicAmplitude('saxophone', 3));
 });
 
-test('reed waveforms are selectable and survive preset serialization', () => {
+test('retired reed waveforms leave the picker and migrate to the noise engine', () => {
   for (const waveform of ['oboe', 'clarinet', 'saxophone']) {
-    assert.ok(WAVEFORM_OPTIONS.some((option) => option.value === waveform));
+    assert.ok(!WAVEFORM_OPTIONS.some((option) => option.value === waveform));
     const preset = normalizePresetData({ tracks: [{ waveform }] });
     assert.equal(preset.tracks[0].waveform, waveform);
+    assert.equal(preset.tracks[0].synthMode, 'resonant-noise');
     assert.equal(normalizePresetData(JSON.parse(JSON.stringify(preset))).tracks[0].waveform, waveform);
   }
 });
