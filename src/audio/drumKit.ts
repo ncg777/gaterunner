@@ -1,4 +1,5 @@
 import * as Tone from 'tone';
+import { setFilterSettings } from './filterSettings.js';
 import {
   getDefaultDrumParameters,
   normalizeDrumParameters,
@@ -347,7 +348,7 @@ export function createDrumInstrument(voiceId: DrumVoiceId, rawParameters: DrumPa
           live.wavePower = nextWavePower;
           oscillator.frequency.value = live.tune;
           inputGain.gain.value = Tone.dbToGain(Number(next.distortionInputGain ?? 0));
-          filter.set({
+          setFilterSettings(filter, {
             type: String(next.filterType ?? 'lowpass') as BiquadFilterType,
             frequency: Number(next.filterFrequency ?? 20000),
             Q: Number(next.filterResonance ?? 1),

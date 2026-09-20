@@ -1,5 +1,64 @@
 # GateRunner performance review
 
+## Realtime follow-up: control edits and silent rests
+
+Implemented three further changes without reducing synthesis quality:
+
+- `resolveSynthMode` selects the engine without rebuilding the noise/choir control
+  objects and formant arrays on every note and wavetable tick. It retains explicit
+  mode precedence and legacy waveform migration. Full normalization still runs
+  when the complete settings are needed. A local 20,000-call measurement using a
+  Vue-reactive default track took 513.3 ms for full normalization versus 4.1 ms
+  for mode resolution; this is an isolated control-path measurement.
+- Filter updates omit an unchanged rolloff. Tone's rolloff setter otherwise
+  reconstructs the entire native biquad bank, even for the same slope. This
+  applies to per-voice filters, rhythmic track filters, drum edits and legacy
+  formant banks. Per-voice routing also stays connected unless filter enablement
+  changes. Actual slope/type/Q/gain changes still apply normally.
+- Realtime polyphonic wavetable loops skip spectrum preparation while the voice
+  pool is completely silent. Every attack still resolves the spectrum at its
+  current transport/note time. Reserved future notes and release tails keep
+  receiving updates. Offline rendering and mono/glide behavior remain eager.
+
+`runFilterUpdatePerformanceChecks` measured **192.9 ms -> 4.4 ms** for 60 control
+updates across eight native filters, eliminating **960 redundant biquad
+allocations**. This measures control-edit work, not whole-song speed or audio
+thread utilization. `runFilterUpdateSoundChecks` compares repeated settings
+updates against uninterrupted native filtering during held notes, release tails
+and reuse: all four slopes (-12/-24/-48/-96 dB/octave) have exactly equal PCM.
+Retaining filter history also avoids resetting it during unrelated voice edits.
+
+`runIdleModulationChecks` confirms 90 silent callbacks perform zero spectrum
+preparations, while attacks, scheduled future notes, release tails and reused
+voices still update. All 261 Node tests pass, along with native browser checks
+for partial generators, Unison sound, voice filters/lifecycle, modulation phase,
+all filter-LFO waveform/retrigger combinations, percussion, live engine controls,
+scheduled engine switches and offline context restoration. Six oversampled
+waveshaper comparisons remain sample-identical. Vue/CLI TypeScript checks and
+the Vite/PWA build in `dist/realtime-followup-build` pass.
+
+The browser profiler now excludes the three-second warmup from CPU sampling as
+well as timing in `PROFILE_MODES=steady`. Earlier steady CPU profiles included
+startup even though their task/timer measurements did not. Optional Google Fonts
+are blocked before navigation so proxy/network delays cannot stall startup.
+The final six-track steady run recorded zero tasks over 50 ms during eight
+seconds, with a 45.1 ms maximum timer gap. The preceding steady run also had zero
+long tasks (34.2 ms maximum gap), so these runs do **not** demonstrate a general
+dense-playback latency improvement. The proven savings are redundant control
+updates and preparation during silence; hardware audio underruns were not measured.
+
+Reproduce the focused browser checks with:
+
+```sh
+node cli/profileBrowser.mjs runFilterUpdatePerformanceChecks runFilterUpdateSoundChecks runIdleModulationChecks
+```
+
+Sample rate, partial counts, Unison oscillators, oversampling, audible modulation
+cadence and effect tails are unchanged. Native periodic-wave construction remains
+a sustained-playback cost. These results do not justify a quality reduction or
+a browser DSP rewrite; warm standby shapers remain unchanged because transition
+state would need separate validation.
+
 ## Implementation results
 
 Implemented the primary optimizations from this review:

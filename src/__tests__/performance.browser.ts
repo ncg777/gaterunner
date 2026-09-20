@@ -58,8 +58,8 @@ export async function prepareBrowserPerformanceProject(app: InstanceType<typeof 
   await new Promise(resolve => setTimeout(resolve, 250));
 }
 
-export async function runBrowserPerformance(app: InstanceType<typeof App>, mode: 'playback' | 'steady' | 'export') {
-  if (mode === 'steady') {
+export async function runBrowserPerformance(app: InstanceType<typeof App>, mode: 'playback' | 'steady' | 'export', warmup = true) {
+  if (mode === 'steady' && warmup) {
     await app.startSequencer();
     await new Promise(resolve => setTimeout(resolve, 3000));
   }

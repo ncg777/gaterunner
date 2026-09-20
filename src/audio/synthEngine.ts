@@ -65,20 +65,29 @@ export function normalizeChoirEngine(value: unknown): ChoirEngineSettings {
     formantGains: Array.from({ length: 5 }, (_, i) => number(Array.isArray(r.formantGains) ? r.formantGains[i] : undefined, 0, -24, 12)),
   };
 }
-export function normalizeSynthEngine(value: unknown): SynthEngineSettings {
-  const r = object(value), source = object(r.partialGenerator);
+/** Resolve routing without rebuilding either engine's controls on every audio tick. */
+export function resolveSynthMode(value: unknown): SynthMode {
+  const r = object(value);
+  if (r.synthMode === 'additive' || r.synthMode === 'resonant-noise' || r.synthMode === 'choir') {
+    return r.synthMode;
+  }
+  const source = object(r.partialGenerator);
   // Explicit modes win. Do not reinterpret inactive waveform metadata in mathematical/tonewheel sources.
   const legacyActive = source.type === 'waveform' || !['tonewheel', 'sequence', 'binary'].includes(String(source.type));
   const wave = String(r.waveform);
-  const fallback: SynthMode = legacyActive && wave.startsWith('choir-') ? 'choir'
+  return legacyActive && wave.startsWith('choir-') ? 'choir'
     : legacyActive && LEGACY_NOISE_WAVEFORMS.includes(wave) ? 'resonant-noise' : 'additive';
+}
+
+export function normalizeSynthEngine(value: unknown): SynthEngineSettings {
+  const r = object(value), wave = String(r.waveform);
   const noiseDefaults: Partial<NoiseEngineSettings> = wave === 'brown-noise' ? { color: 'brown' }
     : wave === 'flute' ? { bands: 2, resonance: 35, tilt: -12 }
     : wave === 'oboe' ? { color: 'white', bands: 6, resonance: 28, tilt: -3 }
     : wave === 'clarinet' ? { bands: 6, oddEven: -24, resonance: 30 }
     : wave === 'saxophone' ? { color: 'white', bands: 8, resonance: 12, tilt: -4 } : {};
   return {
-    synthMode: choice(r.synthMode, ['additive', 'resonant-noise', 'choir'], fallback),
+    synthMode: resolveSynthMode(r),
     noiseEngine: normalizeNoiseEngine({ ...noiseDefaults, ...object(r.noiseEngine) }),
     choirEngine: normalizeChoirEngine({ ...(wave === 'choir-oh' ? { vowel: 'o', targetVowel: 'a' } : {}), ...object(r.choirEngine) }),
   };

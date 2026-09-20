@@ -503,6 +503,9 @@ await checks.runWavWorkerChecks();
 await checks.runWaveshaperChecks(document.querySelector('#app').__vue_app__._instance.proxy);
 await checks.runModulationChecks(document.querySelector('#app').__vue_app__._instance.proxy);
 await checks.runPerformanceOptimizationChecks(document.querySelector('#app').__vue_app__._instance.proxy);
+await checks.runFilterUpdatePerformanceChecks();
+await checks.runFilterUpdateSoundChecks();
+await checks.runIdleModulationChecks(document.querySelector('#app').__vue_app__._instance.proxy);
 ```
 
 `node cli/profileBrowser.mjs` profiles a six-track animated wavetable project in
@@ -514,7 +517,8 @@ not use your browser's saved projects.
 
 Run `node cli/profileBrowser.mjs runNativeEffectChecks runNativeSynthesisChecks runNativeDrumChecks runReverbImpulseLifecycleChecks`
 to compare native DSP against the browser nodes in that disposable profile.
-Set `PROFILE_MODES=steady` to measure sustained playback after warmup, and
+Set `PROFILE_MODES=steady` to measure sustained playback after warmup (excluded
+from both timing and CPU sampling), and
 `PROFILE_POLL_BASELINE=1` to compare against the former 200 ms realtime polling.
 Realtime playback now polls every 10 ms while retaining its 400 ms note lookahead;
 these are configured separately because Tone's lookahead setter changes both.

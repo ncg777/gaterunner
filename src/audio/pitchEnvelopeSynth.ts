@@ -5,6 +5,7 @@ import { buildPitchEnvelopeCurve } from './pitchEnvelope';
 import type { LfoWaveform, LfoPhaseMode } from './lfo';
 import { FilterLfo } from './filterLfo';
 import { setSharedUnisonPartials } from './unisonPartials';
+import { setFilterSettings } from './filterSettings';
 
 type SynthOptions = Tone.SynthOptions;
 type EngineEvent =
@@ -240,14 +241,15 @@ export class PitchEnvelopeSynth extends Tone.Synth {
       this.pitchEnvelopeShape = pitchEnvelopeShape;
     }
     if (voiceFilter) {
+      const wasEnabled = this.voiceFilterOptions.enabled;
       this.voiceFilterOptions = { ...this.voiceFilterOptions, ...voiceFilter };
-      this.filter.set({
+      setFilterSettings(this.filter, {
         type: this.voiceFilterOptions.type,
         rolloff: this.voiceFilterOptions.rolloff,
         Q: this.voiceFilterOptions.Q,
         gain: this.voiceFilterOptions.gain,
       });
-      this.routeFilter();
+      if (wasEnabled !== this.voiceFilterOptions.enabled) this.routeFilter();
       this.syncFilterLfo();
     }
     return this;

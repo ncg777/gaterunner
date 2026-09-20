@@ -24,7 +24,7 @@ try {
     '--autoplay-policy=no-user-gesture-required', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
   let page;
   for (let i = 0; ; i++) {
-    try { page = await (await fetch('http://127.0.0.1:9397/json/new?http://127.0.0.1:3197/gaterunner/', { method: 'PUT' })).json(); break; } catch {}
+    try { page = await (await fetch('http://127.0.0.1:9397/json/new?about:blank', { method: 'PUT' })).json(); break; } catch {}
     if (i === 80) throw new Error('Chrome startup failed');
     await delay(250);
   }
@@ -47,6 +47,11 @@ try {
     return result.result.value;
   };
   await send('Runtime.enable');
+  // Block optional remote fonts before navigation, including on hosts using a
+  // proxy where Chrome's host-resolver rules do not prevent network stalls.
+  await send('Network.enable');
+  await send('Network.setBlockedURLs', { urls: ['*fonts.googleapis.com*', '*fonts.gstatic.com*'] });
+  await send('Page.navigate', { url: 'http://127.0.0.1:3197/gaterunner/' });
   await send('Page.bringToFront');
   for (let i = 0; ; i++) {
     if (await evaluate('!!document.querySelector("#app")?.__vue_app__?._instance?.proxy')) break;
@@ -67,9 +72,13 @@ try {
   }
   const results = [];
   for (const mode of checks.length ? [] : (process.env.PROFILE_MODES ?? 'playback,export').split(',')) {
+    if (mode === 'steady') {
+      await evaluate('app.startSequencer()');
+      await delay(3000);
+    }
     await send('Profiler.enable');
     await send('Profiler.start');
-    const result = await evaluate(`bench.runBrowserPerformance(app, '${mode}')`);
+    const result = await evaluate(`bench.runBrowserPerformance(app, '${mode}', false)`);
     const { profile } = await send('Profiler.stop');
     if (mode === 'export') {
       const base64 = await evaluate(`(() => { let text = ''; const bytes = globalThis.performanceWav;

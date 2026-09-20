@@ -1,9 +1,34 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { choirBands, normalizeSynthEngine, normalizeNoiseEngine, normalizeChoirEngine } from '../audio/synthEngine.js';
+import { choirBands, normalizeSynthEngine, normalizeNoiseEngine, normalizeChoirEngine, resolveSynthMode } from '../audio/synthEngine.js';
 import { clonePresetTrackData, normalizePresetTrackData } from '../presets.js';
 import { createNativeEngineSource } from '../../cli/nativeEngineSource.js';
 import { generateWav } from '../../cli/generate.js';
+
+test('mode-only routing preserves legacy resolution without reading inactive engine controls', () => {
+  for (const synthMode of [undefined, 'invalid', 'additive', 'choir', 'resonant-noise']) {
+    for (const type of [undefined, 'waveform', 'tonewheel', 'sequence', 'binary', 'invalid']) {
+      for (const waveform of ['sine', 'choir-ah', 'choir-oh', 'flute', 'brown-noise']) {
+        const input = { synthMode, waveform, partialGenerator: { type } };
+        const legacyActive = type === 'waveform' || !['tonewheel', 'sequence', 'binary'].includes(String(type));
+        const expected = ['additive', 'choir', 'resonant-noise'].includes(String(synthMode)) ? synthMode
+          : legacyActive && waveform.startsWith('choir-') ? 'choir'
+            : legacyActive && ['flute', 'brown-noise'].includes(waveform) ? 'resonant-noise' : 'additive';
+        assert.equal(resolveSynthMode(input), expected);
+        assert.equal(normalizeSynthEngine(input).synthMode, expected);
+      }
+    }
+  }
+  assert.equal(resolveSynthMode(null), 'additive');
+  const input = {
+    synthMode: 'additive',
+    get noiseEngine() { throw new Error('Routing read noise controls'); },
+    get choirEngine() { throw new Error('Routing read choir controls'); },
+  };
+  assert.equal(resolveSynthMode(input), 'additive');
+  input.synthMode = 'choir';
+  assert.equal(resolveSynthMode(input), 'choir');
+});
 
 test('legacy active sources migrate; inactive waveform metadata and explicit modes survive', () => {
   for (const waveform of ['flute', 'oboe', 'clarinet', 'saxophone', 'pink-noise', 'brown-noise', 'duct']) {
