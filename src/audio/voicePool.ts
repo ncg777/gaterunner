@@ -4,10 +4,11 @@ import type * as Tone from 'tone';
 export const MAX_POOLED_VOICES = 32;
 
 /**
- * Realtime ceiling for retained PitchEnvelopeSynth graphs. Each current voice owns
+ * Realtime headroom target for retained PitchEnvelopeSynth graphs. Each voice owns
  * considerably more native nodes than the Tone.Synth voices used by older releases.
  * Keeping all 32 graphs alive per track overloaded mobile audio render threads even
- * when the preset requested only eight musical voices. Offline exports use the full
+ * when the preset requested only eight musical voices. This is a headroom target,
+ * never a limit below the track's requested polyphony. Offline exports use the full
  * ceiling because they are not constrained by a realtime deadline.
  */
 export const MAX_REALTIME_POOLED_VOICES = 12;
@@ -27,8 +28,8 @@ export function getSynthVoiceCount(
   notesPerEvent = polyphony,
   maximumVoices = MAX_POOLED_VOICES,
 ): number {
-  const ceiling = Math.max(1, Math.min(MAX_POOLED_VOICES, Math.round(maximumVoices)));
-  const musicalVoices = Math.min(ceiling, Math.max(1, Math.round(polyphony)));
+  const musicalVoices = Math.max(1, Math.min(MAX_POOLED_VOICES, Math.round(polyphony)));
+  const ceiling = Math.max(musicalVoices, Math.min(MAX_POOLED_VOICES, Math.round(maximumVoices)));
   const eventVoices = Math.max(1, Math.min(musicalVoices, Math.round(notesPerEvent)));
   const reservationSeconds = Math.max(0, Number.isFinite(releaseSeconds) ? releaseSeconds : 0)
     + 2 * Math.max(0, Number.isFinite(lookAheadSeconds) ? lookAheadSeconds : 0);

@@ -1740,7 +1740,9 @@ export default defineComponent({
           const synth = markRaw(new Tone.PolySynth(PitchEnvelopeSynth));
           configureRealtimeScheduling(synth.context);
           const voiceCount = this.getTrackSynthVoiceCount(track, synth.context);
-          synth.maxPolyphony = voiceCount;
+          // Released voices still occupy Tone's pool until their envelope ends. Allow
+          // temporary tail capacity; claimVoices enforces the track's musical limit.
+          synth.maxPolyphony = MAX_POOLED_VOICES;
           // Reuse voices instead of letting Tone dispose and rebuild them every second.
           retainVoicePool(synth as unknown as Tone.PolySynth, voiceCount);
           prewarmVoicePool(synth as unknown as Tone.PolySynth, voiceCount);
@@ -1767,7 +1769,7 @@ export default defineComponent({
           const synth = chain.synth as Tone.PolySynth;
           configureRealtimeScheduling(synth.context);
           const voiceCount = this.getTrackSynthVoiceCount(track, synth.context);
-          synth.maxPolyphony = voiceCount;
+          synth.maxPolyphony = MAX_POOLED_VOICES;
           retainVoicePool(synth as unknown as Tone.PolySynth, voiceCount);
           prewarmVoicePool(synth as unknown as Tone.PolySynth, voiceCount);
         }

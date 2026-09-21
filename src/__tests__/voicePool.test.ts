@@ -75,6 +75,15 @@ test('bounds the July preset voice graph in realtime without reducing offline ex
   assert.equal(getSynthVoiceCount(polyphony, release, eventInterval, 0, notesPerEvent), 32);
 });
 
+test('the realtime pool never has fewer voices than the Voices control requests', () => {
+  for (const polyphony of [12, 13, 16]) {
+    const realtime = getSynthVoiceCount(polyphony, 0, 0.125, 0, polyphony, MAX_REALTIME_POOLED_VOICES);
+    const offline = getSynthVoiceCount(polyphony, 0, 0.125, 0, polyphony);
+    assert.equal(realtime, polyphony);
+    assert.equal(offline, polyphony);
+  }
+});
+
 test('prewarms the requested pool without consuming already available voices', () => {
   const existingVoice = { dispose() {} };
   const voiceCount = getSynthVoiceCount(2, 5.28, 60 / (46 * 2));
