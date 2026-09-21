@@ -543,3 +543,28 @@ an assumption that every connected silent branch is processed.
 
 Avoid reducing sample rate, harmonic count, unison, oversampling, modulation rate,
 or effect tails to obtain speed. The opportunities above target redundant work.
+
+## Live buffering A/B diagnostics (2026-09-21)
+
+Global actions → Live audio buffering now offers Interactive (unchanged default)
+and Playback. This is a device-local preference, outside preset serialization.
+Stop before applying: switching closes the previous live context and discards its
+remaining tails, preserves the current draft, and leaves playback stopped. No page
+reload is required. The next Play starts from the beginning.
+
+Both modes retain 400 ms scheduling lookahead and 10 ms scheduler polling. Neither
+changes sample rate, oversampling, synthesis parameters, or offline WAV rendering.
+The dialog reports actual sample rate, available latency properties, and counts
+late non-MIDI note callbacks since Play. Diagnostics poll only while the dialog is
+open, once per second; they do not measure audio underruns or CPU utilization.
+
+Validation: 271 Node tests; TypeScript check; browser switching Playback →
+Interactive → Playback, old-context closure, restart, saved preference, unchanged
+draft, and guards against switching during playback/export. A deterministic
+48 kHz offline synthesis fixture produced identical PCM before/after switching.
+Headless Chromium reported base latencies of 10 ms vs 23.2 ms at 44.1 kHz.
+These measurements do not establish that Android speaker crackling is resolved.
+
+Pixel 9 installed-app test: keep the default preset and phone speaker; listen in
+Interactive, Stop, apply Playback, then Play again. Compare audible clicks and the
+late-callback readout. Zero late callbacks does not rule out audio-thread overload.
