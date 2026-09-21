@@ -370,6 +370,8 @@ import { isMonophonic, limitPolyphony, type GlideCurve, type GlideMode } from '.
 import {
   claimVoices,
   getSynthVoiceCount,
+  MAX_POOLED_VOICES,
+  MAX_REALTIME_POOLED_VOICES,
   prewarmVoicePool,
   retainVoicePool,
   type SoundingNote,
@@ -1717,9 +1719,16 @@ export default defineComponent({
         soundingNotes: [],
       });
     },
-    getTrackSynthVoiceCount(track: PresetTrackData, lookAhead: number): number {
+    getTrackSynthVoiceCount(track: PresetTrackData, context: Tone.BaseContext): number {
       const notesPerEvent = this.computeActualNotes(track).reduce((count, notes) => Math.max(count, notes.length), 1);
-      return getSynthVoiceCount(track.polyphony, track.release, this.getTrackQuant(track), lookAhead, notesPerEvent);
+      return getSynthVoiceCount(
+        track.polyphony,
+        track.release,
+        this.getTrackQuant(track),
+        context.lookAhead,
+        notesPerEvent,
+        context.isOffline ? MAX_POOLED_VOICES : MAX_REALTIME_POOLED_VOICES,
+      );
     },
     ensureTrackSynth(chain: TrackAudioChain, track: PresetTrackData): TrackSynth {
       if (!chain.synth) {
@@ -1728,7 +1737,7 @@ export default defineComponent({
         } else {
           const synth = markRaw(new Tone.PolySynth(PitchEnvelopeSynth));
           configureRealtimeScheduling(synth.context);
-          const voiceCount = this.getTrackSynthVoiceCount(track, synth.context.lookAhead);
+          const voiceCount = this.getTrackSynthVoiceCount(track, synth.context);
           synth.maxPolyphony = voiceCount;
           // Reuse voices instead of letting Tone dispose and rebuild them every second.
           retainVoicePool(synth as unknown as Tone.PolySynth, voiceCount);
@@ -1755,7 +1764,7 @@ export default defineComponent({
         if (!isMono) {
           const synth = chain.synth as Tone.PolySynth;
           configureRealtimeScheduling(synth.context);
-          const voiceCount = this.getTrackSynthVoiceCount(track, synth.context.lookAhead);
+          const voiceCount = this.getTrackSynthVoiceCount(track, synth.context);
           synth.maxPolyphony = voiceCount;
           retainVoicePool(synth as unknown as Tone.PolySynth, voiceCount);
           prewarmVoicePool(synth as unknown as Tone.PolySynth, voiceCount);
@@ -3118,10 +3127,15 @@ export default defineComponent({
     },
     downloadLiveDiagnostics() {
       const data = exportLiveDiagnostics({ appVersion,
-        project: { bpm: this.bpm, tracks: this.tracks.map(track => ({ id: track.id,
-          kind: track.trackKind, synthMode: resolveSynthMode(track), polyphony: track.polyphony,
-          release: track.release, effects: ['filter', 'tremolo', 'vibrato', 'chorus', 'flanger', 'phaser', 'echo']
-            .filter(name => Boolean((track as unknown as Record<string, unknown>)[`${name}Enabled`])) })) } });
+        project: { bpm: this.bpm, tracks: this.tracks.map(track => {
+          const synth = this.trackSynths[track.id]?.synth;
+          return { id: track.id,
+            kind: track.trackKind, synthMode: resolveSynthMode(track), polyphony: track.polyphony,
+            liveVoiceLimit: synth instanceof Tone.PolySynth ? synth.maxPolyphony : synth ? 1 : 0,
+            activeVoices: synth instanceof Tone.PolySynth ? synth.activeVoices : synth ? 1 : 0,
+            release: track.release, effects: ['filter', 'tremolo', 'vibrato', 'chorus', 'flanger', 'phaser', 'echo']
+              .filter(name => Boolean((track as unknown as Record<string, unknown>)[`${name}Enabled`])) };
+        }) } });
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob), a = document.createElement('a');
       a.href = url; a.download = `GateRunner-playback-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;

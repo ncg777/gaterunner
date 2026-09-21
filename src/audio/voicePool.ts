@@ -1,10 +1,16 @@
 import type * as Tone from 'tone';
 
-/**
- * Hard ceiling for allocated Tone voices per track, matching Tone's own default so a
- * dense track never runs out of voices mid-pattern.
- */
+/** Absolute ceiling used by offline rendering, matching Tone's own default. */
 export const MAX_POOLED_VOICES = 32;
+
+/**
+ * Realtime ceiling for retained PitchEnvelopeSynth graphs. Each current voice owns
+ * considerably more native nodes than the Tone.Synth voices used by older releases.
+ * Keeping all 32 graphs alive per track overloaded mobile audio render threads even
+ * when the preset requested only eight musical voices. Offline exports use the full
+ * ceiling because they are not constrained by a realtime deadline.
+ */
+export const MAX_REALTIME_POOLED_VOICES = 12;
 
 /**
  * Tone voices to allocate for a track that should sound `polyphony` notes at once.
@@ -19,8 +25,10 @@ export function getSynthVoiceCount(
   eventIntervalSeconds = Number.POSITIVE_INFINITY,
   lookAheadSeconds = 0,
   notesPerEvent = polyphony,
+  maximumVoices = MAX_POOLED_VOICES,
 ): number {
-  const musicalVoices = Math.max(1, Math.round(polyphony));
+  const ceiling = Math.max(1, Math.min(MAX_POOLED_VOICES, Math.round(maximumVoices)));
+  const musicalVoices = Math.min(ceiling, Math.max(1, Math.round(polyphony)));
   const eventVoices = Math.max(1, Math.min(musicalVoices, Math.round(notesPerEvent)));
   const reservationSeconds = Math.max(0, Number.isFinite(releaseSeconds) ? releaseSeconds : 0)
     + 2 * Math.max(0, Number.isFinite(lookAheadSeconds) ? lookAheadSeconds : 0);
@@ -30,7 +38,7 @@ export function getSynthVoiceCount(
     && eventIntervalSeconds > 0
     ? Math.ceil(reservationSeconds / eventIntervalSeconds)
     : 0;
-  return Math.min(MAX_POOLED_VOICES, musicalVoices + eventVoices * reservationIntervals);
+  return Math.min(ceiling, musicalVoices + eventVoices * reservationIntervals);
 }
 
 export interface SoundingNote {

@@ -17,7 +17,7 @@
     "commander": "^14.0.3",
     "register-service-worker": "^1.7.2",
     "roboto-fontface": "*",
-    "tone": "^15.1.22",
+    "tone": "15.1.22",
     "ultra-mega-enumerator": "^2026.7.4",
     "vue": "^3.4.31",
     "vuetify": "^3.6.14",

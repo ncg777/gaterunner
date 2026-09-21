@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   claimVoices,
   getSynthVoiceCount,
+  MAX_REALTIME_POOLED_VOICES,
   prewarmVoicePool,
   retainVoicePool,
   type SoundingNote,
@@ -60,6 +61,18 @@ test('reserves voices for notes scheduled ahead even with zero release', () => {
   assert.equal(getSynthVoiceCount(8, 0.12, 0.125, 0.4), 32, 'the pool remains bounded');
   assert.equal(getSynthVoiceCount(2, 0, 0.125, 0.4, 1), 9);
   assert.equal(getSynthVoiceCount(8, 0, 0.125, 0.4, 1), 15, 'single-note patterns do not reserve full chords');
+});
+
+test('bounds the July preset voice graph in realtime without reducing offline export capacity', () => {
+  const polyphony = 8;
+  const release = 2.83;
+  const eventInterval = 60 / (96 * 4);
+  const notesPerEvent = 3;
+  assert.equal(
+    getSynthVoiceCount(polyphony, release, eventInterval, 0.4, notesPerEvent, MAX_REALTIME_POOLED_VOICES),
+    12,
+  );
+  assert.equal(getSynthVoiceCount(polyphony, release, eventInterval, 0, notesPerEvent), 32);
 });
 
 test('prewarms the requested pool without consuming already available voices', () => {

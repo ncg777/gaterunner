@@ -3506,7 +3506,7 @@ __metadata:
     roboto-fontface: "npm:*"
     sass: "npm:1.77.8"
     sass-embedded: "npm:^1.77.8"
-    tone: "npm:^15.1.22"
+    tone: "npm:15.1.22"
     tsx: "npm:^4.21.0"
     typescript: "npm:^5.8.3"
     ultra-mega-enumerator: "npm:^2026.7.4"
@@ -5550,13 +5550,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"tone@npm:^15.1.22":
-  version: 15.5.36
-  resolution: "tone@npm:15.5.36"
+"tone@npm:15.1.22":
+  version: 15.1.22
+  resolution: "tone@npm:15.1.22"
   dependencies:
     standardized-audio-context: "npm:^25.3.70"
     tslib: "npm:^2.3.1"
-  checksum: 10c0/b5b1cd20297037a75157e519aeefcc0799ab4ecc50fbe4deddcd69b0ef538f452920d99167195337c2a6e6fb56e1083afde4ea7b12a3d3b8ef31a385b71634de
+  checksum: 10c0/dd11cd2b0645fec5e188919ace1494deeae30f10775b493e2a4ab44e1be0bf3087dce6c0db78da91f88eddf2fd5f1430a3cc52e2d2d5f76076efe949aa056e64
   languageName: node
   linkType: hard
 
