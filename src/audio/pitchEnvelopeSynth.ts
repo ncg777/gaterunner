@@ -6,11 +6,10 @@ import type { LfoWaveform, LfoPhaseMode } from './lfo';
 import { FilterLfo } from './filterLfo';
 import { setSharedUnisonPartials } from './unisonPartials';
 import { setFilterSettings } from './filterSettings';
+import { hasVoiceActivity, type VoiceEvent } from './voiceActivity';
 
 type SynthOptions = Tone.SynthOptions;
-type EngineEvent =
-  | { type: 'attack'; time: number; mono: boolean; stopTime?: number }
-  | { type: 'release'; time: number; ampRelease?: number };
+type EngineEvent = VoiceEvent;
 
 export interface VoiceFilterOptions {
   enabled: boolean;
@@ -327,6 +326,7 @@ export class PitchEnvelopeSynth extends Tone.Synth {
 
   protected attackEngine(time: number, mono = false, stopTime?: number): void {
     this.rememberEngineEvent({ type: 'attack', time, mono, stopTime });
+    this.filterLfo?.wake(time);
     this.engineSource?.attack(time, mono, stopTime);
   }
 
@@ -359,7 +359,16 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   private syncFilterLfo(): void {
     const options = this.voiceFilterOptions;
     if (options.enabled && options.lfoEnabled && options.lfoAmount !== 0) {
-      this.filterLfo ??= new FilterLfo(this.filter);
+      this.filterLfo ??= new FilterLfo(this.filter, () => {
+        // Allow resonant filter history to decay after the source ends. This is
+        // deliberately conservative at low cutoff/high Q, rather than clipping tails.
+        const o = this.voiceFilterOptions;
+        const minHz = Math.max(this.midiToFrequency(0), this.filterBaseFrequency
+          * 2 ** ((Math.min(0, o.amount) - Math.abs(o.lfoAmount)) / 12));
+        const tail = Math.max(0.05, 20 * Math.max(1, o.Q) * Math.abs(o.rolloff) / 12 / (Math.PI * minHz));
+        return hasVoiceActivity(this.engineEvents, this.context.currentTime,
+          this.toSeconds(this.envelope.release), tail);
+      });
     }
     this.filterLfo?.set({
       enabled: options.enabled && options.lfoEnabled,
@@ -429,9 +438,10 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   dispose(): this {
     if (this.retiring) return this;
     this.retiring = true;
+    this.filterLfo?.dispose();
+    this.filterLfo = null;
     this.engineSource?.dispose();
     const cleanup = () => {
-      this.filterLfo?.dispose();
       this.pitchEnvelope.dispose();
       this.pitchCents.dispose();
       this.filter.dispose();

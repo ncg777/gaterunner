@@ -1,4 +1,5 @@
 import * as Tone from 'tone';
+export { runAudioLifecycleChecks, runTransportSleepChecks } from './audioLifecycle.browser';
 export { runFilterUpdatePerformanceChecks, runFilterUpdateSoundChecks, runIdleModulationChecks } from './realtimePerformance.browser';
 export { runUnisonSoundChecks, runActiveUnisonPerformanceChecks } from './unison.browser';
 export { runFilterLfoChecks } from './filterLfo.browser';

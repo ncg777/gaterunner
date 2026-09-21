@@ -1,5 +1,58 @@
 # GateRunner performance review
 
+## Realtime lifecycle follow-up — 2026.9.21
+
+This change targets background control/DSP work, not synthesis resolution:
+
+- Prewarmed `PitchEnvelopeSynth` voices no longer subscribe to the 200 Hz
+  filter-LFO scheduler while unused. Attacks wake scheduling; future reservations,
+  held notes, amplitude releases and a conservative resonance-settling allowance
+  keep it active. Finished voices unsubscribe. Phase origins remain absolute and
+  offline scheduling remains eager. Suspended contexts shed their tick listeners.
+- Disabling vibrato, tremolo, chorus, flanger or phaser disposes its graph, including
+  the flanger LFO and phaser input/output gains. Enabled effects are not restarted
+  merely because routing changes. Chorus spread uses the same resting-DC correction
+  as tremolo, avoiding a phase restart as a workaround.
+- Stop retains outstanding notes and effect tails. A temporary stereo analyser
+  waits until queued note durations/releases have elapsed and output stays below
+  -120 dBFS for at least one second and longer than the configured echo/reverb gap.
+  It then disposes itself and suspends the captured realtime AudioContext. Play
+  cancels/awaits pending suspension before resuming; repeated Stop retains that
+  promise. Ordinary stopped-state clicks do not wake the context. Offline export
+  uses its own context and is not suspended by this controller.
+- App/package version is `2026.9.21`; the committed `docs/` PWA build is refreshed.
+
+Validation used the immutable Yarn lock (Tone 15.5.36), Node 24 and headless Chromium:
+
+- All 268 Node tests pass, along with Vue and CLI TypeScript checks and the
+  production Vite/PWA build.
+- `runAudioLifecycleChecks`: 32 allocated voices have **zero idle filter-LFO
+  listeners**; a future/sounding note wakes exactly one. Release completion removes
+  it and reuse wakes it again. Three disable/re-enable cycles dispose/recreate all
+  five modulation effects. Chorus spread, sleep cancellation and resume pass.
+- `runTransportSleepChecks`: repeated Stop, immediate Stop/Play, waiting for tails,
+  stopped UI clicks and playback after suspension pass.
+- Existing filter-update PCM comparisons (all four slopes), idle wavetable checks,
+  filter-LFO phase checks, native effects/synthesis, Unison sound and waveshaper
+  comparisons pass. The new live fixtures save/restore Tone's global waveform cache
+  so they do not contaminate later offline fixtures at another sample rate.
+
+Reproduce focused native checks with an installed Chrome and `CHROME_PATH`:
+
+```sh
+node cli/profileBrowser.mjs runAudioLifecycleChecks runTransportSleepChecks
+node cli/profileBrowser.mjs runFilterUpdateSoundChecks runIdleModulationChecks runFilterLfoChecks
+node cli/profileBrowser.mjs runNativeEffectChecks runNativeSynthesisChecks runUnisonSoundChecks runWaveshaperChecks
+```
+
+These are lifecycle counts and regression checks, **not measured whole-app CPU
+percentages or hardware underrun measurements**. No sample rate, harmonic count,
+unison count, audible control cadence, polyphony ceiling or oversampling setting
+was reduced. A resonant tail's settling allowance is an estimate; extreme settings
+deliberately retain work longer. Context sleep is based on measured output silence,
+not a fixed truncation timeout. Active wavetable pool-wide updates, dynamic pool
+sizing and live standby-waveshaper disconnection remain separate follow-up work.
+
 ## Realtime follow-up: control edits and silent rests
 
 Implemented three further changes without reducing synthesis quality:
