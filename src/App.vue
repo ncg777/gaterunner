@@ -48,6 +48,7 @@
                 </v-btn>
               </template>
               <v-list density="compact" class="transport-action-menu">
+                <v-list-item title="Live audio buffering" prepend-icon="mdi-tune" @click="showLiveAudio = true; transportMenuOpen = false" />
                 <v-list-item
                   title="Download MIDI"
                   prepend-icon="mdi-music-note"
@@ -291,6 +292,7 @@
       </v-dialog>
 
       <HelpDialog v-model="showHelp" :app-version="appVersion" />
+      <LiveAudioDialog v-model="showLiveAudio" :mode="liveBuffering" :busy="isStarting || isExporting" :running="isRunning" @apply="applyLiveBuffering" />
     </v-main>
     <v-snackbar
       v-model="showPlaybackError"
@@ -326,6 +328,8 @@ import EditableSlider from './components/EditableSlider.vue';
 import EditorSurface from './components/EditorSurface.vue';
 import ExportProgressDialog from './components/ExportProgressDialog.vue';
 import HelpDialog from './components/HelpDialog.vue';
+import LiveAudioDialog from './components/LiveAudioDialog.vue';
+import { createLiveContext, readLiveBuffering, saveLiveBuffering, recordLiveScheduling, resetLiveScheduling, type LiveBuffering } from './audio/liveAudio';
 import PresetManager from './components/PresetManager.vue';
 import TrackStrip from './components/TrackStrip.vue';
 import * as Tone from 'tone';
@@ -538,11 +542,14 @@ export default defineComponent({
     EditorSurface,
     ExportProgressDialog,
     HelpDialog,
+    LiveAudioDialog,
     PresetManager,
     TrackStrip,
   },
   data() {
     return {
+      showLiveAudio: false,
+      liveBuffering: readLiveBuffering() as LiveBuffering,
       bpm: initialState.draft.bpm,
       a4: initialState.draft.a4,
       masterGain: initialState.draft.masterGain,
@@ -2964,6 +2971,38 @@ export default defineComponent({
       document.addEventListener('touchstart', handler, { once: true });
       document.addEventListener('keydown', handler, { once: true });
     },
+    async applyLiveBuffering(mode: LiveBuffering) {
+      if (this.isRunning || this.isStarting || this.isExporting || mode === this.liveBuffering
+        || (mode !== 'interactive' && mode !== 'playback')) return;
+      this.isStarting = true;
+      const oldContext = Tone.getContext() as Tone.Context;
+      let next: Tone.Context | undefined;
+      try {
+        next = createLiveContext(mode);
+        await this.audioSleep?.cancel();
+        this.audioSleep = null;
+        if (this.rebuildTrackLoopsTimer !== null) {
+          clearTimeout(this.rebuildTrackLoopsTimer); this.rebuildTrackLoopsTimer = null;
+        }
+        this.stopTrackLoops();
+        oldContext.transport.stop();
+        for (const chain of Object.values(this.trackSynths)) this.disposeTrackChain(chain);
+        this.trackSynths = markRaw({});
+        if (this.reverbChain) disposeReverbAudioChain(this.reverbChain as ReverbAudioChain);
+        this.reverbChain = null;
+        disposeMasterBus(oldContext);
+        Tone.setContext(next);
+        this.lastScheduledAudioEnd = 0;
+        this.liveBuffering = mode;
+        this.applyRealtimeSettings({ createMissingChains: false });
+        if (!saveLiveBuffering(mode)) this.showNotice('Buffering applied, but this browser could not save the preference.', 'warning');
+        await oldContext.close();
+        oldContext.dispose();
+      } catch (error) {
+        if (next && Tone.getContext() !== next) { await next.close(); next.dispose(); }
+        this.showPlaybackErrorMessage(`Could not change audio buffering: ${String(error)}`);
+      } finally { this.isStarting = false; }
+    },
     async startSequencer() {
       if (this.isRunning || this.isStarting) {
         return;
@@ -2993,6 +3032,7 @@ export default defineComponent({
 
         this.applyRealtimeSettings();
         this.isRunning = true;
+        resetLiveScheduling(Tone.getContext());
         this.rebuildTrackLoops();
         Tone.getTransport().seconds = 0;
         Tone.getTransport().start();
@@ -3051,6 +3091,7 @@ export default defineComponent({
       }
 
       const chain = this.getOrCreateTrackChain(track);
+      recordLiveScheduling(chain.sourceBus.context, when);
       this.lastScheduledAudioEnd = Math.max(this.lastScheduledAudioEnd,
         when + noteDuration + Math.max(track.release, track.filterEnvelopeRelease));
       this.scheduleFilterEnvelope(track, arr, when, noteDuration, chain);
@@ -3067,7 +3108,7 @@ export default defineComponent({
     },
 
     async downloadMIDI() {
-      if (this.isExporting) {
+      if (this.isExporting || this.isStarting) {
         return;
       }
 
@@ -3101,7 +3142,7 @@ export default defineComponent({
       }
     },
     async downloadWAV() {
-      if (this.isExporting) {
+      if (this.isExporting || this.isStarting) {
         return;
       }
 

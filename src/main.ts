@@ -14,6 +14,11 @@ import App from './App.vue'
 import { createApp } from 'vue'
 
 import './registerServiceWorker'
+import * as Tone from 'tone'
+import { createLiveContext, readLiveBuffering } from './audio/liveAudio'
+
+// Device-local preference; offline export always creates its own context.
+Tone.setContext(createLiveContext(readLiveBuffering()), true)
 
 const app = createApp(App)
 
