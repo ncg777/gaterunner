@@ -16,6 +16,7 @@
           <dt>Worst lateness</dt><dd>{{ stats.worstLateMs.toFixed(1) }} ms</dd>
         </dl>
         <p class="text-caption">Counters reset on Play. These measure note scheduling, not audio-output glitches or CPU usage. Zero late callbacks does not rule out crackling.</p>
+        <v-btn class="mt-4" block prepend-icon="mdi-download" @click="$emit('export')">Export diagnostics</v-btn>
       </v-card-text>
       <v-card-actions>
         <v-btn @click="$emit('update:modelValue', false)">Close</v-btn>
@@ -30,7 +31,7 @@ import { ref, watch, onUnmounted } from 'vue';
 import * as Tone from 'tone';
 import { readLiveScheduling, type LiveBuffering } from '../audio/liveAudio';
 const props = defineProps<{ modelValue: boolean; mode: LiveBuffering; busy: boolean; running: boolean }>();
-defineEmits<{ 'update:modelValue': [boolean]; apply: [LiveBuffering] }>();
+defineEmits<{ 'update:modelValue': [boolean]; apply: [LiveBuffering]; export: [] }>();
 const modes = [{ title: 'Interactive (current default)', value: 'interactive' }, { title: 'Playback (more buffering)', value: 'playback' }];
 const selected = ref<LiveBuffering>(props.mode);
 const sampleRate = ref(0), lookAhead = ref(0);
