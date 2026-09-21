@@ -292,7 +292,7 @@
       </v-dialog>
 
       <HelpDialog v-model="showHelp" :app-version="appVersion" />
-      <LiveAudioDialog v-model="showLiveAudio" :mode="liveBuffering" :busy="isStarting || isExporting" :running="isRunning" @apply="applyLiveBuffering" />
+      <LiveAudioDialog v-model="showLiveAudio" :mode="liveBuffering" :busy="isStarting || isExporting" :running="isRunning" @apply="applyLiveBuffering" @export="downloadLiveDiagnostics" />
     </v-main>
     <v-snackbar
       v-model="showPlaybackError"
@@ -329,7 +329,7 @@ import EditorSurface from './components/EditorSurface.vue';
 import ExportProgressDialog from './components/ExportProgressDialog.vue';
 import HelpDialog from './components/HelpDialog.vue';
 import LiveAudioDialog from './components/LiveAudioDialog.vue';
-import { createLiveContext, readLiveBuffering, saveLiveBuffering, recordLiveScheduling, resetLiveScheduling, type LiveBuffering } from './audio/liveAudio';
+import { beginLiveScheduling, createLiveContext, exportLiveDiagnostics, readLiveBuffering, recordLiveGraphBuild, resetLiveScheduling, saveLiveBuffering, stopLiveDiagnostics, type LiveBuffering } from './audio/liveAudio';
 import PresetManager from './components/PresetManager.vue';
 import TrackStrip from './components/TrackStrip.vue';
 import * as Tone from 'tone';
@@ -2003,6 +2003,7 @@ export default defineComponent({
         return existing;
       }
 
+      const buildStarted = performance.now();
       const chain = this.createTrackAudioChain({
         echoPingPong: track.echoPingPong,
         maxDelay: this.getTrackEchoMaxDelay(track),
@@ -2011,6 +2012,7 @@ export default defineComponent({
       });
       this.trackSynths[track.id] = chain;
       this.updateTrackChainSettings(track, chain);
+      recordLiveGraphBuild(chain.sourceBus.context, track.id, buildStarted);
       return chain;
     },
     /**
@@ -3030,15 +3032,18 @@ export default defineComponent({
           throw lastError instanceof Error ? lastError : new Error('Audio context did not resume.');
         }
 
-        this.applyRealtimeSettings();
-        this.isRunning = true;
+        // Build every audible graph and voice pool before the transport starts. Creating
+        // them in first-note callbacks can consume more than the whole lookahead window.
         resetLiveScheduling(Tone.getContext());
+        this.applyRealtimeSettings({ rebuildLoops: false, createMissingChains: true });
+        this.isRunning = true;
         this.rebuildTrackLoops();
         Tone.getTransport().seconds = 0;
         Tone.getTransport().start();
       } catch (error) {
         console.error('Unable to start audio playback:', error);
         this.isRunning = false;
+        stopLiveDiagnostics(Tone.getContext());
         this.stopTrackLoops();
         Tone.getTransport().stop();
         this.scheduleAudioSleep();
@@ -3053,6 +3058,7 @@ export default defineComponent({
       this.stopTrackLoops();
       Tone.getTransport().stop();
       Tone.getTransport().seconds = 0;
+      stopLiveDiagnostics(Tone.getContext());
       this.scheduleAudioSleep();
     },
     scheduleAudioSleep() {
@@ -3069,6 +3075,8 @@ export default defineComponent({
       this.audioSleep = sleep ? markRaw(sleep) : null;
     },
     playTrackStep(track: PresetTrackData, event: TrackScheduledEvent, when: Tone.Unit.Seconds) {
+      const finishDiagnostic = beginLiveScheduling(Tone.getContext(), when, track.id, event.notes.length);
+      try {
       if (!this.audibleTrackIds.has(track.id)) {
         return;
       }
@@ -3091,7 +3099,6 @@ export default defineComponent({
       }
 
       const chain = this.getOrCreateTrackChain(track);
-      recordLiveScheduling(chain.sourceBus.context, when);
       this.lastScheduledAudioEnd = Math.max(this.lastScheduledAudioEnd,
         when + noteDuration + Math.max(track.release, track.filterEnvelopeRelease));
       this.scheduleFilterEnvelope(track, arr, when, noteDuration, chain);
@@ -3105,6 +3112,20 @@ export default defineComponent({
       } else {
         this.triggerTrackVoice(track, chain, arr, `${noteDuration}s`, when, vel);
       }
+      } finally {
+        finishDiagnostic();
+      }
+    },
+    downloadLiveDiagnostics() {
+      const data = exportLiveDiagnostics({ appVersion,
+        project: { bpm: this.bpm, tracks: this.tracks.map(track => ({ id: track.id,
+          kind: track.trackKind, synthMode: resolveSynthMode(track), polyphony: track.polyphony,
+          release: track.release, effects: ['filter', 'tremolo', 'vibrato', 'chorus', 'flanger', 'phaser', 'echo']
+            .filter(name => Boolean((track as unknown as Record<string, unknown>)[`${name}Enabled`])) })) } });
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob), a = document.createElement('a');
+      a.href = url; a.download = `GateRunner-playback-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+      a.click(); URL.revokeObjectURL(url);
     },
 
     async downloadMIDI() {

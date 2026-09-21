@@ -1,6 +1,6 @@
 import * as Tone from 'tone';
 import type App from '../App.vue';
-import { readLiveScheduling, readLiveBuffering } from '../audio/liveAudio';
+import { exportLiveDiagnostics, readLiveScheduling, readLiveBuffering } from '../audio/liveAudio';
 import { renderOfflineAudio } from '../audio/offlineRender';
 import { PitchEnvelopeSynth } from '../audio/pitchEnvelopeSynth';
 const check = (ok: boolean, message: string) => { if (!ok) throw new Error(message); };
@@ -30,11 +30,18 @@ export async function runLiveBufferingChecks(app: InstanceType<typeof App>) {
     check(JSON.stringify(app.draftData) === draft, 'Preset/unsaved edits changed');
     await app.startSequencer();
     check(app.isRunning && current.state === 'running', 'Play failed after switch');
+    check(Object.keys(app.trackSynths).length === app.tracks.length, 'Track graphs were not prepared before playback');
     await app.applyLiveBuffering(mode === 'playback' ? 'interactive' : 'playback');
     check(Tone.getContext() === current, 'Switch allowed during playback');
     await wait(700);
     const stats = readLiveScheduling(current);
     check(stats.callbacks > 0, 'No live callback diagnostics');
+    const diagnostic = exportLiveDiagnostics();
+    check(diagnostic.session?.events.some(event => event.kind === 'graph-build'), 'Graph builds absent from diagnostics');
+    check(diagnostic.session?.events.some(event => event.kind === 'callback'), 'Callbacks absent from diagnostic export');
+    const firstCallback = diagnostic.session!.events.findIndex(event => event.kind === 'callback');
+    const lastBuild = diagnostic.session!.events.findLastIndex(event => event.kind === 'graph-build');
+    check(lastBuild >= 0 && lastBuild < firstCallback, 'A track graph was built inside note callbacks');
     app.stopSequencer();
     app.isExporting = true;
     await app.applyLiveBuffering(mode === 'playback' ? 'interactive' : 'playback');

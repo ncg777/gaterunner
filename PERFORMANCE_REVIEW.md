@@ -1,5 +1,27 @@
 # GateRunner performance review
 
+## Device playback trace and startup preparation (2026-09-21)
+
+Live playback diagnostics now retain a bounded, JSON-exportable trace containing
+note-callback lateness and execution duration, scheduler gaps over 100 ms, browser
+long tasks where supported, and track graph construction. The trace also records
+the requested buffering mode and the browser-reported sample rate and latency.
+It contains project structure but no audio and no complete note sequences. Recording
+starts on Play, stops on Stop, and keeps at most 4000 events.
+
+Play now creates all audible track graphs and prewarms their bounded voice pools
+before starting the transport. Previously `applyRealtimeSettings()` skipped missing
+chains because `isRunning` was still false; those graphs were then created by the
+first note callbacks. With the supplied two-track preset under 6x Chromium CPU
+throttling, the old ordering produced callbacks up to roughly 405–644 ms late.
+The corrected ordering produced zero late callbacks in 30 seconds (168 callbacks),
+with at least 170 ms of scheduling margin. This synthetic throttling is not a Pixel
+9 simulation and does not explain sustained device lateness by itself.
+
+The diagnostic path does not change synthesis, effects, sample rate, lookahead, or
+offline WAV rendering. Export is available from Global actions → Live audio
+buffering → Export diagnostics.
+
 ## Realtime lifecycle follow-up — 2026.9.21
 
 This change targets background control/DSP work, not synthesis resolution:
