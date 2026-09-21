@@ -4,6 +4,14 @@ type TremoloLfo = Pick<Tone.LFO, 'state'> & { _stoppedSignal: Tone.Signal<'audio
 
 /** Change stereo phase without restarting the running oscillators. */
 export function setTremoloSpread(tremolo: Tone.Tremolo, spread: number): void {
+  setStereoLfoSpread(tremolo, spread);
+}
+
+export function setChorusSpread(chorus: Tone.Chorus, spread: number): void {
+  setStereoLfoSpread(chorus, spread);
+}
+
+function setStereoLfoSpread(tremolo: Tone.Tremolo | Tone.Chorus, spread: number): void {
   if (tremolo.spread === spread) {
     return;
   }

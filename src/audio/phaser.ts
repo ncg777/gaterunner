@@ -174,7 +174,8 @@ export class Phaser extends Tone.ToneAudioNode<PhaserOptions> {
     this.feedbackGain.dispose();
     this.feedbackDelay.dispose();
     this.mix.dispose();
-    // input/output are disconnected (not disposed) by super.dispose().
+    this.input.dispose();
+    this.output.dispose();
     super.dispose();
     return this;
   }

@@ -343,6 +343,7 @@ import { renderOfflineAudio } from './audio/offlineRender';
 import { preparePeriodicWaveContext } from './audio/periodicWave';
 import { configureRealtimeScheduling } from './audio/realtimeScheduling';
 import { getMasterBus, disposeMasterBus, setMasterGainDb } from './audio/masterBus';
+import { sleepWhenSilent, type AudioSleep } from './audio/idleAudio';
 import { buildTrackFadeEnvelope } from './audio/trackFade';
 import { getStepDurations } from './audio/stepDurations';
 import { Phaser } from './audio/phaser';
@@ -353,7 +354,7 @@ import {
   disposeWaveshaperAudioChain,
   type WaveshaperAudioChain,
 } from './audio/waveshaperEffect';
-import { setTremoloSpread } from './audio/tremolo';
+import { setTremoloSpread, setChorusSpread } from './audio/tremolo';
 import { getLfoFrequencyHz, type LfoWaveform } from './audio/lfo';
 import { FilterLfo } from './audio/filterLfo';
 import { CHOIR_FORMANT_BANDS, getChoirFormantBandGainLinear, type FormantBand } from './audio/choir';
@@ -563,6 +564,8 @@ export default defineComponent({
       playbackErrorMessage: '',
       showPlaybackError: false,
       audioContextResumeHandler: null as (() => void) | null,
+      audioSleep: null as AudioSleep | null,
+      lastScheduledAudioEnd: 0,
       trackLoops: markRaw({}) as Record<string, Tone.Part<TrackScheduledEvent>>,
       trackFadeLoops: markRaw({}) as Record<string, Tone.Part<{ time: number }>>,
       showHelp: false,
@@ -2424,6 +2427,7 @@ export default defineComponent({
     },
     updateTrackChainSettings(track: PresetTrackData, chain: TrackAudioChain) {
       chain.modulationTrack = track;
+      this.disposeDisabledTrackEffects(track, chain);
       if (!chain.waveshaper && track.waveshaper.enabled) {
         chain.waveshaper = markRaw(createWaveshaperAudioChain(track.waveshaper));
         chain.routingSignature = '';
@@ -2586,14 +2590,15 @@ export default defineComponent({
       }
       chain.echoReturnGain.gain.value = this.dbToGain(track.echoWet);
       if (track.chorusEnabled) {
-        this.ensureTrackChorus(chain).set({
+        const chorus = this.ensureTrackChorus(chain);
+        chorus.set({
           frequency: this.getModulationRateHz(track.chorusRate),
           delayTime: track.chorusDelay,
           depth: this.clampNormalRange(track.chorusDepth),
-          spread: track.chorusSpread,
           feedback: this.clampNormalRange(track.chorusFeedback),
           wet: this.dbToWetMix(track.chorusWet),
         });
+        setChorusSpread(chorus, track.chorusSpread);
       }
       if (track.flangerEnabled) {
         const flangerDelaySeconds = track.flangerDelay / 1000;
@@ -2627,9 +2632,8 @@ export default defineComponent({
       if (routingSignature !== chain.routingSignature) {
         this.routeTrackAudioChain(track, chain);
         chain.routingSignature = routingSignature;
-        // Vibrato and tremolo start once at creation; rewiring must not reset their
-        // phase or schedule a second oscillator at the beginning of an offline render.
-        this.ensureTrackModulationRunning(chain);
+        // Enabled modulators start once in their constructors. Rewiring must not
+        // reset their phase or resurrect a disabled effect.
       }
     },
     /**
@@ -2743,23 +2747,23 @@ export default defineComponent({
         chain.wavetableLfoLoop.start(0);
       }
     },
-    /**
-     * Recover the remaining free-running modulators on the track chain.
-     * stop()+start() recreates each LFO's internal oscillator and re-binds frequency,
-     * which recovers units that report "started" but are no longer producing motion.
-     */
-    ensureTrackModulationRunning(chain: TrackAudioChain) {
-      if (chain.chorus) {
-        chain.chorus.stop();
-        chain.chorus.start();
+    disposeDisabledTrackEffects(track: PresetTrackData, chain: TrackAudioChain) {
+      if (!track.flangerEnabled && chain.flangerLfo) {
+        chain.flangerLfo.dispose();
+        chain.flangerLfo = null;
       }
-      if (chain.flangerLfo) {
-        chain.flangerLfo.stop();
-        chain.flangerLfo.start();
-      }
-      if (chain.phaser) {
-        chain.phaser.lfo.stop();
-        chain.phaser.lfo.start();
+      const effects = [
+        ['vibrato', track.vibratoEnabled], ['tremolo', track.tremoloEnabled],
+        ['chorus', track.chorusEnabled], ['flanger', track.flangerEnabled],
+        ['phaser', track.phaserEnabled],
+      ] as const;
+      for (const [key, enabled] of effects) {
+        if (!enabled && chain[key]) {
+          chain[key]!.disconnect();
+          chain[key]!.dispose();
+          chain[key] = null;
+          chain.routingSignature = '';
+        }
       }
     },
     updateSynths(trackId?: string, createMissingChains = true) {
@@ -2949,7 +2953,7 @@ export default defineComponent({
     },
     setupAudioContextResumeOnInteraction() {
       const handler = () => {
-        if (Tone.getContext().state !== 'running') {
+        if (this.isRunning && Tone.getContext().state !== 'running') {
           Tone.start().catch((error) => {
             console.warn('Failed to resume audio context on interaction:', error);
           });
@@ -2967,6 +2971,8 @@ export default defineComponent({
 
       this.isStarting = true;
       try {
+        await this.audioSleep?.cancel();
+        this.audioSleep = null;
         let lastError: unknown = null;
         for (let attempt = 0; attempt < 3; attempt += 1) {
           try {
@@ -2995,6 +3001,7 @@ export default defineComponent({
         this.isRunning = false;
         this.stopTrackLoops();
         Tone.getTransport().stop();
+        this.scheduleAudioSleep();
         const message = error instanceof Error ? error.message : String(error);
         this.showPlaybackErrorMessage(`Audio playback could not start: ${message}`);
       } finally {
@@ -3006,6 +3013,20 @@ export default defineComponent({
       this.stopTrackLoops();
       Tone.getTransport().stop();
       Tone.getTransport().seconds = 0;
+      this.scheduleAudioSleep();
+    },
+    scheduleAudioSleep() {
+      // Repeated Stop retains the same pending suspend so Play can await it.
+      if (this.audioSleep) return;
+      const context = Tone.getContext();
+      // A full delay/predelay window prevents sleeping between sparse echoes.
+      // Test both output channels, and require sustained silence below -120 dBFS.
+      const effectGap = Math.max(0, ...Object.values(this.trackSynths).map(chain => chain.maxDelay));
+      const reverbGap = this.reverbEnabled ? this.reverbPreDelay + this.reverbDecay : 0;
+      const sleep = sleepWhenSilent(context, getMasterBus(context).clipper,
+        Math.max(context.currentTime + context.lookAhead, this.lastScheduledAudioEnd),
+        Math.max(1, effectGap + reverbGap + 0.1));
+      this.audioSleep = sleep ? markRaw(sleep) : null;
     },
     playTrackStep(track: PresetTrackData, event: TrackScheduledEvent, when: Tone.Unit.Seconds) {
       if (!this.audibleTrackIds.has(track.id)) {
@@ -3030,6 +3051,8 @@ export default defineComponent({
       }
 
       const chain = this.getOrCreateTrackChain(track);
+      this.lastScheduledAudioEnd = Math.max(this.lastScheduledAudioEnd,
+        when + noteDuration + Math.max(track.release, track.filterEnvelopeRelease));
       this.scheduleFilterEnvelope(track, arr, when, noteDuration, chain);
       if (track.trackKind === 'rhythmic') {
         for (let index = 0; index < arr.length; index += 1) {
@@ -3140,6 +3163,8 @@ export default defineComponent({
       this.rebuildTrackLoopsTimer = null;
     }
     this.stopSequencer();
+    void this.audioSleep?.cancel();
+    this.audioSleep = null;
     for (const chain of Object.values(this.trackSynths)) {
       this.disposeTrackChain(chain);
     }

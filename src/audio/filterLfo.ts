@@ -28,7 +28,7 @@ export class FilterLfo {
     }
   };
 
-  constructor(private readonly filter: Tone.Filter) {
+  constructor(private readonly filter: Tone.Filter, private readonly isActive: () => boolean = () => true) {
     const time = filter.context.now();
     const transport = filter.context.transport;
     // Voices allocated during playback share the current song's phase origin.
@@ -67,23 +67,43 @@ export class FilterLfo {
 
   set(options: FilterLfoOptions): void {
     options = { ...options, retrigger: options.retrigger ?? 'song' };
-    if (JSON.stringify(options) === JSON.stringify(this.options)) return;
+    if (JSON.stringify(options) === JSON.stringify(this.options)) {
+      this.wake();
+      return;
+    }
     this.options = { ...options };
     const time = this.filter.context.now();
-    this.filter.detune.cancelAndHoldAtTime(time);
     if (!options.enabled || options.amount === 0) {
+      this.filter.detune.cancelAndHoldAtTime(time);
       this.filter.context.off('tick', this.tick);
       this.listening = false;
       this.filter.detune.linearRampToValueAtTime(0, time + CONTROL_INTERVAL);
       return;
     }
+    this.pause();
+    this.wake(time);
+  }
+
+  /** Resume without resetting free/song/note phase. Future reserved notes count as active. */
+  wake(time = this.filter.context.now()): void {
+    if (this.listening || !this.options?.enabled || this.options.amount === 0) return;
+    // Keep offline scheduling unchanged: native graphs are assembled before rendering.
+    if (!this.filter.context.isOffline
+      && (this.filter.context.state === 'suspended' || !this.isActive())) return;
+    time = Math.max(this.filter.context.currentTime, Math.min(time, this.filter.context.now()));
     if (!this.listening) {
       this.filter.context.on('tick', this.tick);
       this.listening = true;
     }
+    this.filter.detune.cancelAndHoldAtTime(time);
     this.filter.detune.setValueAtTime(this.detuneAtTime(time), time);
     this.nextTime = time + CONTROL_INTERVAL;
     this.schedule();
+  }
+
+  private pause(): void {
+    this.filter.context.off('tick', this.tick);
+    this.listening = false;
   }
 
   /** Recompute queued modulation where a new frequency envelope changes cutoff limits. */
@@ -105,6 +125,11 @@ export class FilterLfo {
 
   private schedule(): void {
     if (!this.listening) return;
+    if (!this.filter.context.isOffline
+      && (this.filter.context.state === 'suspended' || !this.isActive())) {
+      this.pause();
+      return;
+    }
     // Fill the look-ahead window on the context clock, including offline rendering.
     const end = this.filter.context.now() + CONTROL_INTERVAL * 2;
     const options = this.options!;
