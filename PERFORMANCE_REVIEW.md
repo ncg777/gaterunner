@@ -1,5 +1,25 @@
 # GateRunner performance review
 
+## Mobile realtime voice regression (2026-09-21)
+
+The July runtime used Tone 15.1.22 and the August mobile optimization retained at
+most 12 live voices per track. Later dependency and pool changes resolved Tone
+15.5.36 and prebuilt up to 32 `PitchEnvelopeSynth` graphs per track. Dense legacy
+presets could therefore keep 64 substantially heavier voice graphs alive across
+two tracks, overloading the Android audio render thread even though JavaScript
+note callbacks still met their deadlines.
+
+Realtime pools are again capped at 12 voices per track while offline WAV renders
+retain the full 32-voice ceiling. Tone is pinned to the known July version so a
+future install cannot silently change the audio runtime. Diagnostic exports now
+include each track's actual live voice limit and active voice count. A regression
+fixture derived from preset `2026.7.27-1` verifies a 12-voice realtime ceiling and
+32-voice offline capacity.
+
+All 272 Node tests, Vue/CLI type checks, and the production PWA build pass. Native
+browser audio checks require Chrome/Chromium and could not run in the current
+container because neither executable was installed.
+
 ## Device playback trace and startup preparation (2026-09-21)
 
 Live playback diagnostics now retain a bounded, JSON-exportable trace containing
