@@ -48,7 +48,7 @@
                 </v-btn>
               </template>
               <v-list density="compact" class="transport-action-menu">
-                <v-list-item title="Live audio buffering" prepend-icon="mdi-tune" @click="showLiveAudio = true; transportMenuOpen = false" />
+                <v-list-item v-if="!useMidiOutput" title="Live audio buffering" prepend-icon="mdi-tune" @click="showLiveAudio = true; transportMenuOpen = false" />
                 <v-list-item
                   title="Download MIDI"
                   prepend-icon="mdi-music-note"
@@ -126,7 +126,7 @@
         />
 
         <div v-show="!controlDeckCollapsed" class="toolbar-panel dependent-settings-panel">
-          <div class="dependent-settings-row">
+          <div class="dependent-settings-row" :class="{ 'midi-settings': useMidiOutput }">
             <div class="forte-control-top">
               <v-autocomplete
                 label="Forte number"
@@ -150,7 +150,7 @@
                 @update:modelValue="handleDraftChange"
               />
             </div>
-            <div class="a4-control">
+            <div v-if="!useMidiOutput" class="a4-control">
               <EditableSlider
                 :label="'A4 (' + Number(a4).toFixed(1) + ' Hz)'"
                 :min="380"
@@ -160,7 +160,7 @@
                 @update:modelValue="handleDraftChange"
               />
             </div>
-            <div class="a4-control">
+            <div v-if="!useMidiOutput" class="a4-control">
               <EditableSlider
                 :label="'Master (' + Number(masterGain).toFixed(1) + ' dB)'"
                 :min="-96"
@@ -246,6 +246,7 @@
         :track="currentTrack"
         :reverb="reverbSettings"
         :bpm="bpm"
+        :midi-output="useMidiOutput"
         @track-change="handleTrackDraftChange"
         @reverb-change="handleReverbDraftChange"
       />
@@ -292,7 +293,7 @@
       </v-dialog>
 
       <HelpDialog v-model="showHelp" :app-version="appVersion" />
-      <LiveAudioDialog v-model="showLiveAudio" :mode="liveBuffering" :busy="isStarting || isExporting" :running="isRunning" @apply="applyLiveBuffering" @export="downloadLiveDiagnostics" />
+      <LiveAudioDialog v-if="!useMidiOutput" v-model="showLiveAudio" :mode="liveBuffering" :busy="isStarting || isExporting" :running="isRunning" @apply="applyLiveBuffering" @export="downloadLiveDiagnostics" />
     </v-main>
     <v-snackbar
       v-model="showPlaybackError"
@@ -1602,6 +1603,7 @@ export default defineComponent({
     },
     updateMidiMode() {
       if (this.useMidiOutput) {
+        this.showLiveAudio = false;
         this.initializeMidi();
       } else {
         //this.midiOutput = null;
@@ -3547,6 +3549,10 @@ export default defineComponent({
   align-items: center;
 }
 
+.dependent-settings-row.midi-settings {
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+}
+
 .tempo-control,
 .a4-control {
   min-width: 0;
@@ -3603,6 +3609,10 @@ export default defineComponent({
   }
 
   .dependent-settings-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dependent-settings-row.midi-settings {
     grid-template-columns: minmax(0, 1fr);
   }
 

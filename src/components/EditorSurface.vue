@@ -3,20 +3,20 @@
     <div class="control-tabs-layout">
       <v-tabs v-model="activeControlTab" :direction="$vuetify.display.xs ? 'horizontal' : 'vertical'" class="control-tabs" color="primary">
         <v-tab value="sequence" prepend-icon="mdi-format-list-numbered">Sequence</v-tab>
-        <v-tab v-if="draftTrack.trackKind === 'rhythmic'" value="drum-sounds" prepend-icon="mdi-album">Drum Sounds</v-tab>
+        <v-tab v-if="!midiOutput && draftTrack.trackKind === 'rhythmic'" value="drum-sounds" prepend-icon="mdi-album">Drum Sounds</v-tab>
         <v-tab value="playback" prepend-icon="mdi-play-circle-outline">Playback</v-tab>
         <v-tab value="time-warp" prepend-icon="mdi-chart-sankey">Time Warp</v-tab>
-        <v-tab v-if="draftTrack.trackKind !== 'rhythmic'" value="generator" prepend-icon="mdi-sine-wave">Generator</v-tab>
-        <v-tab v-if="draftTrack.trackKind !== 'rhythmic'" value="envelopes" prepend-icon="mdi-chart-bell-curve-cumulative">Envelopes</v-tab>
-        <v-tab v-if="draftTrack.trackKind !== 'rhythmic'" value="unison" prepend-icon="mdi-account-voice">Voices &amp; Glide</v-tab>
-        <v-tab value="modulation" prepend-icon="mdi-sine-wave">Tremolo/Vibrato</v-tab>
-        <v-tab value="drive" prepend-icon="mdi-lightning-bolt-outline">Drive</v-tab>
-        <v-tab value="chorus" prepend-icon="mdi-blur">Chorus</v-tab>
-        <v-tab value="flanger" prepend-icon="mdi-waves">Flanger</v-tab>
-        <v-tab value="phaser" prepend-icon="mdi-vector-curve">Phaser</v-tab>
-        <v-tab value="filter" prepend-icon="mdi-filter-outline">Filter</v-tab>
-        <v-tab value="effects" prepend-icon="mdi-waveform">Echo &amp; Sends</v-tab>
-        <v-tab value="reverb" prepend-icon="mdi-weather-rainy">Global Reverb</v-tab>
+        <v-tab v-if="!midiOutput && draftTrack.trackKind !== 'rhythmic'" value="generator" prepend-icon="mdi-sine-wave">Generator</v-tab>
+        <v-tab v-if="!midiOutput && draftTrack.trackKind !== 'rhythmic'" value="envelopes" prepend-icon="mdi-chart-bell-curve-cumulative">Envelopes</v-tab>
+        <v-tab v-if="!midiOutput && draftTrack.trackKind !== 'rhythmic'" value="unison" prepend-icon="mdi-account-voice">Voices &amp; Glide</v-tab>
+        <v-tab v-if="!midiOutput" value="modulation" prepend-icon="mdi-sine-wave">Tremolo/Vibrato</v-tab>
+        <v-tab v-if="!midiOutput" value="drive" prepend-icon="mdi-lightning-bolt-outline">Drive</v-tab>
+        <v-tab v-if="!midiOutput" value="chorus" prepend-icon="mdi-blur">Chorus</v-tab>
+        <v-tab v-if="!midiOutput" value="flanger" prepend-icon="mdi-waves">Flanger</v-tab>
+        <v-tab v-if="!midiOutput" value="phaser" prepend-icon="mdi-vector-curve">Phaser</v-tab>
+        <v-tab v-if="!midiOutput" value="filter" prepend-icon="mdi-filter-outline">Filter</v-tab>
+        <v-tab v-if="!midiOutput" value="effects" prepend-icon="mdi-waveform">Echo &amp; Sends</v-tab>
+        <v-tab v-if="!midiOutput" value="reverb" prepend-icon="mdi-weather-rainy">Global Reverb</v-tab>
       </v-tabs>
 
       <v-window v-model="activeControlTab" :touch="false" class="control-tab-content">
@@ -41,7 +41,7 @@
           </v-row>
         </v-window-item>
 
-        <v-window-item v-if="draftTrack.trackKind === 'rhythmic'" value="drum-sounds" class="control-tab-panel">
+        <v-window-item v-if="!midiOutput && draftTrack.trackKind === 'rhythmic'" value="drum-sounds" class="control-tab-panel">
           <RhythmSoundControls
             :track="draftTrack"
             @update:track="draftTrack = $event; handleTrackDraftChange()"
@@ -127,7 +127,7 @@
             </v-col>
           </v-row>
 
-          <v-row class="compact-row">
+          <v-row v-if="!midiOutput" class="compact-row">
             <v-col cols="12">
               <EditableSlider
                 :label="'Track Gain (' + Number(draftTrack.gain).toFixed(1) + ' dB)'"
@@ -205,7 +205,7 @@
             </v-col>
           </v-row>
 
-          <v-row class="compact-row">
+          <v-row v-if="!midiOutput" class="compact-row">
             <v-col cols="12">
               <EditableSlider
                 :label="'Fade In (' + Number(draftTrack.fadeIn).toFixed(2) + ' bars)'"
@@ -218,7 +218,7 @@
             </v-col>
           </v-row>
 
-          <v-row class="compact-row">
+          <v-row v-if="!midiOutput" class="compact-row">
             <v-col cols="12">
               <EditableSlider
                 :label="'Fade Out (' + Number(draftTrack.fadeOut).toFixed(2) + ' bars)'"
@@ -356,7 +356,7 @@
           </v-row>
         </v-window-item>
 
-        <v-window-item v-if="draftTrack.trackKind !== 'rhythmic'" value="generator" class="control-tab-panel">
+        <v-window-item v-if="!midiOutput && draftTrack.trackKind !== 'rhythmic'" value="generator" class="control-tab-panel">
           <SynthEngineControls :track="draftTrack" @change="handleSynthEngineChange" />
           <template v-if="!draftTrack.synthMode || draftTrack.synthMode === 'additive'">
           <v-row class="compact-row">
@@ -634,7 +634,7 @@
           </template>
         </v-window-item>
 
-        <v-window-item v-if="draftTrack.trackKind !== 'rhythmic'" value="envelopes" class="control-tab-panel">
+        <v-window-item v-if="!midiOutput && draftTrack.trackKind !== 'rhythmic'" value="envelopes" class="control-tab-panel">
           <div class="envelope-section-label">Amp Envelope</div>
           <v-row class="compact-row">
             <v-col cols="12" md="6">
@@ -680,7 +680,7 @@
           </v-row>
         </v-window-item>
 
-        <v-window-item v-if="draftTrack.trackKind !== 'rhythmic'" value="unison" class="control-tab-panel">
+        <v-window-item v-if="!midiOutput && draftTrack.trackKind !== 'rhythmic'" value="unison" class="control-tab-panel">
           <div class="envelope-section-label">Polyphony</div>
           <v-row class="compact-row">
             <v-col cols="12" md="6">
@@ -746,7 +746,7 @@
           </v-row>
         </v-window-item>
 
-        <v-window-item value="modulation" class="control-tab-panel">
+        <v-window-item v-if="!midiOutput" value="modulation" class="control-tab-panel">
           <v-row>
             <v-col cols="12" md="6">
               <v-switch v-model="draftTrack.tremoloEnabled" label="Tremolo" hide-details density="compact" @update:modelValue="handleTrackDraftChange" />
@@ -776,13 +776,13 @@
           </v-row>
         </v-window-item>
 
-        <v-window-item value="drive" class="control-tab-panel">
+        <v-window-item v-if="!midiOutput" value="drive" class="control-tab-panel">
           <WaveshaperControls v-model="draftTrack.waveshaper" @update:modelValue="handleTrackDraftChange" />
           <v-divider class="my-4" />
           <EditableSlider :label="'Tanh Drive (' + Number(draftTrack.limiterGain).toFixed(1) + ' dB before tanh)'" :min="-48" :max="72" :step="0.1" v-model="draftTrack.limiterGain" @update:modelValue="handleTrackDraftChange" />
         </v-window-item>
 
-        <v-window-item value="chorus" class="control-tab-panel">
+        <v-window-item v-if="!midiOutput" value="chorus" class="control-tab-panel">
           <v-row>
             <v-col cols="12" md="6">
               <v-switch v-model="draftTrack.chorusEnabled" label="Enable Chorus" hide-details density="compact" @update:modelValue="handleTrackDraftChange" />
@@ -820,7 +820,7 @@
           </v-row>
         </v-window-item>
 
-        <v-window-item value="flanger" class="control-tab-panel">
+        <v-window-item v-if="!midiOutput" value="flanger" class="control-tab-panel">
           <v-row>
             <v-col cols="12" md="6">
               <v-switch v-model="draftTrack.flangerEnabled" label="Enable Flanger" hide-details density="compact" @update:modelValue="handleTrackDraftChange" />
@@ -855,7 +855,7 @@
           </v-row>
         </v-window-item>
 
-        <v-window-item value="phaser" class="control-tab-panel">
+        <v-window-item v-if="!midiOutput" value="phaser" class="control-tab-panel">
           <v-row>
             <v-col cols="12" md="6">
               <v-switch v-model="draftTrack.phaserEnabled" label="Enable Phaser" hide-details density="compact" @update:modelValue="handleTrackDraftChange" />
@@ -904,7 +904,7 @@
           </v-row>
         </v-window-item>
 
-        <v-window-item value="filter" class="control-tab-panel">
+        <v-window-item v-if="!midiOutput" value="filter" class="control-tab-panel">
           <v-row>
             <v-col cols="12" md="6">
               <v-switch v-model="draftTrack.filterEnabled" label="Enable Filter" hide-details density="compact" @update:modelValue="handleTrackDraftChange" />
@@ -1036,7 +1036,7 @@
           </v-row>
         </v-window-item>
 
-        <v-window-item value="effects" class="control-tab-panel">
+        <v-window-item v-if="!midiOutput" value="effects" class="control-tab-panel">
           <v-row>
             <v-col cols="12" md="6">
               <v-switch v-model="draftTrack.echoEnabled" label="Feedback Stereo Echo" hide-details density="compact" @update:modelValue="handleTrackDraftChange" />
@@ -1063,7 +1063,7 @@
           </v-row>
         </v-window-item>
 
-        <v-window-item value="reverb" class="control-tab-panel">
+        <v-window-item v-if="!midiOutput" value="reverb" class="control-tab-panel">
           <ReverbControls
             v-model:enabled="draftReverb.enabled"
             v-model:decay="draftReverb.decay"
@@ -1147,6 +1147,10 @@ export default defineComponent({
     bpm: {
       type: Number,
       required: true,
+    },
+    midiOutput: {
+      type: Boolean,
+      default: false,
     },
   },
   emits: ['track-change', 'reverb-change'],
@@ -1309,6 +1313,11 @@ export default defineComponent({
     },
   },
   watch: {
+    midiOutput(enabled: boolean) {
+      if (enabled && !['sequence', 'playback', 'time-warp'].includes(this.activeControlTab)) {
+        this.activeControlTab = 'sequence';
+      }
+    },
     track: {
       deep: true,
       immediate: true,
