@@ -87,6 +87,7 @@ export function claimVoices(
 
 interface PolySynthInternals {
   context: {
+    isOffline: boolean;
     clearInterval(id: number): void;
     setInterval(callback: () => void, interval: number): number;
   };
@@ -129,8 +130,9 @@ export function prewarmVoicePool(synth: Tone.PolySynth, voiceCount: number): voi
  * right when notes are being scheduled, which is what makes several tracks stutter.
  *
  * Retaining the voices turns the synth into a true voice pool: idle voices keep their
- * oscillators stopped (so they cost no audio CPU) and are simply re-triggered. The pool
- * is still bounded by `poolSize`, so voices above that watermark are collected as before.
+ * oscillators stopped (so they cost no audio CPU) and are simply re-triggered. Realtime
+ * voices above `poolSize` are collected. Offline voices stay allocated until rendering
+ * completes because their earlier scheduled notes have not been rendered yet.
  */
 export function retainVoicePool(synth: Tone.PolySynth, poolSize = MAX_POOLED_VOICES): void {
   const internals = synth as unknown as PolySynthInternals;
@@ -145,7 +147,9 @@ export function retainVoicePool(synth: Tone.PolySynth, poolSize = MAX_POOLED_VOI
 
   internals._collectGarbage = function collectPooledGarbage(this: PolySynthInternals) {
     this._averageActiveVoices = Math.max(this._averageActiveVoices * 0.95, this.activeVoices);
-    if (this._voices.length <= retention.size || this._availableVoices.length === 0) {
+    // Tone schedules the entire offline timeline before native rendering begins.
+    // An available voice may still own notes scheduled earlier in that timeline.
+    if (this.context.isOffline || this._voices.length <= retention.size || this._availableVoices.length === 0) {
       return;
     }
 

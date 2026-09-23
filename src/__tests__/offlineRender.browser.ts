@@ -252,6 +252,47 @@ export async function runOfflineVoiceLifecycleChecks() {
   }
 }
 
+export async function runOfflineVoiceGarbageCollectionChecks() {
+  const render = async (retainedVoices: number) => {
+    let synth: Tone.PolySynth<PitchEnvelopeSynth> | undefined;
+    try {
+      const buffer = await renderOfflineAudio((context) => {
+        synth = new Tone.PolySynth(PitchEnvelopeSynth).toDestination();
+        synth.maxPolyphony = 4;
+        retainVoicePool(synth as unknown as Tone.PolySynth, retainedVoices);
+        prewarmVoicePool(synth as unknown as Tone.PolySynth, retainedVoices);
+        synth.set({
+          oscillator: { type: 'sine' },
+          envelope: { attack: 0.005, decay: 0.005, sustain: 1, release: 0.05 },
+        });
+        context.transport.schedule((time) => {
+          synth!.triggerAttackRelease([220, 330, 440, 550], 0.2, time, 0.5);
+        }, 0.1);
+        context.transport.start(0);
+      }, 4.1, 1, 48000);
+      return {
+        samples: buffer.getChannelData(0).slice(0, 20000),
+        allocatedVoices: (synth as unknown as { _voices: unknown[] })._voices.length,
+      };
+    } finally {
+      synth?.dispose();
+    }
+  };
+
+  const fullPool = await render(4);
+  const smallPool = await render(1);
+  let peak = 0;
+  let maxDifference = 0;
+  for (let index = 0; index < fullPool.samples.length; index += 1) {
+    peak = Math.max(peak, Math.abs(fullPool.samples[index]));
+    maxDifference = Math.max(maxDifference, Math.abs(fullPool.samples[index] - smallPool.samples[index]));
+  }
+  if (peak < 0.01 || smallPool.allocatedVoices !== 4 || maxDifference > 1e-4) {
+    throw new Error(`Offline pool GC removed scheduled audio: peak=${peak}, allocated=${smallPool.allocatedVoices}, difference=${maxDifference}`);
+  }
+  return { peak, allocatedVoices: smallPool.allocatedVoices, maxDifference };
+}
+
 export async function runVoiceFilterChecks() {
   const labels: string[] = [];
   const check = (condition: boolean, label: string) => {
