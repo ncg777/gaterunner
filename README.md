@@ -471,7 +471,12 @@ reuse harmonic samples rather than rebuilding full waveform tables each block.
 ### Browser WAV Export
 
 Offline rendering uses Tone's original audio graph and 128-frame clock ticks,
-yielding after about 8 ms of scheduling work to keep the UI responsive. Progress checkpoints resume rendering
+yielding after about 8 ms of scheduling work to keep the UI responsive. Browsers
+with native AudioParam cancel-and-hold support use Tone's native offline-context
+constructor, avoiding the compatibility layer's repeated scans of automation
+history. Other browsers retain the compatibility context. Overlapping notes of
+the same pitch release their own allocated voices, including when time warping
+puts their note endings in a different order. Progress checkpoints resume rendering
 without waiting for animation frames, so a hidden tab cannot stall export on a missing
 frame callback. Native audio rendering follows scheduling, then a worker encodes
 24-bit WAV data with deterministic dither. Only one bounded PCM chunk (2 MiB for
@@ -498,6 +503,8 @@ await checks.runNativeDrumChecks();
 await checks.runReverbImpulseLifecycleChecks();
 await checks.runVoiceFilterChecks();
 await checks.runOfflineRenderChecks();
+await checks.runOfflineSchedulingChecks();
+await checks.runWarpedNoteChecks();
 await checks.runPeriodicWavePreparationChecks();
 await checks.runWavWorkerChecks();
 await checks.runWaveshaperChecks(document.querySelector('#app').__vue_app__._instance.proxy);
@@ -514,6 +521,11 @@ timings to `dist/browser-profile`. Set `CHROME_PATH` for another Chromium instal
 `PROFILE_OUTPUT` to keep separate runs, or `PROFILE_BASELINE=1` to compare the
 previous periodic-wave preparation and scheduling behavior. This benchmark does
 not use your browser's saved projects.
+
+Set `PROFILE_PROJECT=time-warp PROFILE_MODES=export` to profile a longer two-track
+FM-warped preset with per-voice filter LFOs and no wavetable modulation. Results
+include elapsed timestamps for the scheduling, native-rendering and encoding
+progress phases.
 
 Run `node cli/profileBrowser.mjs runNativeEffectChecks runNativeSynthesisChecks runNativeDrumChecks runReverbImpulseLifecycleChecks`
 to compare native DSP against the browser nodes in that disposable profile.

@@ -37,6 +37,15 @@ test('budgeted offline clock preserves every tick and restores context across yi
     assert.equal(clock._currentTime, time);
     assert.equal(current, live);
 
+    // Native AudioContext lengths are integer frames; the requested clock
+    // endpoint must still win over Tone's frame-derived duration.
+    ticks.length = 0;
+    clock._currentTime = 0;
+    clock._duration = 0;
+    prepareOfflineClock(clock as unknown as Tone.OfflineContext, 0.031);
+    await clock._renderClock(false);
+    assert.deepEqual(ticks, expected);
+
     clock._currentTime = 0;
     clock.emit = () => { throw new Error('tick cancelled'); };
     await assert.rejects(clock._renderClock(true), /tick cancelled/);

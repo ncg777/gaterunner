@@ -10,8 +10,17 @@ export async function renderOfflineAudio(
 ): Promise<Tone.ToneAudioBuffer> {
   signal?.throwIfAborted();
   const originalContext = Tone.getContext();
-  const context = new Tone.OfflineContext(channels, duration, sampleRate);
-  prepareOfflineClock(context);
+  // The compatibility context retains/replays every AudioParam event and scans
+  // its full history on each ramp. Long, densely warped/filter-modulated tracks
+  // make that bookkeeping quadratic. Tone accepts a native context directly;
+  // keep its scheduler and graph, without the duplicate automation history.
+  // Older browsers still need the compatibility implementation of cancel/hold.
+  const nativeSupported = typeof globalThis.OfflineAudioContext === 'function'
+    && typeof globalThis.AudioParam?.prototype.cancelAndHoldAtTime === 'function';
+  const context = nativeSupported
+    ? new Tone.OfflineContext(new globalThis.OfflineAudioContext(channels, duration * sampleRate, sampleRate))
+    : new Tone.OfflineContext(channels, duration, sampleRate);
+  prepareOfflineClock(context, duration);
   const proxy = context.rawContext as unknown as OfflineAudioContext & {
     _nativeOfflineAudioContext?: OfflineAudioContext;
   };

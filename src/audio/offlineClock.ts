@@ -21,7 +21,7 @@ function yieldClock(): Promise<void> {
 }
 
 /** Keep Tone's exact 128-frame ticks, but bound work between UI yields. */
-export function prepareOfflineClock(context: Tone.OfflineContext): void {
+export function prepareOfflineClock(context: Tone.OfflineContext, duration?: number): void {
   const clock = context as unknown as OfflineClockInternals;
   // This adapter matches Tone 15's clock fields. Future incompatible versions
   // retain Tone's own scheduler rather than receiving a partially working patch.
@@ -29,7 +29,10 @@ export function prepareOfflineClock(context: Tone.OfflineContext): void {
     || !Number.isFinite(clock._duration)) return;
   clock._renderClock = async function (asynchronous) {
     let deadline = performance.now() + 8;
-    while (this._duration - this._currentTime >= 0) {
+    // The native-context constructor derives duration from an integer frame
+    // count. Preserve the caller's original endpoint and floating-point ticks.
+    const end = duration ?? this._duration;
+    while (end - this._currentTime >= 0) {
       const previous = Tone.getContext();
       Tone.setContext(context);
       try {

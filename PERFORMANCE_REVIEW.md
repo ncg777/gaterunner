@@ -610,3 +610,34 @@ These measurements do not establish that Android speaker crackling is resolved.
 Pixel 9 installed-app test: keep the default preset and phone speaker; listen in
 Interactive, Stop, apply Playback, then Play again. Compare audible clicks and the
 late-callback readout. Zero late callbacks does not rule out audio-thread overload.
+
+## Offline FM-warp scheduling (September 23, 2026)
+
+The two-track `PROFILE_PROJECT=time-warp` fixture uses static spectra, FM time
+warping, repeated notes and 200 Hz per-voice filter LFOs. The compatibility
+context's automation-history traversal dominated scheduling: the CPU profile
+attributed 22.9 seconds to `isCancelAndHoldAutomationEvent` alone. Its ramp
+implementation materializes the entire automation history to check whether it
+is empty, making long automation sequences quadratic.
+
+`renderOfflineAudio` now gives Tone a native `OfflineAudioContext` when native
+`AudioParam.cancelAndHoldAtTime` is available. It retains Tone's graph, exact
+128-frame ticks, requested clock endpoint, cancellation and cooperative yields.
+Browsers needing the compatibility cancel-and-hold implementation keep the old
+context path.
+
+On this Windows/Chrome run, elapsed time from scheduling status to the first
+native-render progress checkpoint fell from 42.79 s to 5.10 s; total export fell
+from 122.72 s to 46.92 s. The checkpoint includes the first 2.5% of native rendering,
+so it is a user-visible phase measurement, not an isolated clock measurement.
+Before the separate release fix, the two 24-bit WAVs differed by at most four
+integer PCM units (4.77e-7 full scale; RMS 4.21e-8). No sample rate, timing,
+modulation resolution or synthesis-quality reductions were used.
+
+Warped equal-pitch overlaps also exposed Tone PolySynth's pitch-based release
+matching. A later short note could release an earlier long note, leaving the
+later voice sounding until the earlier note's scheduled release. Track note
+events now retain their allocated voice entries and release those entries only;
+stolen, dropped or recycled entries cannot release a later restrike. This applies
+to live playback as well as WAV export. Independent per-event pools provide the
+browser regression reference, preserving Tone's dispatch and source-start timing.

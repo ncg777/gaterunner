@@ -62,13 +62,20 @@ try {
     globalThis.bench = await import('/gaterunner/src/__tests__/performance.browser.ts');
     ${process.env.PROFILE_BASELINE === '1' ? 'bench.installBrowserProfileBaseline();' : ''}
     ${process.env.PROFILE_POLL_BASELINE === '1' ? 'bench.installRealtimePollingBaseline(app);' : ''}
-    await bench.prepareBrowserPerformanceProject(app); })()`);
+    await bench.prepareBrowserPerformanceProject(app, ${JSON.stringify(process.env.PROFILE_PROJECT ?? 'wavetable')}); })()`);
   const checks = process.argv.slice(2);
   if (checks.length) {
-    for (const check of checks) console.log(JSON.stringify(await evaluate(`(async () => {
-      const checks = await import('/gaterunner/src/__tests__/offlineRender.browser.ts');
-      return { check: '${check}', result: await checks['${check}'](app) };
-    })()`)));
+    for (const check of checks) {
+      try {
+        console.log(JSON.stringify(await evaluate(`(async () => {
+          const checks = await import('/gaterunner/src/__tests__/offlineRender.browser.ts');
+          return { check: '${check}', result: await checks['${check}'](app) };
+        })()`)));
+      } catch (error) {
+        console.error(check, error);
+        process.exitCode = 1;
+      }
+    }
   }
   const results = [];
   for (const mode of checks.length ? [] : (process.env.PROFILE_MODES ?? 'playback,export').split(',')) {

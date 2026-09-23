@@ -32,7 +32,7 @@ export function installBrowserProfileBaseline() {
 }
 
 /** Run only in a disposable browser profile: installs a deterministic stress project. */
-export async function prepareBrowserPerformanceProject(app: InstanceType<typeof App>) {
+export async function prepareBrowserPerformanceProject(app: InstanceType<typeof App>, project = 'wavetable') {
   app.applyDraftData(normalizePresetData({
     ...DEFAULT_PRESET_DATA, bpm: 120,
     reverb: { ...DEFAULT_PRESET_DATA.reverb, enabled: false },
@@ -54,6 +54,22 @@ export async function prepareBrowserPerformanceProject(app: InstanceType<typeof 
       },
     })),
   }));
+  if (project === 'time-warp') {
+    app.applyDraftData(normalizePresetData({
+      ...DEFAULT_PRESET_DATA, bpm: 120,
+      reverb: { ...DEFAULT_PRESET_DATA.reverb, enabled: false },
+      tracks: Array.from({ length: 2 }, (_, index) => ({
+        ...DEFAULT_PRESET_TRACK_DATA, id: `warp-${index}`, name: `Warp ${index + 1}`,
+        sequenceInput: Array.from({ length: 64 }, (_, step) => [3, 5, 9, 17, 6, 10, 18, 12][step % 8]).join(' '),
+        denominator: 16, repeats: 8, polyphony: 4, unisonVoices: 3, gain: -24,
+        timeWarpEnabled: true, timeWarpCurve: index ? 'fm_saw2' : 'custom',
+        timeWarpExpression: 'T + sin(PI*T)*0.25*sin(24*PI*(T+0.25*sin(10*PI*T)))',
+        timeWarpRepeats: 2, timeWarpNoteLengths: true,
+        filterEnabled: true, filterLfoEnabled: true, filterLfoAmount: 12,
+        filterLfoRateHz: 2.7, filterFrequency: 90, filterEnvelopeAmount: 12,
+      })),
+    }));
+  }
   await app.$nextTick();
   await new Promise(resolve => setTimeout(resolve, 250));
 }
@@ -76,6 +92,14 @@ export async function runBrowserPerformance(app: InstanceType<typeof App>, mode:
     previous = now;
   }, 10);
   const started = performance.now();
+  const phases: Array<{ status: string; milliseconds: number }> = [];
+  const progress = app.setWavExportProgress;
+  if (mode === 'export') {
+    app.setWavExportProgress = (value, status) => {
+      if (phases.at(-1)?.status !== status) phases.push({ status, milliseconds: performance.now() - started });
+      progress(value, status);
+    };
+  }
   let hash: string | undefined;
   try {
     if (mode === 'playback' || mode === 'steady') {
@@ -91,8 +115,9 @@ export async function runBrowserPerformance(app: InstanceType<typeof App>, mode:
     }
     await new Promise(resolve => setTimeout(resolve, 30));
     return { mode, milliseconds: performance.now() - started, maxTimerGap,
-      longTaskCount: longTasks.length, longestTask: Math.max(0, ...longTasks), hash };
+      longTaskCount: longTasks.length, longestTask: Math.max(0, ...longTasks), hash, phases };
   } finally {
+    app.setWavExportProgress = progress;
     clearInterval(timer);
     observer.disconnect();
     if (app.isRunning) app.stopSequencer();

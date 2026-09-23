@@ -1,4 +1,6 @@
 import * as Tone from 'tone';
+export { runWarpedNoteChecks } from './pooledNote.browser';
+export { runOfflineSchedulingChecks } from './offlineScheduling.browser';
 export { runLiveBufferingChecks } from './liveAudio.browser';
 export { runAudioLifecycleChecks, runTransportSleepChecks } from './audioLifecycle.browser';
 export { runFilterUpdatePerformanceChecks, runFilterUpdateSoundChecks, runIdleModulationChecks } from './realtimePerformance.browser';
@@ -899,9 +901,11 @@ export async function runModulationChecks(app: InstanceType<typeof App>) {
           effect.toDestination();
           oscillator = new Tone.Oscillator(440).connect(effect).start(0).stop(0.45);
           if (rewire) {
-            app.ensureTrackModulationRunning(chain);
-            app.ensureTrackModulationRunning(chain);
-            context.transport.schedule(() => app.ensureTrackModulationRunning(chain), 0.137);
+            const ensure = () => kind === 'vibrato'
+              ? app.ensureTrackVibrato(chain, track) : app.ensureTrackTremolo(chain, track);
+            ensure();
+            ensure();
+            context.transport.schedule(ensure, 0.137);
             context.transport.start(0);
           }
         }, 0.5, 2, 48000);

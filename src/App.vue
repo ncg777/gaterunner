@@ -367,6 +367,7 @@ import { normalizeSynthEngine, resolveSynthMode } from './audio/synthEngine';
 import { setFilterSettings } from './audio/filterSettings';
 import { PitchEnvelopeSynth } from './audio/pitchEnvelopeSynth';
 import { MonoGlideSynth } from './audio/monoGlideSynth';
+import { triggerPooledNote } from './audio/pooledNote';
 import { isMonophonic, limitPolyphony, type GlideCurve, type GlideMode } from './audio/glide';
 import {
   claimVoices,
@@ -2200,7 +2201,7 @@ export default defineComponent({
       if (stolen.length > 0) {
         synth.triggerRelease(stolen, startTime);
       }
-      synth.triggerAttackRelease(voiced, duration, when, velocity);
+      triggerPooledNote(synth, voiced, synth.toSeconds(duration), startTime, velocity);
     },
     getTrackPlaybackFrequencies(track: PresetTrackData, notes: number[]): number[] {
       return notes.map((note) => this.midiToFrequency(note - 12));

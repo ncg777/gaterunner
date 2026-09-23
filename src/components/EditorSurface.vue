@@ -279,7 +279,21 @@
                 variant="outlined"
                 :disabled="!draftTrack.timeWarpEnabled"
                 @update:modelValue="handleTrackDraftChange"
-              />
+              >
+                <template #item="{ props, item }">
+                  <v-list-item v-bind="props" class="time-warp-curve-option">
+                    <template #title>
+                      <span class="time-warp-curve-option-content">
+                        <span>{{ item.title }}</span>
+                        <svg viewBox="0 0 96 36" class="time-warp-curve-option-graph" aria-hidden="true">
+                          <path d="M 0 36 L 96 0" class="time-warp-curve-option-identity" />
+                          <path :d="timeWarpCurvePath(item.value)" class="time-warp-curve-option-line" />
+                        </svg>
+                      </span>
+                    </template>
+                  </v-list-item>
+                </template>
+              </v-autocomplete>
             </v-col>
           </v-row>
 
@@ -1107,6 +1121,7 @@ import {
   TIME_WARP_CURVE_OPTIONS,
   TIME_WARP_QUANTIZE_OPTIONS,
   resolveTimeWarpFunction,
+  sampleWarpCurve,
 } from '../audio/timeWarp';
 import {
   clonePresetTrackData,
@@ -1123,6 +1138,18 @@ import {
   type PresetReverbData,
   type PresetTrackData,
 } from '../presets';
+
+function makeTimeWarpCurvePath(curve: string, expression = ''): string {
+  const samples = sampleWarpCurve(resolveTimeWarpFunction(curve, expression).fn, 1, 49);
+  return samples.map((value, index) => {
+    const x = (index / (samples.length - 1)) * 96;
+    return `${index === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${(36 - value * 36).toFixed(1)}`;
+  }).join(' ');
+}
+
+const builtinTimeWarpCurvePaths = new Map(
+  TIME_WARP_CURVE_OPTIONS.map(({ value }) => [value, makeTimeWarpCurvePath(value)]),
+);
 
 export default defineComponent({
   name: 'EditorSurface',
@@ -1344,6 +1371,11 @@ export default defineComponent({
     },
   },
   methods: {
+    timeWarpCurvePath(curve: string): string {
+      return curve === CUSTOM_TIME_WARP_CURVE
+        ? makeTimeWarpCurvePath(curve, this.draftTrack.timeWarpExpression)
+        : (builtinTimeWarpCurvePaths.get(curve) ?? '');
+    },
     handleSynthEngineChange(settings: SynthEngineSettings) {
       Object.assign(this.draftTrack, settings);
       if (settings.synthMode === 'additive' && !WAVEFORM_OPTIONS.some(option => option.value === this.draftTrack.waveform)) {
@@ -1552,6 +1584,40 @@ export default defineComponent({
 </script>
 
 <style scoped>
+.time-warp-curve-option-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.time-warp-curve-option-content > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.time-warp-curve-option-graph {
+  width: 96px;
+  height: 36px;
+  flex: none;
+  background: var(--panel-inset);
+}
+
+.time-warp-curve-option-identity {
+  fill: none;
+  stroke: rgba(170, 167, 141, 0.45);
+  stroke-dasharray: 3 3;
+  stroke-width: 1;
+}
+
+.time-warp-curve-option-line {
+  fill: none;
+  stroke: #f2b84b;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
 .partial-spectrum {
   margin: 16px 0;
 }
