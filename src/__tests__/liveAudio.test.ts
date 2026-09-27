@@ -20,6 +20,6 @@ test('offline export never contributes to live counters', () => {
   beginLiveScheduling(context, 1)();
   assert.equal(readLiveScheduling(context).callbacks, 0);
 });
-test('missing storage defaults safely to interactive buffering', () => {
-  assert.equal(readLiveBuffering(), 'interactive');
+test('missing storage defaults safely to extended buffering', () => {
+  assert.equal(readLiveBuffering(), 'extended');
 });

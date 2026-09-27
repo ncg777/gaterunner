@@ -19,13 +19,14 @@ export async function runLiveBufferingChecks(app: InstanceType<typeof App>) {
   };
   const before = await render();
   const results = [];
-  for (const mode of ['playback', 'interactive', 'playback'] as const) {
+  for (const mode of ['playback', 'extended', 'interactive', 'playback'] as const) {
     const old = Tone.getContext();
     await app.applyLiveBuffering(mode);
     const current = Tone.getContext();
     check(current !== old, 'Context not replaced');
     check(old.state === 'closed', 'Old context not closed');
     check(current.lookAhead === 0.4 && current.updateInterval === 0.01, 'Scheduling changed');
+    check(current.latencyHint === (mode === 'extended' ? 0.1 : mode), 'Wrong output latency request');
     check(app.liveBuffering === mode && readLiveBuffering() === mode, 'Preference not saved');
     check(JSON.stringify(app.draftData) === draft, 'Preset/unsaved edits changed');
     await app.startSequencer();

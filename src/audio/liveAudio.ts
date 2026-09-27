@@ -1,17 +1,25 @@
 import * as Tone from 'tone';
 import { configureRealtimeScheduling } from './realtimeScheduling';
 
-export type LiveBuffering = 'interactive' | 'playback';
-const storageKey = 'gaterunner.liveBuffering';
+export type LiveBuffering = 'interactive' | 'playback' | 'extended';
+// Use a new preference key so existing two-mode installs start with the new default.
+// Any choice made after this update remains device-local and persistent.
+const storageKey = 'gaterunner.liveBuffering.v2';
 export function readLiveBuffering(): LiveBuffering {
-  try { return localStorage.getItem(storageKey) === 'playback' ? 'playback' : 'interactive'; }
-  catch { return 'interactive'; }
+  try {
+    const saved = localStorage.getItem(storageKey);
+    return saved === 'interactive' || saved === 'playback' || saved === 'extended' ? saved : 'extended';
+  }
+  catch { return 'extended'; }
 }
 export function saveLiveBuffering(mode: LiveBuffering): boolean {
   try { localStorage.setItem(storageKey, mode); return true; } catch { return false; }
 }
 export function createLiveContext(mode: LiveBuffering): Tone.Context {
-  const context = new Tone.Context({ latencyHint: mode });
+  // Web Audio accepts a latency request in seconds. Tone forwards numeric hints to
+  // the browser, though its ContextOptions type only lists the named categories.
+  const latencyHint = mode === 'extended' ? 0.1 : mode;
+  const context = new Tone.Context({ latencyHint: latencyHint as AudioContextLatencyCategory });
   configureRealtimeScheduling(context);
   return context;
 }

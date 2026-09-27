@@ -4,7 +4,7 @@
       <v-card-text>
         <p class="mb-4">Stop playback before changing buffering. Applying clears remaining audio tails; your preset and unsaved edits stay intact.</p>
         <v-select v-model="selected" :items="modes" label="Buffering" :disabled="busy || running" />
-        <p>Playback requests more output buffering. Controls may respond more slowly. The browser decides the actual latency.</p>
+        <p>Playback requests more output buffering. Extended requests 100 ms. Controls may respond more slowly. The browser decides the actual latency.</p>
         <p class="my-3">Sound quality and WAV export are unchanged. This setting is saved on this device, not in presets.</p>
         <dl class="live-audio-stats my-4">
           <dt>Active request</dt><dd>{{ mode }}</dd>
@@ -32,7 +32,11 @@ import * as Tone from 'tone';
 import { readLiveScheduling, type LiveBuffering } from '../audio/liveAudio';
 const props = defineProps<{ modelValue: boolean; mode: LiveBuffering; busy: boolean; running: boolean }>();
 defineEmits<{ 'update:modelValue': [boolean]; apply: [LiveBuffering]; export: [] }>();
-const modes = [{ title: 'Interactive (current default)', value: 'interactive' }, { title: 'Playback (more buffering)', value: 'playback' }];
+const modes = [
+  { title: 'Interactive (lowest latency)', value: 'interactive' },
+  { title: 'Playback (more buffering)', value: 'playback' },
+  { title: 'Extended (default; request 100 ms)', value: 'extended' },
+];
 const selected = ref<LiveBuffering>(props.mode);
 const sampleRate = ref(0), lookAhead = ref(0);
 const baseLatency = ref('Unavailable'), outputLatency = ref('Unavailable');

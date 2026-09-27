@@ -2989,7 +2989,7 @@ export default defineComponent({
     },
     async applyLiveBuffering(mode: LiveBuffering) {
       if (this.isRunning || this.isStarting || this.isExporting || mode === this.liveBuffering
-        || (mode !== 'interactive' && mode !== 'playback')) return;
+        || (mode !== 'interactive' && mode !== 'playback' && mode !== 'extended')) return;
       this.isStarting = true;
       const oldContext = Tone.getContext() as Tone.Context;
       let next: Tone.Context | undefined;
