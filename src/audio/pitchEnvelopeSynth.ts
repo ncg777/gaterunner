@@ -70,6 +70,10 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   private engineMode: SynthEngineSettings['synthMode'] = 'additive';
   private engineEvents: EngineEvent[] = [];
   private retiring = false;
+  private outputAwake = false;
+  private sleepTimer: number | null = null;
+  private outputProtectedUntil = 0;
+  private continuousPhase = false;
 
   constructor(options?: Partial<PitchEnvelopeSynthOptions>) {
     const defaults = PitchEnvelopeSynth.getDefaults();
@@ -325,7 +329,15 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   }
 
   protected attackEngine(time: number, mono = false, stopTime?: number): void {
+    // A mono oscillator free-runs through gaps for glide/legato continuity.
+    // Pruning its destination path can freeze its phase in the native renderer.
+    this.continuousPhase = mono;
     this.rememberEngineEvent({ type: 'attack', time, mono, stopTime });
+    if (!this.outputAwake) {
+      this.outputAwake = true;
+      this.routeFilter();
+    }
+    if (stopTime !== undefined) this.scheduleOutputSleep();
     this.filterLfo?.wake(time);
     this.engineSource?.attack(time, mono, stopTime);
   }
@@ -333,6 +345,7 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   protected releaseEngine(time: number, ampRelease?: number): void {
     this.rememberEngineEvent({ type: 'release', time, ampRelease });
     this.engineSource?.release(time, ampRelease);
+    this.scheduleOutputSleep();
   }
 
   protected cancelEngine(time: number): void {
@@ -341,13 +354,20 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   }
 
   protected resetEngine(time: number): void {
+    this.continuousPhase = false;
     this.engineEvents = [];
     this.engineSource?.reset(time);
+    this.outputProtectedUntil = Math.max(this.outputProtectedUntil,
+      time + this.toSeconds(this.envelope.release) + this.filterTailSeconds());
+    this.scheduleOutputSleep();
   }
 
   private routeFilter(): void {
     this.envelope.disconnect();
     this.filter.disconnect();
+    // Keep the prepared voice reusable, but do not pull its control/filter graph
+    // through the destination while it has never played or has finished its tail.
+    if (!this.context.isOffline && !this.outputAwake) return;
     if (this.voiceFilterOptions.enabled) {
       this.envelope.connect(this.filter);
       this.filter.connect(this.output);
@@ -356,18 +376,40 @@ export class PitchEnvelopeSynth extends Tone.Synth {
     }
   }
 
+  private filterTailSeconds(): number {
+    const o = this.voiceFilterOptions;
+    if (!o.enabled) return 0;
+    const minHz = Math.max(this.midiToFrequency(0), this.filterBaseFrequency
+      * 2 ** ((Math.min(0, o.amount) - Math.abs(o.lfoAmount)) / 12));
+    return Math.max(0.05, 20 * Math.max(1, o.Q) * Math.abs(o.rolloff) / 12 / (Math.PI * minHz));
+  }
+
+  private scheduleOutputSleep(): void {
+    if (this.context.isOffline || this.retiring || this.continuousPhase || this.sleepTimer !== null) return;
+    this.sleepTimer = this.context.setTimeout(() => {
+      this.sleepTimer = null;
+      if (this.retiring || this.continuousPhase) return;
+      // Use the audio clock: lookahead callbacks can run before a release ends.
+      // Future reserved attacks also keep the connection alive.
+      if (this.context.currentTime < this.outputProtectedUntil
+        || hasVoiceActivity(this.engineEvents, this.context.currentTime,
+        this.toSeconds(this.envelope.release), this.filterTailSeconds())) {
+        this.scheduleOutputSleep();
+      } else if (this.outputAwake) {
+        this.outputAwake = false;
+        this.routeFilter();
+      }
+    }, 0.25);
+  }
+
   private syncFilterLfo(): void {
     const options = this.voiceFilterOptions;
     if (options.enabled && options.lfoEnabled && options.lfoAmount !== 0) {
       this.filterLfo ??= new FilterLfo(this.filter, () => {
         // Allow resonant filter history to decay after the source ends. This is
         // deliberately conservative at low cutoff/high Q, rather than clipping tails.
-        const o = this.voiceFilterOptions;
-        const minHz = Math.max(this.midiToFrequency(0), this.filterBaseFrequency
-          * 2 ** ((Math.min(0, o.amount) - Math.abs(o.lfoAmount)) / 12));
-        const tail = Math.max(0.05, 20 * Math.max(1, o.Q) * Math.abs(o.rolloff) / 12 / (Math.PI * minHz));
         return hasVoiceActivity(this.engineEvents, this.context.currentTime,
-          this.toSeconds(this.envelope.release), tail);
+          this.toSeconds(this.envelope.release), this.filterTailSeconds());
       });
     }
     this.filterLfo?.set({
@@ -438,6 +480,8 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   dispose(): this {
     if (this.retiring) return this;
     this.retiring = true;
+    if (this.sleepTimer !== null) this.context.clearTimeout(this.sleepTimer);
+    this.sleepTimer = null;
     this.filterLfo?.dispose();
     this.filterLfo = null;
     this.engineSource?.dispose();

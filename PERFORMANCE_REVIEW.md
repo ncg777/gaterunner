@@ -1,5 +1,92 @@
 # GateRunner performance review
 
+## Live album rendering: native context and sleeping voices (2026-09-27)
+
+The album diagnostic captures had no late note callbacks even when live audio
+clicked and lagged. A new `cli/profileLiveAudio.mjs` harness measures Chrome's
+audio renderer through CDP `WebAudio.getRealtimeData`, alongside graph counts,
+voice allocation and the existing scheduling diagnostics. It uses a disposable
+browser profile and does not alter the user's presets or browser data.
+
+Two sources of redundant work were confirmed:
+
+- Tone's compatibility context added roughly 1,000 gain nodes and 124 biquad
+  nodes to the six-track Weather opening. On browsers with native
+  `AudioParam.cancelAndHoldAtTime`, live playback now supplies Tone with a native
+  `AudioContext`, as WAV export already does. Older browsers retain the fallback.
+- Prewarmed voices kept their control/filter paths connected even without notes.
+  `PitchEnvelopeSynth` now leaves unused voices disconnected, reconnects before
+  reserved attacks, and disconnects after releases and conservative filter-tail
+  settling. Future notes and scheduled mono resets protect their connections.
+  Monophonic voices keep their free-running path connected between notes to
+  preserve oscillator phase; they may sleep after an explicit reset.
+  Offline graphs remain connected throughout rendering.
+
+Alternating old/new runs of **A Room Full of Refractions**, with the original
+arrangement, all effects enabled, 48 kHz and the same actual 170 ms buffer:
+
+| Run | Mean renderer load | Peak sampled load | Audio seconds / wall second |
+| --- | ---: | ---: | ---: |
+| Original 1 | 99.96% | 99.96% | 0.853 |
+| Optimized 1 | 31.68% | 40.37% | 1.006 |
+| Original 2 | 99.96% | 99.96% | 0.920 |
+| Optimized 2 | 32.66% | 42.88% | 1.005 |
+
+Each run measured 15 seconds after a four-second warmup. These are Chrome's
+render-capacity samples, not whole-machine CPU percentages. The short opening
+activates only the first track; it specifically exposes the cost of the other
+prepared tracks. All four runs had zero late JS note callbacks. The old graph
+nevertheless failed to advance its audio clock at realtime speed. Small timing
+ratios above 1 reflect the 170 ms callback granularity and sampling boundaries.
+Raw local measurements: `dist/live-weather-comparison/results.json`.
+
+In a separate all-six-tracks stress test (arrangement mask bypassed, 10-second
+warmup, 30-second measurement), mean load fell from 99.96% to 77.83%. Audio-clock
+progress improved from 0.669 to 1.000 seconds per wall second. Samples above 99%
+load fell from 30/30 to 1/30. This artificial density test still reached 99.93%
+briefly; it does not establish click-free playback on every device or preset.
+Raw local measurements: `dist/live-weather-dense/results.json`.
+
+The Lake Remembers (Dream Atlas revision 2, original arrangement, four-second
+warmup and 20-second measurement) fell from 99.96% mean / 99.99% peak load to
+34.62% mean / 45.89% peak. Audio-clock progress improved from 0.606 to 1.000
+seconds per wall second. Both runs reported 170 ms actual base latency and zero
+late note callbacks. Raw local measurements: `dist/live-dream-comparison/results.json`.
+
+No sample rate, voice limit, unison, oversampling, effect parameters or modulation
+resolution was reduced. The 170 ms default and 400 ms scheduling lookahead stay
+unchanged. Diagnostics now identify the native versus compatibility backend.
+
+Reproduce in PowerShell (single-preset JSON export):
+
+```powershell
+$env:PROFILE_PRESET = 'D:\compositions\weather-inside-glass\presets\01-a-room-full-of-refractions.json'
+$env:PROFILE_CASES = 'baseline,full,baseline,full'
+$env:PROFILE_SECONDS = '15'
+$env:PROFILE_OUTPUT = 'dist/live-weather-comparison'
+node cli/profileLiveAudio.mjs
+```
+
+`baseline` reconstructs the previous compatibility context and connected voice
+pools; `native-awake` isolates the context change; `full` runs current playback.
+`PROFILE_ALL_TRACKS=1` bypasses arrangement masks for a separate density stress
+test. Effect-isolation cases include `no-reverb`, `no-shapers`, `no-effects`, and
+`no-filter`/`no-chorus`/`no-phaser`/`no-flanger`/`no-echo`/`no-vibrato`/`no-tremolo`.
+Do not edit source files or run competing audio benchmarks during measurement.
+
+Validation: 15 Node scheduling/pool/buffering checks; browser PCM comparisons
+against always-connected voices (zero sample difference with common audio-clock
+filter modulation); monophonic phase preservation and scheduled reset protection;
+all 72 tested notes across additive/choir/resonant-noise with 1/2/8 voices;
+filter-LFO waveform/phase/release checks; repeated-pitch scheduling at 44.1/48 kHz;
+buffering context replacement with unchanged offline PCM and preset data; and
+Stop/Play, tail-draining and rapid-restart checks. Monophonic voices deliberately
+stay connected between notes: disconnecting a free-running oscillator can freeze
+its phase. Independent JavaScript LFO schedulers are not used as a sample-exact
+reference because their lookahead fills can straddle different audio callbacks.
+The production build, TypeScript check and PWA generation also passed; `docs/`
+contains the rebuilt GUI. Publishing is a separate step.
+
 ## Mobile realtime voice regression (2026-09-21)
 
 The July runtime used Tone 15.1.22 and the August mobile optimization retained at

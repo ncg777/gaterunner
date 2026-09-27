@@ -19,7 +19,15 @@ export function createLiveContext(mode: LiveBuffering): Tone.Context {
   // Web Audio accepts a latency request in seconds. Tone forwards numeric hints to
   // the browser, though its ContextOptions type only lists the named categories.
   const latencyHint = mode === 'extended' ? 0.17 : mode;
-  const context = new Tone.Context({ latencyHint: latencyHint as AudioContextLatencyCategory });
+  // Modern browsers provide the automation primitive Tone needs natively.
+  // Its compatibility context otherwise adds hundreds of wrapper/support nodes
+  // to large voice pools. Keep that fallback for browsers lacking cancel/hold.
+  const nativeSupported = typeof globalThis.AudioContext === 'function'
+    && typeof globalThis.AudioParam?.prototype.cancelAndHoldAtTime === 'function';
+  const context = new Tone.Context({
+    ...(nativeSupported ? { context: new globalThis.AudioContext({ latencyHint }) } : {}),
+    latencyHint: latencyHint as AudioContextLatencyCategory,
+  });
   configureRealtimeScheduling(context);
   return context;
 }
@@ -99,6 +107,7 @@ export function exportLiveDiagnostics(extra: Record<string, unknown> = {}) {
     schema: 1, generatedAt: new Date().toISOString(), userAgent: navigator.userAgent,
     session: s ? { startedAt: s.startedAt, elapsedMs: performance.now() - s.startPerformance,
       buffering: s.buffering, sampleRate: s.context.sampleRate, lookAheadMs: (s.context.lookAhead ?? 0) * 1000,
+      audioBackend: typeof globalThis.AudioContext === 'function' && raw instanceof globalThis.AudioContext ? 'native' : 'compatibility',
       baseLatencyMs: typeof raw?.baseLatency === 'number' ? raw.baseLatency * 1000 : null,
       outputLatencyMs: typeof raw?.outputLatency === 'number' ? raw.outputLatency * 1000 : null,
       callbacks: s.callbacks, lateCallbacks: s.late, worstLateMs: s.worstLateMs,

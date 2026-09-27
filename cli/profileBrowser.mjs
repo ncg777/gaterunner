@@ -7,7 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 const output = resolve(process.env.PROFILE_OUTPUT ?? 'dist/browser-profile');
 mkdirSync(output, { recursive: true });
 const browser = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
-const vite = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', '3197', '--strictPort'], { windowsHide: true, stdio: 'ignore' });
+const vite = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', '3197', '--strictPort'], { windowsHide: true, stdio: process.env.PROFILE_VERBOSE ? 'inherit' : 'ignore' });
 let chrome;
 let socket;
 try {

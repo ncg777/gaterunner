@@ -2,6 +2,7 @@ import * as Tone from 'tone';
 export { runWarpedNoteChecks } from './pooledNote.browser';
 export { runOfflineSchedulingChecks } from './offlineScheduling.browser';
 export { runLiveBufferingChecks } from './liveAudio.browser';
+export { runVoiceSleepChecks, runMonoVoiceSleepChecks } from './liveAudioPerformance.browser';
 export { runAudioLifecycleChecks, runTransportSleepChecks } from './audioLifecycle.browser';
 export { runFilterUpdatePerformanceChecks, runFilterUpdateSoundChecks, runIdleModulationChecks } from './realtimePerformance.browser';
 export { runUnisonSoundChecks, runActiveUnisonPerformanceChecks } from './unison.browser';

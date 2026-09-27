@@ -129,8 +129,10 @@ export function prewarmVoicePool(synth: Tone.PolySynth, voiceCount: number): voi
  * partials for every unison oscillator), and that allocation happens on the main thread
  * right when notes are being scheduled, which is what makes several tracks stutter.
  *
- * Retaining the voices turns the synth into a true voice pool: idle voices keep their
- * oscillators stopped (so they cost no audio CPU) and are simply re-triggered. Realtime
+ * Retaining the voices turns the synth into a true voice pool. PitchEnvelopeSynth
+ * disconnects its silent output path after filter tails settle, then reconnects
+ * before its next reserved note; stopped oscillators alone do not eliminate the
+ * render cost of the retained control/filter graph. Realtime
  * voices above `poolSize` are collected. Offline voices stay allocated until rendering
  * completes because their earlier scheduled notes have not been rendered yet.
  */
