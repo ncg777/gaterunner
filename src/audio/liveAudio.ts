@@ -18,7 +18,7 @@ export function saveLiveBuffering(mode: LiveBuffering): boolean {
 export function createLiveContext(mode: LiveBuffering): Tone.Context {
   // Web Audio accepts a latency request in seconds. Tone forwards numeric hints to
   // the browser, though its ContextOptions type only lists the named categories.
-  const latencyHint = mode === 'extended' ? 0.1 : mode;
+  const latencyHint = mode === 'extended' ? 0.17 : mode;
   const context = new Tone.Context({ latencyHint: latencyHint as AudioContextLatencyCategory });
   configureRealtimeScheduling(context);
   return context;
