@@ -1064,3 +1064,5 @@ export { runChoirRealtimeSetupChecks } from './synthEngine.browser';
 export { runChoirResourceChecks } from './synthEngine.browser';
 export { runSynthEngineMasterOutputChecks } from './synthEngine.browser';
 export { runFourNoteSequencerChecks } from './synthEngine.browser';
+export { runAdditiveModulationChecks, runModulationUiChecks } from './modulation.browser';
+export { runSpectralModulationChecks } from './spectralModulation.browser';

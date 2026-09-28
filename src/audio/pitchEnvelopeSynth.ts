@@ -1,5 +1,9 @@
 ﻿import * as Tone from 'tone';
 import { EngineSource } from './engineSource';
+import { VoiceModulation } from './voiceModulation';
+import { SpectralVoice } from './spectralVoice';
+import { hasSpectralModulation, type SpectralSourceSettings } from './spectralModulation';
+import { compileModulation, normalizeModulation } from './modulation';
 import { normalizeSynthEngine, type SynthEngineSettings } from './synthEngine';
 import { buildPitchEnvelopeCurve } from './pitchEnvelope';
 import type { LfoWaveform, LfoPhaseMode } from './lfo';
@@ -33,6 +37,7 @@ export interface VoiceFilterOptions {
 }
 
 export interface PitchEnvelopeSynthOptions extends SynthOptions {
+  spectralSource?: SpectralSourceSettings;
   pitchEnvelope: {
     attack: Tone.Unit.Time;
     decay: Tone.Unit.Time;
@@ -74,6 +79,11 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   private sleepTimer: number | null = null;
   private outputProtectedUntil = 0;
   private continuousPhase = false;
+  private modulation: VoiceModulation | null = null;
+  private engineSettings = normalizeSynthEngine({});
+  private spectralVoice: SpectralVoice | null = null;
+  private spectralSource?: SpectralSourceSettings;
+  private modulationSignature = '';
 
   constructor(options?: Partial<PitchEnvelopeSynthOptions>) {
     const defaults = PitchEnvelopeSynth.getDefaults();
@@ -128,6 +138,7 @@ export class PitchEnvelopeSynth extends Tone.Synth {
       Q: this.voiceFilterOptions.Q,
       gain: this.voiceFilterOptions.gain,
     });
+    this.spectralSource = options?.spectralSource;
     this.setEngine(options?.engine ?? normalizeSynthEngine({}));
     this.routeFilter();
     this.syncFilterLfo();
@@ -207,8 +218,9 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   }
 
   set(props: Partial<PitchEnvelopeSynthOptions>): this {
-    const { engine, pitchEnvelope, pitchEnvelopeAmount, pitchEnvelopeShape, voiceFilter, oscillator,
+    const { engine, spectralSource, pitchEnvelope, pitchEnvelopeAmount, pitchEnvelopeShape, voiceFilter, oscillator,
       filterLfoNoteStartSeconds, ...rest } = props;
+    if (spectralSource) this.spectralSource = spectralSource;
     if (filterLfoNoteStartSeconds !== undefined) {
       this.filterLfoNoteStartSeconds = filterLfoNoteStartSeconds;
       if (filterLfoNoteStartSeconds >= 0) this.filterLfo?.triggerNote(filterLfoNoteStartSeconds);
@@ -254,7 +266,9 @@ export class PitchEnvelopeSynth extends Tone.Synth {
       });
       if (wasEnabled !== this.voiceFilterOptions.enabled) this.routeFilter();
       this.syncFilterLfo();
+      this.syncModulation();
     }
+    if (spectralSource) this.syncModulation();
     return this;
   }
 
@@ -270,6 +284,8 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   private setEngine(engine: SynthEngineSettings): void {
     const signature = JSON.stringify(engine);
     if (signature === this.engineSignature) return;
+    this.engineSettings = engine;
+    this.syncModulation();
     if (this.engineSource && engine.synthMode === this.engineMode) {
       this.engineSource.set(engine);
       this.engineSignature = signature;
@@ -280,7 +296,9 @@ export class PitchEnvelopeSynth extends Tone.Synth {
     this.engineSource?.dispose();
     this.engineSource = null;
     this.oscillator.disconnect();
-    if (engine.synthMode === 'additive') this.oscillator.connect(this.envelope);
+    if (engine.synthMode === 'additive') {
+      if (!this.spectralVoice) this.oscillator.connect(this.envelope);
+    }
     else {
       this.engineSource = new EngineSource(this.context, this.frequency, this.detune, engine);
       this.engineSource.output.connect(this.envelope);
@@ -333,6 +351,8 @@ export class PitchEnvelopeSynth extends Tone.Synth {
     // Pruning its destination path can freeze its phase in the native renderer.
     this.continuousPhase = mono;
     this.rememberEngineEvent({ type: 'attack', time, mono, stopTime });
+    this.spectralVoice?.attack(time, mono, stopTime);
+    this.modulation?.attack(time);
     if (!this.outputAwake) {
       this.outputAwake = true;
       this.routeFilter();
@@ -344,18 +364,23 @@ export class PitchEnvelopeSynth extends Tone.Synth {
 
   protected releaseEngine(time: number, ampRelease?: number): void {
     this.rememberEngineEvent({ type: 'release', time, ampRelease });
+    this.spectralVoice?.release(time, ampRelease);
+    this.modulation?.release(time);
     this.engineSource?.release(time, ampRelease);
     this.scheduleOutputSleep();
   }
 
   protected cancelEngine(time: number): void {
     this.engineEvents = this.engineEvents.filter(event => event.time < time);
+    this.modulation?.cancel(time);
     this.engineSource?.cancel(time);
   }
 
   protected resetEngine(time: number): void {
     this.continuousPhase = false;
     this.engineEvents = [];
+    this.spectralVoice?.reset(time);
+    this.modulation?.reset(time);
     this.engineSource?.reset(time);
     this.outputProtectedUntil = Math.max(this.outputProtectedUntil,
       time + this.toSeconds(this.envelope.release) + this.filterTailSeconds());
@@ -365,15 +390,53 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   private routeFilter(): void {
     this.envelope.disconnect();
     this.filter.disconnect();
+    this.modulation?.pan.disconnect();
     // Keep the prepared voice reusable, but do not pull its control/filter graph
     // through the destination while it has never played or has finished its tail.
     if (!this.context.isOffline && !this.outputAwake) return;
     if (this.voiceFilterOptions.enabled) {
       this.envelope.connect(this.filter);
-      this.filter.connect(this.output);
+      this.filter.connect(this.modulation?.gain ?? this.output);
     } else {
-      this.envelope.connect(this.output);
+      this.envelope.connect(this.modulation?.gain ?? this.output);
     }
+    this.modulation?.pan.connect(this.output);
+  }
+
+  private syncModulation(): void {
+    const settings = this.engineSettings.synthMode === 'additive'
+      ? normalizeModulation(this.engineSettings.modulation) : normalizeModulation(undefined);
+    const signature = JSON.stringify([settings, this.spectralSource, this.voiceFilterOptions.Q, this.voiceFilterOptions.gain]);
+    if (signature === this.modulationSignature) return;
+    this.modulationSignature = signature;
+    if (this.spectralSource && hasSpectralModulation(settings)) {
+      if (!this.spectralVoice) {
+        this.spectralVoice = new SpectralVoice(this.context, this.frequency, this.detune, this.spectralSource);
+        this.oscillator.disconnect();
+        this.spectralVoice.output.connect(this.envelope);
+        for (const e of this.engineEvents) {
+          if (e.type === 'attack') this.spectralVoice.attack(e.time, e.mono, e.stopTime);
+          else this.spectralVoice.release(e.time, e.ampRelease);
+        }
+      } else this.spectralVoice.set(this.spectralSource);
+    } else if (this.spectralVoice) {
+      this.spectralVoice.dispose();
+      this.spectralVoice = null;
+      if (this.engineSettings.synthMode === 'additive') this.oscillator.connect(this.envelope);
+    }
+    if (!this.modulation && compileModulation(settings).active) {
+      this.modulation = new VoiceModulation(this.context, this.detune, this.filter, () =>
+        hasVoiceActivity(this.engineEvents, this.context.currentTime, this.toSeconds(this.envelope.release), this.filterTailSeconds()), {
+          write: (v, t, ramp) => this.spectralVoice?.write(v, t, ramp),
+          refresh: time => this.spectralVoice?.refresh(time),
+        });
+      for (const event of this.engineEvents) {
+        if (event.type === 'attack') this.modulation.attack(event.time);
+        else this.modulation.release(event.time);
+      }
+      this.routeFilter();
+    }
+    this.modulation?.set(settings, this.voiceFilterOptions.Q, this.voiceFilterOptions.gain);
   }
 
   private filterTailSeconds(): number {
@@ -485,6 +548,8 @@ export class PitchEnvelopeSynth extends Tone.Synth {
     this.filterLfo?.dispose();
     this.filterLfo = null;
     this.engineSource?.dispose();
+    this.modulation?.dispose();
+    this.spectralVoice?.dispose();
     const cleanup = () => {
       this.pitchEnvelope.dispose();
       this.pitchCents.dispose();

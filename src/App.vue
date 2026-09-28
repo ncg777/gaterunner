@@ -2499,6 +2499,11 @@ export default defineComponent({
           } as unknown as Tone.PolySynthOptions<Tone.Synth<Tone.SynthOptions>>['options']['oscillator'];
           const voiceOptions = {
             engine: normalizeSynthEngine(track),
+            spectralSource: {
+              partialGenerator: normalizePartialGenerator(track.partialGenerator), waveform: track.waveform,
+              tonewheelDrawbars: track.tonewheelDrawbars, tonewheelWavetable: track.tonewheelWavetable,
+              unisonVoices: track.unisonVoices, unisonDetune: track.unisonDetune,
+            },
             envelope,
             oscillator: oscillatorOptions,
             pitchEnvelope: {

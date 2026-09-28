@@ -1,3 +1,6 @@
+import { compileModulation, emptyModulationValues, type ModulationSettings } from '../src/audio/modulation.js';
+import { hasSpectralModulation } from '../src/audio/spectralModulation.js';
+import { createSpectralOscillator } from './spectralOscillator.js';
 import { normalizeSynthEngine, type SynthMode, type NoiseEngineSettings, type ChoirEngineSettings } from '../src/audio/synthEngine.js';
 import { createNativeEngineSource } from './nativeEngineSource.js';
 import ToneMidi from '@tonejs/midi';
@@ -88,6 +91,7 @@ export interface GenerateTrackOptions extends Partial<NativeEffectSettings> {
   denominator?: number;
   /** Oscillator shape metadata (not used by MIDI export). */
   synthMode?: SynthMode;
+  modulation?: ModulationSettings;
   noiseEngine?: NoiseEngineSettings;
   choirEngine?: ChoirEngineSettings;
   waveform?: string;
@@ -250,6 +254,7 @@ export interface GenerateReverbOptions {
 
 export interface GenerateOptions extends Partial<NativeEffectSettings> {
   synthMode?: SynthMode;
+  modulation?: ModulationSettings;
   noiseEngine?: NoiseEngineSettings;
   choirEngine?: ChoirEngineSettings;
   /** Tempo in beats per minute (1-499). Default: 90 */
@@ -695,7 +700,7 @@ function normalizeTracks(options: GenerateOptions): NormalizedTrack[] {
     unisonVoices: clamp(track.unisonVoices ?? fallbackTrack.unisonVoices, 1, 8),
     unisonDetune: clamp(track.unisonDetune ?? fallbackTrack.unisonDetune, 0, 100),
     tonewheelDrawbars: normalizeTonewheelDrawbars(track.tonewheelDrawbars),
-    ...normalizeSynthEngine({ ...track, synthMode: track.synthMode ?? options.synthMode, noiseEngine: track.noiseEngine ?? options.noiseEngine, choirEngine: track.choirEngine ?? options.choirEngine, waveform: track.waveform ?? fallbackTrack.waveform, partialGenerator: track.partialGenerator ?? options.partialGenerator }),
+    ...normalizeSynthEngine({ ...track, modulation: track.modulation ?? options.modulation, synthMode: track.synthMode ?? options.synthMode, noiseEngine: track.noiseEngine ?? options.noiseEngine, choirEngine: track.choirEngine ?? options.choirEngine, waveform: track.waveform ?? fallbackTrack.waveform, partialGenerator: track.partialGenerator ?? options.partialGenerator }),
     partialGenerator: normalizeTrackPartialGenerator(track.partialGenerator ?? options.partialGenerator, track.waveform ?? fallbackTrack.waveform),
     tonewheelWavetable: track.tonewheelWavetable ?? fallbackTrack.tonewheelWavetable,
     tremoloEnabled: Boolean(track.tremoloEnabled ?? fallbackTrack.tremoloEnabled),
@@ -1123,6 +1128,8 @@ function renderPreparedWavChannels(
     const drumReverbRight = drumReverbLeft ? new Float32Array(frameCount) : null;
     const engine = normalizeSynthEngine(entry.track);
     const isAdditive = engine.synthMode === 'additive';
+    const modulation = compileModulation(isAdditive ? engine.modulation : { sources: [], routes: [] });
+    const spectralModulation = isAdditive && hasSpectralModulation(engine.modulation);
     const monoEngineSources = new Map<number, ReturnType<typeof createNativeEngineSource>>();
     const partialGenerator = normalizePartialGenerator(entry.track.partialGenerator);
     const fallbackSource = {
@@ -1293,7 +1300,7 @@ function renderPreparedWavChannels(
         for (let voice = 0; voice < voiceCount; voice += 1) {
           const detuneOffset = voiceCount === 1 ? 0 : ((voice / (voiceCount - 1)) - 0.5) * entry.track.unisonDetune;
           const frequency = midiToFrequency(midiNote + detuneOffset / 100, prepared.a4);
-          const usesHalfFundamentalSpectrum = hasGenericWavetable || partialGenerator.type === 'tonewheel';
+          const usesHalfFundamentalSpectrum = spectralModulation || hasGenericWavetable || partialGenerator.type === 'tonewheel';
           const phaseIncrement = frequency / sampleRate / (usesHalfFundamentalSpectrum ? 2 : 1);
           const voiceGain = (isMonoTrack ? 1 : noteAmplitude) * nativeUnisonGain(voiceCount);
           // Voices start together and diverge at their detuned frequencies.
@@ -1309,9 +1316,19 @@ function renderPreparedWavChannels(
           const [voiceFilter] = createStereoFilter(entry.track, sampleRate);
           const voiceCutoff = createFilterCutoff(entry.track, [midiNote], noteDuration, prepared.a4, start, prepared.bpm,
             filterNoteStarts);
+          const mod = emptyModulationValues();
+          const modulationRelease = isMonoTrack
+            ? voiceEvents.filter(e => e.envelopeStart === voiceEvent.envelopeStart).at(-1)!
+            : null;
+          const releaseTime = modulationRelease ? modulationRelease.time + modulationRelease.duration : start + noteDuration;
+          const spectralOscillator = spectralModulation ? createSpectralOscillator({ ...fallbackSource,
+            tonewheelWavetable: entry.track.tonewheelWavetable, unisonVoices: voiceCount, unisonDetune: entry.track.unisonDetune },
+            modulation, { noteStart: voiceEvent.envelopeStart, releaseTime, bpm: prepared.bpm }) : null;
           for (let frame = startFrame; frame < voiceEndFrame; frame += 1) {
             const t = (frame - startFrame) / sampleRate;
-            if (hasTonewheelModulation && (frame - startFrame) % 64 === 0) {
+            if (modulation.active) modulation.sample({ time: frame / sampleRate,
+              noteStart: voiceEvent.envelopeStart, releaseTime, bpm: prepared.bpm }, mod);
+            if (!spectralModulation && hasTonewheelModulation && (frame - startFrame) % 64 === 0) {
               tonewheelOscillator = modulatedOscillators.get(frame) ?? prepareTonewheelSpectrumOscillator(
                 interpolateModulatedTonewheelDrawbars(
                   entry.track.tonewheelWavetable,
@@ -1325,7 +1342,7 @@ function renderPreparedWavChannels(
               );
               modulatedOscillators.set(frame, tonewheelOscillator);
             }
-            if (hasGenericWavetableModulation && (frame - startFrame) % 64 === 0) {
+            if (!spectralModulation && hasGenericWavetableModulation && (frame - startFrame) % 64 === 0) {
               wavetableWeights = modulatedWeights.get(frame) ?? getPartialWavetableWeights(
                 entry.track.tonewheelWavetable,
                 getModulatedPartialWavetablePosition(entry.track.tonewheelWavetable, {
@@ -1347,9 +1364,12 @@ function renderPreparedWavChannels(
               : 1;
             const glideRatio = glidePlan && glidePlan.seconds > 0
               ? getGlideFrequency(glidePlan, t) / glidePlan.toFrequency : 1;
-            const playbackFrequency = frequency * pitchEnvelopeRatio * glideRatio;
+            const modulationPitchRatio = modulation.active ? 2 ** (mod.pitch / 12) : 1;
+            const playbackFrequency = frequency * pitchEnvelopeRatio * glideRatio * modulationPitchRatio;
             const engineElapsed = (frame / sampleRate) - voiceEvent.envelopeStart;
-            const oscillatorSample = engineSource
+            const oscillatorSample = spectralOscillator
+              ? spectralOscillator(phase, playbackFrequency / 2, frame / sampleRate, sampleRate)
+              : engineSource
               ? engineSource(playbackFrequency, engineElapsed, start + noteDuration - voiceEvent.envelopeStart, frame / sampleRate)
               : genericWavetableOscillators.length > 0
               ? genericWavetableOscillators.reduce((sum, oscillator, configurationIndex) => (
@@ -1358,11 +1378,14 @@ function renderPreparedWavChannels(
               : partialOscillator
                 ? partialOscillator(phase, playbackFrequency, sampleRate)
                 : tonewheelOscillator?.(phase, playbackFrequency / 2, sampleRate) ?? 0;
-            const sample = choir(voiceFilter(oscillatorSample * voiceGain * env, voiceCutoff(t)));
-            trackLeft[frame] += sample;
-            trackRight[frame] += sample;
+            const sample = choir(voiceFilter(oscillatorSample * voiceGain * env,
+              voiceCutoff(t) * (modulation.active ? 2 ** (mod.cutoff / 12) : 1),
+              entry.track.filterQ + mod.resonance, entry.track.filterGain + mod.filterGain))
+              * (modulation.active ? 10 ** (mod.level / 20) : 1);
+            trackLeft[frame] += sample * (modulation.active ? Math.SQRT2 * Math.cos((mod.pan + 1) * Math.PI / 4) : 1);
+            trackRight[frame] += sample * (modulation.active ? Math.SQRT2 * Math.sin((mod.pan + 1) * Math.PI / 4) : 1);
 
-            phase += phaseIncrement * pitchEnvelopeRatio * glideRatio;
+            phase += phaseIncrement * pitchEnvelopeRatio * glideRatio * modulationPitchRatio;
             if (phase >= 1) {
               phase -= Math.floor(phase);
             }
@@ -1373,7 +1396,7 @@ function renderPreparedWavChannels(
       }
       if (isMonoTrack) {
         monoIncrement = midiToFrequency(voicedNotes[0], prepared.a4) / sampleRate
-          / (hasGenericWavetable || partialGenerator.type === 'tonewheel' ? 2 : 1);
+          / (spectralModulation || hasGenericWavetable || partialGenerator.type === 'tonewheel' ? 2 : 1);
       }
 
     }

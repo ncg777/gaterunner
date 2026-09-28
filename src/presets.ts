@@ -1,3 +1,4 @@
+import type { ModulationSettings } from './audio/modulation.js';
 import { normalizeSynthEngine, LEGACY_NOISE_WAVEFORMS, type SynthMode, type NoiseEngineSettings, type ChoirEngineSettings } from './audio/synthEngine.js';
 import {
   cloneWaveshaperSettings,
@@ -66,6 +67,7 @@ export interface PresetTrackData {
   denominator: number;
   phase: number;
   synthMode?: SynthMode;
+  modulation?: ModulationSettings;
   noiseEngine?: NoiseEngineSettings;
   choirEngine?: ChoirEngineSettings;
   waveform: string;

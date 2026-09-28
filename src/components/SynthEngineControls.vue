@@ -1,5 +1,6 @@
 <template>
   <v-select :model-value="engine.synthMode" label="Synth engine" :items="modes" variant="outlined" density="comfortable" @update:modelValue="emit('change', { ...engine, synthMode: $event })" />
+  <ModulationControls v-if="engine.synthMode === 'additive'" :model-value="engine.modulation" @update:modelValue="emit('change', { ...engine, modulation: $event })" />
   <template v-if="engine.synthMode === 'resonant-noise'">
     <p class="text-body-2 mb-4">Real noise excites parallel resonators. Narrow resonance creates pitched whistles; wider bands create breath and turbulent textures. Base frequency is anchored at A4. Pitch tracking follows notes and glide.</p>
     <v-select :model-value="noiseStartingPoint" label="Noise starting point" :items="[...noisePresets, customPreset]" variant="outlined" @update:modelValue="applyPreset('noiseEngine', $event)" />
@@ -60,6 +61,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import EditableSlider from './EditableSlider.vue';
+import ModulationControls from './ModulationControls.vue';
 import { choirBands, noiseBands, normalizeSynthEngine, type SynthEngineSettings, type NoiseEngineSettings, type ChoirEngineSettings } from '../audio/synthEngine';
 const props = defineProps<{ track: unknown }>();
 const emit = defineEmits<{ change: [settings: SynthEngineSettings] }>();

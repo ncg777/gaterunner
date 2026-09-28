@@ -537,6 +537,60 @@ these are configured separately because Tone's lookahead setter changes both.
 
 ## Developer Guide
 
+### Additive modulation
+
+Open **Generator → Modulation** on an additive track. Add any number of named
+envelopes and LFOs, then add routes from sources to destinations. Source editors
+collapse individually, so a large patch can stay compact. Sources and routes can
+be bypassed or removed; removing a source also removes its routes.
+
+- Spectral destinations: **tilt** (dB/octave), **contrast**, **odd/even balance**
+  (dB), **harmonic count**, and **mapping exponent**. Routes offset the existing
+  generator controls and respect their bounds. For example, an LFO routed to
+  tilt with amount `6` moves a base tilt of `-6` between `-12` and `0` dB/octave.
+  Mapping exponent affects sequence/binary sources using Power mapping.
+  Contrast and odd/even shaping also work on procedural and tonewheel spectra.
+  Harmonic count is rounded to whole harmonics; increasing it reveals partials
+  supplied by the source, while tonewheel count limits its existing drawbar spectrum
+  from an eight-harmonic base. Odd/even balance leaves fractional drawbars unchanged.
+- Other destinations: pitch (semitones), level (dB), pan, filter cutoff (semitones),
+  filter resonance (Q), and filter gain (dB). Enable the voice filter for filter
+  routes; filter gain applies to shelf and peaking filters.
+- Each source can drive multiple destinations. Multiple routes to a destination
+  add together, including negative amounts, before limits are applied. Existing
+  pitch/filter envelopes and filter LFOs continue to work alongside the matrix.
+- Envelopes have attack, decay, sustain, release, and curve controls. They belong
+  to individual voices and hold through mono legato. Release starts from the
+  current envelope level; the amp envelope still determines how long a note sounds.
+- LFOs offer seven shapes, Hz or tempo sync, initial phase, bipolar/unipolar
+  output, and voice-attack, song-start, or free-running timing. Free-running phase
+  uses the audio context clock (export starts at zero).
+- Panning preserves the original center level. Modulation affects the additive
+  voice before track effects; the separate breath-noise layer is unaffected.
+
+The optional `modulation` track field contains `sources` and `routes` arrays and
+round-trips through presets and CLI preset/track JSON. Older patches
+default to an empty matrix. There is no fixed source or route count ceiling;
+processing cost grows with active routes and sounding voices. Browser automation
+uses a 200 Hz control clock with interpolated ramps; native WAV rendering evaluates
+the same source functions at sample rate. Spectral coefficients use interpolated
+200 Hz updates in both renderers. Browser spectral motion uses independently
+automated, band-limited partials per voice; it survives offline rendering and
+does not overwrite other notes' envelopes. Active spectral routes cost more CPU
+as harmonic count, polyphony, and unison increase. Mixed wavetable sources receive
+the spectral transforms before blending, alongside their existing vector LFOs.
+Fast corners can differ slightly between renderers.
+
+The shared model, validation, destination metadata, and source evaluator live in
+`src/audio/modulation.ts`. To extend the matrix, add a destination there and its
+browser/native adapters in `src/audio/voiceModulation.ts` and `cli/generate.ts`.
+Spectral transforms are shared in `src/audio/spectralModulation.ts`, with browser
+partial automation in `src/audio/spectralVoice.ts` and native sampling in
+`cli/spectralOscillator.ts`.
+The editor reads destination names, units, limits, and increments from the registry.
+Sources use stable IDs rather than array positions. Only enabled, connected sources
+are evaluated, and an empty matrix allocates no additional browser audio graph.
+
 ### Project Layout
 
 | Path | Responsibility |

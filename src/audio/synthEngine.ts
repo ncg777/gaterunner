@@ -1,3 +1,4 @@
+import { normalizeModulation, type ModulationSettings } from './modulation.js';
 /** Engine settings are shared by presets, the Web Audio voices and the native WAV renderer. */
 export type SynthMode = 'additive' | 'resonant-noise' | 'choir';
 export type Vowel = 'a' | 'e' | 'i' | 'o' | 'u';
@@ -15,6 +16,7 @@ export interface ChoirEngineSettings {
   formantOffsets: number[]; formantGains: number[];
 }
 export interface SynthEngineSettings {
+  modulation: ModulationSettings;
   synthMode: SynthMode;
   noiseEngine: NoiseEngineSettings;
   choirEngine: ChoirEngineSettings;
@@ -88,6 +90,7 @@ export function normalizeSynthEngine(value: unknown): SynthEngineSettings {
     : wave === 'saxophone' ? { color: 'white', bands: 8, resonance: 12, tilt: -4 } : {};
   return {
     synthMode: resolveSynthMode(r),
+    modulation: normalizeModulation(r.modulation),
     noiseEngine: normalizeNoiseEngine({ ...noiseDefaults, ...object(r.noiseEngine) }),
     choirEngine: normalizeChoirEngine({ ...(wave === 'choir-oh' ? { vowel: 'o', targetVowel: 'a' } : {}), ...object(r.choirEngine) }),
   };

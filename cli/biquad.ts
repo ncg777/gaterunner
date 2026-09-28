@@ -8,15 +8,16 @@ export interface NativeFilterSettings {
 const clamp = (value: number, minimum: number, maximum: number) => Math.max(minimum, Math.min(maximum, value));
 
 export function createStereoFilter(track: NativeFilterSettings, sampleRate: number): [
-  (sample: number, cutoff: number) => number,
-  (sample: number, cutoff: number) => number,
+  (sample: number, cutoff: number, q?: number, gain?: number) => number,
+  (sample: number, cutoff: number, q?: number, gain?: number) => number,
 ] {
   if (!track.filterEnabled) {
     return [(sample) => sample, (sample) => sample];
   }
 
-  const quality = clamp(Number.isFinite(track.filterQ) ? track.filterQ : 1, 0.0001, 30);
-  const amplitude = Math.pow(10, clamp(Number.isFinite(track.filterGain) ? track.filterGain : 0, -48, 48) / 40);
+  let quality = clamp(Number.isFinite(track.filterQ) ? track.filterQ : 1, 0.0001, 30);
+  let gainDb = clamp(Number.isFinite(track.filterGain) ? track.filterGain : 0, -48, 48);
+  let amplitude = Math.pow(10, gainDb / 40);
   let b0 = 0;
   let b1 = 0;
   let b2 = 0;
@@ -28,9 +29,14 @@ export function createStereoFilter(track: NativeFilterSettings, sampleRate: numb
     let input2 = 0;
     let output1 = 0;
     let output2 = 0;
-    return (sample: number, cutoff: number) => {
+    return (sample: number, cutoff: number, q = quality, gain = gainDb) => {
+      q = clamp(q, 0.0001, 30);
+      gain = clamp(gain, -48, 48);
       const frequency = clamp(Number.isFinite(cutoff) ? cutoff : 20, 0, sampleRate / 2);
-      if (frequency !== previousCutoff) {
+      if (frequency !== previousCutoff || q !== quality || gain !== gainDb) {
+        quality = q;
+        gainDb = gain;
+        amplitude = Math.pow(10, gain / 40);
         const omega = 2 * Math.PI * frequency / sampleRate;
         const cosine = Math.cos(omega);
         const sine = Math.sin(omega);
@@ -108,7 +114,7 @@ export function createStereoFilter(track: NativeFilterSettings, sampleRate: numb
   };
   const createCascade = () => {
     const stages = Array.from({ length: [-12, -24, -48, -96].indexOf(track.filterRolloff) + 1 }, createChannel);
-    return (sample: number, cutoff: number) => stages.reduce((value, process) => process(value, cutoff), sample);
+    return (sample: number, cutoff: number, q?: number, gain?: number) => stages.reduce((value, process) => process(value, cutoff, q, gain), sample);
   };
   return [createCascade(), createCascade()];
 }

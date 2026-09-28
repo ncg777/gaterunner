@@ -12,6 +12,7 @@ declare module 'vue' {
     ExportProgressDialog: typeof import('./src/components/ExportProgressDialog.vue')['default']
     HelpDialog: typeof import('./src/components/HelpDialog.vue')['default']
     LiveAudioDialog: typeof import('./src/components/LiveAudioDialog.vue')['default']
+    ModulationControls: typeof import('./src/components/ModulationControls.vue')['default']
     PresetManager: typeof import('./src/components/PresetManager.vue')['default']
     ReverbControls: typeof import('./src/components/ReverbControls.vue')['default']
     RhythmSoundControls: typeof import('./src/components/RhythmSoundControls.vue')['default']
