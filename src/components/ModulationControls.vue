@@ -2,7 +2,7 @@
   <v-expansion-panels class="my-3">
     <v-expansion-panel :title="`Modulation · ${settings.sources.length} sources · ${settings.routes.length} routes`">
       <v-expansion-panel-text>
-        <p class="text-caption mb-3">Animate the partial spectrum with tilt, contrast, odd/even balance, or harmonic count. Route any envelope or LFO to multiple parameters. Amounts offset the existing controls; each voice has its own envelopes.</p>
+        <p class="text-caption mb-3">Animate the partial spectrum with tilt, contrast, odd/even balance, or harmonic count. <template v-if="partialBank">Move frequencies with Position / Target a, b, c and Position morph. </template>Route any envelope or LFO to multiple parameters. Amounts offset the existing controls; each voice has its own envelopes.</p>
         <div class="d-flex ga-2 mb-3 flex-wrap">
           <v-btn size="small" prepend-icon="mdi-plus" @click="addSource('envelope')">Envelope</v-btn>
           <v-btn size="small" prepend-icon="mdi-plus" @click="addSource('lfo')">LFO</v-btn>
@@ -60,11 +60,13 @@
 import { computed } from 'vue';
 import { MODULATION_TARGETS, normalizeModulation, type ModulationSettings, type ModulationSource, type ModulationRoute } from '../audio/modulation';
 import { LFO_WAVEFORM_OPTIONS, LFO_SYNC_RATE_OPTIONS } from '../audio/lfo';
-const props = defineProps<{ modelValue: ModulationSettings }>();
+const props = defineProps<{ modelValue: ModulationSettings; partialBank?: boolean }>();
 const emit = defineEmits<{ 'update:modelValue': [value: ModulationSettings] }>();
 const settings = computed(() => props.modelValue);
 const sourceOptions = computed(() => settings.value.sources.map(s => ({ title: s.name, value: s.id })));
-const targetOptions = Object.entries(MODULATION_TARGETS).map(([value, d]) => ({ title: d.title, value }));
+const targetOptions = computed(() => Object.entries(MODULATION_TARGETS)
+  .filter(([value]) => props.partialBank || !/^(position|target)/.test(value))
+  .map(([value, d]) => ({ title: d.title, value })));
 const phaseOptions = [{ title: 'Each voice attack', value: 'note' }, { title: 'Song start', value: 'song' }, { title: 'Free running', value: 'free' }];
 const envelopeFields = [
   { key: 'attack', label: 'Attack (s)', min: 0, max: 60, step: 0.01 },

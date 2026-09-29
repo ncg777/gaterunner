@@ -2,6 +2,7 @@
 import { EngineSource } from './engineSource';
 import { VoiceModulation } from './voiceModulation';
 import { SpectralVoice } from './spectralVoice';
+import { PartialBankVoice } from './partialBankVoice';
 import { hasSpectralModulation, type SpectralSourceSettings } from './spectralModulation';
 import { compileModulation, normalizeModulation } from './modulation';
 import { normalizeSynthEngine, type SynthEngineSettings } from './synthEngine';
@@ -9,6 +10,7 @@ import { buildPitchEnvelopeCurve } from './pitchEnvelope';
 import type { LfoWaveform, LfoPhaseMode } from './lfo';
 import { FilterLfo } from './filterLfo';
 import { setSharedUnisonPartials } from './unisonPartials';
+import { normalizePartialGenerator } from './partialGenerator';
 import { setFilterSettings } from './filterSettings';
 import { hasVoiceActivity, type VoiceEvent } from './voiceActivity';
 
@@ -81,7 +83,7 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   private continuousPhase = false;
   private modulation: VoiceModulation | null = null;
   private engineSettings = normalizeSynthEngine({});
-  private spectralVoice: SpectralVoice | null = null;
+  private spectralVoice: SpectralVoice | PartialBankVoice | null = null;
   private spectralSource?: SpectralSourceSettings;
   private modulationSignature = '';
 
@@ -296,7 +298,7 @@ export class PitchEnvelopeSynth extends Tone.Synth {
     this.engineSource?.dispose();
     this.engineSource = null;
     this.oscillator.disconnect();
-    if (engine.synthMode === 'additive') {
+    if (engine.synthMode === 'additive' || engine.synthMode === 'partial-bank') {
       if (!this.spectralVoice) this.oscillator.connect(this.envelope);
     }
     else {
@@ -404,31 +406,46 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   }
 
   private syncModulation(): void {
-    const settings = this.engineSettings.synthMode === 'additive'
+    const bank = this.engineSettings.synthMode === 'partial-bank';
+    // A standalone bank voice must also work without the app's amplitude-source snapshot.
+    if (bank && !this.spectralSource) this.spectralSource = {
+      waveform: 'sine', partialGenerator: normalizePartialGenerator({ type: 'waveform' }),
+      tonewheelDrawbars: [], tonewheelWavetable: { enabled: false, dimensions: [], configurations: [], lfos: [] },
+      unisonVoices: 1, unisonDetune: 0,
+    };
+    const settings = this.engineSettings.synthMode === 'additive' || bank
       ? normalizeModulation(this.engineSettings.modulation) : normalizeModulation(undefined);
-    const signature = JSON.stringify([settings, this.spectralSource, this.voiceFilterOptions.Q, this.voiceFilterOptions.gain]);
+    const signature = JSON.stringify([settings, this.spectralSource, bank ? this.engineSettings.partialBank : null, this.voiceFilterOptions.Q, this.voiceFilterOptions.gain]);
     if (signature === this.modulationSignature) return;
     this.modulationSignature = signature;
-    if (this.spectralSource && hasSpectralModulation(settings)) {
+    if (this.spectralVoice && (this.spectralVoice instanceof PartialBankVoice) !== bank) {
+      this.spectralVoice.dispose();
+      this.spectralVoice = null;
+    }
+    if (this.spectralSource && (bank || hasSpectralModulation(settings))) {
       if (!this.spectralVoice) {
-        this.spectralVoice = new SpectralVoice(this.context, this.frequency, this.detune, this.spectralSource);
+        this.spectralVoice = bank
+          ? new PartialBankVoice(this.context, this.frequency, this.detune, this.spectralSource, this.engineSettings.partialBank)
+          : new SpectralVoice(this.context, this.frequency, this.detune, this.spectralSource);
         this.oscillator.disconnect();
         this.spectralVoice.output.connect(this.envelope);
         for (const e of this.engineEvents) {
           if (e.type === 'attack') this.spectralVoice.attack(e.time, e.mono, e.stopTime);
           else this.spectralVoice.release(e.time, e.ampRelease);
         }
-      } else this.spectralVoice.set(this.spectralSource);
+      } else if (this.spectralVoice instanceof PartialBankVoice) this.spectralVoice.set(this.spectralSource, this.engineSettings.partialBank);
+      else this.spectralVoice.set(this.spectralSource);
     } else if (this.spectralVoice) {
       this.spectralVoice.dispose();
       this.spectralVoice = null;
       if (this.engineSettings.synthMode === 'additive') this.oscillator.connect(this.envelope);
     }
-    if (!this.modulation && compileModulation(settings).active) {
+    if (!this.modulation && (bank || compileModulation(settings).active)) {
       this.modulation = new VoiceModulation(this.context, this.detune, this.filter, () =>
         hasVoiceActivity(this.engineEvents, this.context.currentTime, this.toSeconds(this.envelope.release), this.filterTailSeconds()), {
           write: (v, t, ramp) => this.spectralVoice?.write(v, t, ramp),
           refresh: time => this.spectralVoice?.refresh(time),
+          needsClock: () => this.engineSettings.synthMode === 'partial-bank',
         });
       for (const event of this.engineEvents) {
         if (event.type === 'attack') this.modulation.attack(event.time);

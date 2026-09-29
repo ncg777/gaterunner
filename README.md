@@ -186,10 +186,14 @@ wavetable from the **Generator** tab.
 
 ### Melodic Sound Palette
 
-Choose **Additive**, **Resonant noise**, or **Vocal choir** in the Generator tab.
+Choose **Additive**, **Partial Bank**, **Resonant noise**, or **Vocal choir** in the Generator tab.
 
 - **Additive** keeps tonewheel drawbars, classic Fourier waveforms, sequence and binary
   partial sources, spectrum transforms, unison, and multidimensional wavetable morphing.
+- **Partial Bank** gives each partial an independent, fractional frequency. Choose among
+  20 position functions, morph between two functions, and modulate their parameters with
+  envelopes or LFOs. The existing partial sources and wavetables supply amplitudes.
+  See the [Partial Bank guide](PARTIAL_BANK.md) for functions, recipes, and implementation details.
 - **Resonant noise** uses real white, pink or brown noise through 1-8 parallel bandpass
   resonators. Controls include A4-reference frequency, pitch tracking, Q, harmonic spacing,
   odd/even balance, tilt, dry blend, an independent resonator ADSR and a frequency LFO.
@@ -198,14 +202,14 @@ Choose **Additive**, **Resonant noise**, or **Vocal choir** in the Generator tab
   shift, bandwidth, brightness, breath, 1-8 ensemble singers, detune and vibrato. Each
   formant also has its own tuning offset and gain. Zero transition time fixes the blend;
   otherwise every attack starts at the first vowel and moves toward the target blend.
-- All three engines use the shared amp/pitch envelopes, polyphony, mono glide, track
+- All four engines use the shared amp/pitch envelopes, polyphony, mono glide, track
   filter, modulation, waveshaper and effects. Resonator and formant motion is per voice.
-  Choir ensemble controls replace additive unison. Breath controls in Additive remain
-  a separate legacy layer; the new engines have their own noise/breath controls.
+  Choir ensemble controls replace additive unison. Additive and Partial Bank retain
+  the separate breath layer; noise and choir have their own noise/breath controls.
 - Active legacy wind/resonance/noise waveforms migrate to Resonant noise; Choir Ah/Oh
   migrate to Vocal choir. Explicit modes and inactive waveform metadata are preserved.
   Old additive wavetable snapshots retain their original spectra for compatibility.
-- Settings are stored as `synthMode`, `noiseEngine` and `choirEngine` in presets,
+- Settings are stored as `synthMode`, `partialBank`, `noiseEngine` and `choirEngine` in presets,
   shared URLs and CLI `--tracks` JSON. Both browser WAV export and native CLI rendering
   support the engines. Native exports use seeded noise; browser and native rendering
   share parameter definitions but do not produce identical noise samples or oscillator phases.

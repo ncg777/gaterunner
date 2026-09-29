@@ -1,6 +1,7 @@
 import { normalizeModulation, type ModulationSettings } from './modulation.js';
+import { normalizePartialBank, type PartialBankSettings } from './partialBank.js';
 /** Engine settings are shared by presets, the Web Audio voices and the native WAV renderer. */
-export type SynthMode = 'additive' | 'resonant-noise' | 'choir';
+export type SynthMode = 'additive' | 'partial-bank' | 'resonant-noise' | 'choir';
 export type Vowel = 'a' | 'e' | 'i' | 'o' | 'u';
 export interface NoiseEngineSettings {
   color: 'white' | 'pink' | 'brown';
@@ -16,6 +17,7 @@ export interface ChoirEngineSettings {
   formantOffsets: number[]; formantGains: number[];
 }
 export interface SynthEngineSettings {
+  partialBank: PartialBankSettings;
   modulation: ModulationSettings;
   synthMode: SynthMode;
   noiseEngine: NoiseEngineSettings;
@@ -70,7 +72,7 @@ export function normalizeChoirEngine(value: unknown): ChoirEngineSettings {
 /** Resolve routing without rebuilding either engine's controls on every audio tick. */
 export function resolveSynthMode(value: unknown): SynthMode {
   const r = object(value);
-  if (r.synthMode === 'additive' || r.synthMode === 'resonant-noise' || r.synthMode === 'choir') {
+  if (r.synthMode === 'additive' || r.synthMode === 'partial-bank' || r.synthMode === 'resonant-noise' || r.synthMode === 'choir') {
     return r.synthMode;
   }
   const source = object(r.partialGenerator);
@@ -90,6 +92,7 @@ export function normalizeSynthEngine(value: unknown): SynthEngineSettings {
     : wave === 'saxophone' ? { color: 'white', bands: 8, resonance: 12, tilt: -4 } : {};
   return {
     synthMode: resolveSynthMode(r),
+    partialBank: normalizePartialBank(r.partialBank),
     modulation: normalizeModulation(r.modulation),
     noiseEngine: normalizeNoiseEngine({ ...noiseDefaults, ...object(r.noiseEngine) }),
     choirEngine: normalizeChoirEngine({ ...(wave === 'choir-oh' ? { vowel: 'o', targetVowel: 'a' } : {}), ...object(r.choirEngine) }),

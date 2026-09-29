@@ -2175,7 +2175,7 @@ export default defineComponent({
       }
       chain.modulationNoteStartSeconds = modulationTime;
       this.applyTonewheelModulation(track, chain, modulationTime);
-      if (resolveSynthMode(track) === 'additive' && track.breathEnabled && frequencies.length > 0) {
+      if (['additive', 'partial-bank'].includes(resolveSynthMode(track)) && track.breathEnabled && frequencies.length > 0) {
         const averageFrequency = frequencies.reduce((sum, frequency) => sum + frequency, 0) / frequencies.length;
         const maximumFrequency = chain.sourceBus.context.sampleRate * 0.45;
         this.ensureTrackBreathFilter(chain).frequency.setValueAtTime(
@@ -2401,7 +2401,7 @@ export default defineComponent({
         if (isChoir) {
           chain.choir!.output.connect(chain.sourceBus);
         }
-        if (resolveSynthMode(track) === 'additive' && track.breathEnabled) {
+        if (['additive', 'partial-bank'].includes(resolveSynthMode(track)) && track.breathEnabled) {
           this.ensureTrackNoiseSynth(chain).connect(this.ensureTrackBreathFilter(chain));
           chain.breathFilter!.connect(this.ensureTrackBreathGain(chain));
           chain.breathGain!.connect(chain.sourceBus);
@@ -2483,13 +2483,13 @@ export default defineComponent({
               partialGenerator: normalizePartialGenerator(track.partialGenerator), waveform: track.waveform,
               tonewheelDrawbars: track.tonewheelDrawbars,
             }) : null;
-          if (resolveSynthMode(track) === 'additive' && track.breathEnabled) {
+          if (['additive', 'partial-bank'].includes(resolveSynthMode(track)) && track.breathEnabled) {
             this.ensureTrackNoiseSynth(chain).set({
               envelope,
               noise: { type: 'pink' },
             });
           }
-          const partials = this.getTonewheelPartials(track, 0, 0, chain.preparedWavetable);
+          const partials = resolveSynthMode(track) === 'partial-bank' ? [1] : this.getTonewheelPartials(track, 0, 0, chain.preparedWavetable);
           const oscillatorOptions = {
             type: this.getOscillatorType(track) as Tone.ToneOscillatorType,
             count: track.unisonVoices,
@@ -2558,7 +2558,7 @@ export default defineComponent({
           if (this.isChoirWaveform(this.getEffectiveTrackWaveform(track))) {
             this.updateChoirFormantBank(this.getEffectiveTrackWaveform(track), this.ensureTrackChoirBank(chain).formants);
           }
-          if (resolveSynthMode(track) === 'additive' && track.breathEnabled) {
+          if (['additive', 'partial-bank'].includes(resolveSynthMode(track)) && track.breathEnabled) {
             this.ensureTrackBreathGain(chain).gain.value = this.dbToGain(track.breathLevel);
           }
         }

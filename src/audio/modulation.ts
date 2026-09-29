@@ -3,6 +3,13 @@ import { createSkewLfoState, getLfoFrequencyHz, LFO_SYNC_RATE_VALUES, LFO_WAVEFO
 
 /** Amounts are offsets in destination units; routes sum before destination limits. */
 export const MODULATION_TARGETS = {
+  positionA: { title: 'Position function · a', unit: 'parameter offset', min: -1200, max: 1200, step: 0.01 },
+  positionB: { title: 'Position function · b', unit: 'parameter offset', min: -100, max: 100, step: 0.01 },
+  positionC: { title: 'Position function · c', unit: 'parameter offset', min: -32, max: 32, step: 0.01 },
+  targetA: { title: 'Target position · a', unit: 'parameter offset', min: -1200, max: 1200, step: 0.01 },
+  targetB: { title: 'Target position · b', unit: 'parameter offset', min: -100, max: 100, step: 0.01 },
+  targetC: { title: 'Target position · c', unit: 'parameter offset', min: -32, max: 32, step: 0.01 },
+  positionMorph: { title: 'Position morph', unit: 'morph offset', min: -1, max: 1, step: 0.01 },
   spectralTilt: { title: 'Spectral tilt', unit: 'dB/octave', min: -48, max: 48, step: 0.5 },
   spectralContrast: { title: 'Spectral contrast', unit: 'exponent offset', min: -3.75, max: 3.75, step: 0.05 },
   spectralBalance: { title: 'Odd/even balance', unit: 'dB (+ favors even)', min: -48, max: 48, step: 0.5 },
@@ -30,6 +37,7 @@ export interface ModulationRoute { id: string; source: string; target: Modulatio
 export interface ModulationSettings { sources: ModulationSource[]; routes: ModulationRoute[] }
 export type ModulationValues = Record<ModulationTarget, number>;
 export const emptyModulationValues = (): ModulationValues => ({ spectralTilt: 0, spectralContrast: 0,
+  positionA: 0, positionB: 0, positionC: 0, targetA: 0, targetB: 0, targetC: 0, positionMorph: 0,
   spectralBalance: 0, harmonicCount: 0, mappingExponent: 0, pitch: 0, level: 0, pan: 0, cutoff: 0, resonance: 0, filterGain: 0 });
 const record = (v: unknown): Record<string, unknown> => v && typeof v === 'object' ? v as Record<string, unknown> : {};
 const num = (v: unknown, fallback: number, min: number, max: number) => typeof v === 'number' && Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : fallback;

@@ -67,6 +67,7 @@ export interface PresetTrackData {
   denominator: number;
   phase: number;
   synthMode?: SynthMode;
+  partialBank?: import('./audio/partialBank.js').PartialBankSettings;
   modulation?: ModulationSettings;
   noiseEngine?: NoiseEngineSettings;
   choirEngine?: ChoirEngineSettings;

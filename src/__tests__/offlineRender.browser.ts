@@ -1,4 +1,5 @@
 import * as Tone from 'tone';
+export { runPartialBankChecks, runPartialBankRealtimeChecks } from './partialBank.browser';
 export { runWarpedNoteChecks } from './pooledNote.browser';
 export { runOfflineSchedulingChecks } from './offlineScheduling.browser';
 export { runLiveBufferingChecks } from './liveAudio.browser';

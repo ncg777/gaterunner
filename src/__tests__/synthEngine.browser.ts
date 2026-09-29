@@ -465,16 +465,16 @@ export async function runSynthEngineUiChecks(app: InstanceType<typeof App>) {
   const editor = instance.proxy as InstanceType<typeof EditorSurface>;
   editor.activeControlTab = 'generator';
   const results = [];
-  for (const synthMode of ['additive', 'resonant-noise', 'choir'] as const) {
+  for (const synthMode of ['additive', 'partial-bank', 'resonant-noise', 'choir'] as const) {
     editor.handleSynthEngineChange(normalizeSynthEngine({ synthMode }));
     await app.$nextTick();
     await app.$nextTick();
     const panel = document.querySelector('.v-window-item--active')!;
     const text = panel.textContent ?? '';
-    const expected = synthMode === 'additive' ? 'Partial source' : synthMode === 'choir' ? 'Starting vowel' : 'Noise color';
+    const expected = synthMode === 'additive' ? 'Partial source' : synthMode === 'partial-bank' ? 'Position function' : synthMode === 'choir' ? 'Starting vowel' : 'Noise color';
     if (!text.includes(expected)) throw new Error(`Missing ${synthMode} controls`);
-    if (synthMode !== 'additive' && text.includes('Partial source')) throw new Error('Inactive additive controls remain visible');
-    if (synthMode !== 'additive') {
+    if (synthMode !== 'additive' && synthMode !== 'partial-bank' && text.includes('Partial source')) throw new Error('Inactive additive controls remain visible');
+    if (synthMode !== 'additive' && synthMode !== 'partial-bank') {
       const curve = panel.querySelector('.engine-response path')?.getAttribute('d');
       if (!curve || /NaN|Infinity/.test(curve)) throw new Error('Invalid filter response preview');
     }
@@ -486,7 +486,7 @@ export async function runSynthEngineUiChecks(app: InstanceType<typeof App>) {
 
 export async function runSynthEngineAppChecks(app: InstanceType<typeof App>) {
   const results = [];
-  for (const synthMode of ['resonant-noise', 'choir'] as const) for (const polyphony of [1, 4]) {
+  for (const synthMode of ['partial-bank', 'resonant-noise', 'choir'] as const) for (const polyphony of [1, 4]) {
     const track = normalizePresetTrackData({ synthMode, polyphony, reverbWet: -96, gain: -12,
       attack: 0.01, decay: 0.03, sustain: 0.7, release: 0.05 });
     const savedReverb = app.reverbChain;

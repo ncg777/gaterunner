@@ -25,7 +25,7 @@ export class VoiceModulation {
 
   constructor(private context: Tone.BaseContext, detune: Tone.Signal<'cents'>,
     private filter: Tone.Filter, private isActive: () => boolean,
-    private spectral?: { write(v: ModulationValues, t: ModulationTime, ramp: boolean): void; refresh(time: number): void }) {
+    private spectral?: { write(v: ModulationValues, t: ModulationTime, ramp: boolean): void; refresh(time: number): void; needsClock?(): boolean }) {
     this.gain = new Tone.Gain({ context, gain: Math.SQRT2 });
     this.pan = new Tone.Panner({ context, pan: 0 });
     this.gain.connect(this.pan);
@@ -84,7 +84,7 @@ export class VoiceModulation {
     this.spectral?.refresh(time);
     this.write(time, false);
     this.nextTime = time + INTERVAL;
-    if (this.matrix.active && (this.context.isOffline || this.isActive())) {
+    if ((this.matrix.active || this.spectral?.needsClock?.()) && (this.context.isOffline || this.isActive())) {
       if (!this.listening) { this.context.on('tick', this.tick); this.listening = true; }
       this.schedule();
     } else this.pause();

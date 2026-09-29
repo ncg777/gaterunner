@@ -3,6 +3,7 @@ import { hasSpectralModulation } from '../src/audio/spectralModulation.js';
 import { createSpectralOscillator } from './spectralOscillator.js';
 import { normalizeSynthEngine, type SynthMode, type NoiseEngineSettings, type ChoirEngineSettings } from '../src/audio/synthEngine.js';
 import { createNativeEngineSource } from './nativeEngineSource.js';
+import { createPartialBankOscillator } from './partialBankOscillator.js';
 import ToneMidi from '@tonejs/midi';
 const { Midi } = ToneMidi;
 import { PCS12 } from 'ultra-mega-enumerator';
@@ -92,6 +93,7 @@ export interface GenerateTrackOptions extends Partial<NativeEffectSettings> {
   /** Oscillator shape metadata (not used by MIDI export). */
   synthMode?: SynthMode;
   modulation?: ModulationSettings;
+  partialBank?: import('../src/audio/partialBank.js').PartialBankSettings;
   noiseEngine?: NoiseEngineSettings;
   choirEngine?: ChoirEngineSettings;
   waveform?: string;
@@ -255,6 +257,7 @@ export interface GenerateReverbOptions {
 export interface GenerateOptions extends Partial<NativeEffectSettings> {
   synthMode?: SynthMode;
   modulation?: ModulationSettings;
+  partialBank?: import('../src/audio/partialBank.js').PartialBankSettings;
   noiseEngine?: NoiseEngineSettings;
   choirEngine?: ChoirEngineSettings;
   /** Tempo in beats per minute (1-499). Default: 90 */
@@ -700,7 +703,7 @@ function normalizeTracks(options: GenerateOptions): NormalizedTrack[] {
     unisonVoices: clamp(track.unisonVoices ?? fallbackTrack.unisonVoices, 1, 8),
     unisonDetune: clamp(track.unisonDetune ?? fallbackTrack.unisonDetune, 0, 100),
     tonewheelDrawbars: normalizeTonewheelDrawbars(track.tonewheelDrawbars),
-    ...normalizeSynthEngine({ ...track, modulation: track.modulation ?? options.modulation, synthMode: track.synthMode ?? options.synthMode, noiseEngine: track.noiseEngine ?? options.noiseEngine, choirEngine: track.choirEngine ?? options.choirEngine, waveform: track.waveform ?? fallbackTrack.waveform, partialGenerator: track.partialGenerator ?? options.partialGenerator }),
+    ...normalizeSynthEngine({ ...track, modulation: track.modulation ?? options.modulation, synthMode: track.synthMode ?? options.synthMode, partialBank: track.partialBank ?? options.partialBank, noiseEngine: track.noiseEngine ?? options.noiseEngine, choirEngine: track.choirEngine ?? options.choirEngine, waveform: track.waveform ?? fallbackTrack.waveform, partialGenerator: track.partialGenerator ?? options.partialGenerator }),
     partialGenerator: normalizeTrackPartialGenerator(track.partialGenerator ?? options.partialGenerator, track.waveform ?? fallbackTrack.waveform),
     tonewheelWavetable: track.tonewheelWavetable ?? fallbackTrack.tonewheelWavetable,
     tremoloEnabled: Boolean(track.tremoloEnabled ?? fallbackTrack.tremoloEnabled),
@@ -1127,9 +1130,11 @@ function renderPreparedWavChannels(
     const drumReverbLeft = isDrumTrack && hasReverbSend && entry.track.reverbWet > -96 ? new Float32Array(frameCount) : null;
     const drumReverbRight = drumReverbLeft ? new Float32Array(frameCount) : null;
     const engine = normalizeSynthEngine(entry.track);
-    const isAdditive = engine.synthMode === 'additive';
+    const isBank = engine.synthMode === 'partial-bank';
+    const isAdditive = engine.synthMode === 'additive' || isBank;
+    const monoBanks = new Map<number, ReturnType<typeof createPartialBankOscillator>>();
     const modulation = compileModulation(isAdditive ? engine.modulation : { sources: [], routes: [] });
-    const spectralModulation = isAdditive && hasSpectralModulation(engine.modulation);
+    const spectralModulation = isAdditive && !isBank && hasSpectralModulation(engine.modulation);
     const monoEngineSources = new Map<number, ReturnType<typeof createNativeEngineSource>>();
     const partialGenerator = normalizePartialGenerator(entry.track.partialGenerator);
     const fallbackSource = {
@@ -1137,7 +1142,7 @@ function renderPreparedWavChannels(
       waveform: entry.track.waveform,
       tonewheelDrawbars: entry.track.tonewheelDrawbars,
     };
-    const hasGenericWavetable = isAdditive && entry.track.tonewheelWavetable.enabled
+    const hasGenericWavetable = isAdditive && !isBank && entry.track.tonewheelWavetable.enabled
       && entry.track.tonewheelWavetable.configurations.some((configuration) => configuration.source);
     const genericWavetableOscillators = hasGenericWavetable
       ? entry.track.tonewheelWavetable.configurations.map((configuration) => {
@@ -1160,11 +1165,11 @@ function renderPreparedWavChannels(
       const peak = getPartialSpectrumGain(spectrum);
       return (phase: number, frequency = 0, rate = sampleRate) => peak > 0 ? oscillator(phase, frequency, rate) / peak : 0;
     };
-    const staticTonewheelOscillator = partialGenerator.type === 'tonewheel' && !hasGenericWavetable
+    const staticTonewheelOscillator = !isBank && partialGenerator.type === 'tonewheel' && !hasGenericWavetable
       ? prepareTonewheelSpectrumOscillator(staticTonewheelDrawbars)
       : null;
     const waveform = hasGenericWavetable ? 'sine' : getEffectiveWaveform(partialGenerator, entry.track.waveform);
-    const partialOscillator = !isDrumTrack && partialGenerator.type !== 'tonewheel' && !hasGenericWavetable
+    const partialOscillator = !isBank && !isDrumTrack && partialGenerator.type !== 'tonewheel' && !hasGenericWavetable
       ? preparePartialOscillator(partialGenerator, waveform)
       : null;
     const hasTonewheelModulation = isAdditive && partialGenerator.type === 'tonewheel' && !hasGenericWavetable
@@ -1309,7 +1314,7 @@ function renderPreparedWavChannels(
           let phase = isMonoTrack ? ((monoPhases.get(voice) ?? initialPhase) + Math.max(0, startFrame - monoFrame) * monoIncrement) % 1 : initialPhase;
           let tonewheelOscillator = staticTonewheelOscillator;
           let wavetableWeights = staticWavetableWeights;
-          const choir = createChoirProcessor(isAdditive ? waveform : 'sine', sampleRate);
+          const choir = createChoirProcessor(isAdditive && !isBank ? waveform : 'sine', sampleRate);
           const engineSource = isAdditive ? null : (isMonoTrack ? monoEngineSources.get(voice) : undefined)
             ?? createNativeEngineSource(engine, sampleRate, (trackIndex + 1) * 65537 + startFrame + noteIndex * 97 + voice);
           if (isMonoTrack && engineSource) monoEngineSources.set(voice, engineSource);
@@ -1324,11 +1329,16 @@ function renderPreparedWavChannels(
           const spectralOscillator = spectralModulation ? createSpectralOscillator({ ...fallbackSource,
             tonewheelWavetable: entry.track.tonewheelWavetable, unisonVoices: voiceCount, unisonDetune: entry.track.unisonDetune },
             modulation, { noteStart: voiceEvent.envelopeStart, releaseTime, bpm: prepared.bpm }) : null;
+          const bankTiming = { noteStart: voiceEvent.envelopeStart, releaseTime, bpm: prepared.bpm };
+          const bankOscillator = isBank ? (isMonoTrack ? monoBanks.get(voice) : undefined)
+            ?? createPartialBankOscillator({ ...fallbackSource, tonewheelWavetable: entry.track.tonewheelWavetable,
+              unisonVoices: voiceCount, unisonDetune: entry.track.unisonDetune }, engine.partialBank, modulation, bankTiming) : null;
+          if (bankOscillator) { bankOscillator.setTiming(bankTiming); if (isMonoTrack) monoBanks.set(voice, bankOscillator); }
           for (let frame = startFrame; frame < voiceEndFrame; frame += 1) {
             const t = (frame - startFrame) / sampleRate;
             if (modulation.active) modulation.sample({ time: frame / sampleRate,
               noteStart: voiceEvent.envelopeStart, releaseTime, bpm: prepared.bpm }, mod);
-            if (!spectralModulation && hasTonewheelModulation && (frame - startFrame) % 64 === 0) {
+            if (!isBank && !spectralModulation && hasTonewheelModulation && (frame - startFrame) % 64 === 0) {
               tonewheelOscillator = modulatedOscillators.get(frame) ?? prepareTonewheelSpectrumOscillator(
                 interpolateModulatedTonewheelDrawbars(
                   entry.track.tonewheelWavetable,
@@ -1342,7 +1352,7 @@ function renderPreparedWavChannels(
               );
               modulatedOscillators.set(frame, tonewheelOscillator);
             }
-            if (!spectralModulation && hasGenericWavetableModulation && (frame - startFrame) % 64 === 0) {
+            if (!isBank && !spectralModulation && hasGenericWavetableModulation && (frame - startFrame) % 64 === 0) {
               wavetableWeights = modulatedWeights.get(frame) ?? getPartialWavetableWeights(
                 entry.track.tonewheelWavetable,
                 getModulatedPartialWavetablePosition(entry.track.tonewheelWavetable, {
@@ -1367,7 +1377,9 @@ function renderPreparedWavChannels(
             const modulationPitchRatio = modulation.active ? 2 ** (mod.pitch / 12) : 1;
             const playbackFrequency = frequency * pitchEnvelopeRatio * glideRatio * modulationPitchRatio;
             const engineElapsed = (frame / sampleRate) - voiceEvent.envelopeStart;
-            const oscillatorSample = spectralOscillator
+            const oscillatorSample = bankOscillator
+              ? bankOscillator.sample(playbackFrequency, frame / sampleRate, sampleRate)
+              : spectralOscillator
               ? spectralOscillator(phase, playbackFrequency / 2, frame / sampleRate, sampleRate)
               : engineSource
               ? engineSource(playbackFrequency, engineElapsed, start + noteDuration - voiceEvent.envelopeStart, frame / sampleRate)

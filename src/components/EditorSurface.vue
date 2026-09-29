@@ -372,7 +372,7 @@
 
         <v-window-item v-if="!midiOutput && draftTrack.trackKind !== 'rhythmic'" value="generator" class="control-tab-panel">
           <SynthEngineControls :track="draftTrack" @change="handleSynthEngineChange" />
-          <template v-if="!draftTrack.synthMode || draftTrack.synthMode === 'additive'">
+          <template v-if="!draftTrack.synthMode || ['additive', 'partial-bank'].includes(draftTrack.synthMode)">
           <v-row class="compact-row">
             <v-col cols="12">
               <v-switch
@@ -508,9 +508,9 @@
             </v-col>
           </v-row>
           <figure class="partial-spectrum">
-            <figcaption class="text-subtitle-2">Static harmonic spectrum preview</figcaption>
+            <figcaption class="text-subtitle-2">{{ draftTrack.synthMode === 'partial-bank' ? 'Static partial positions' : 'Static harmonic spectrum preview' }}</figcaption>
             <svg viewBox="0 0 640 150" role="img" :aria-label="partialSpectrumDescription">
-              <title>Static harmonic spectrum</title>
+              <title>{{ partialSpectrumDescription }}</title>
               <desc>{{ partialSpectrumDescription }}</desc>
               <g v-for="tick in spectrumTicks" :key="tick.db">
                 <line x1="48" :y1="tick.y" x2="624" :y2="tick.y" class="spectrum-grid" />
@@ -518,12 +518,12 @@
               </g>
               <line x1="48" y1="120" x2="624" y2="120" class="spectrum-axis" />
               <line x1="48" y1="12" x2="48" y2="120" class="spectrum-axis" />
-              <line v-for="bar in partialSpectrumBars" :key="bar.harmonic" :x1="bar.x" :x2="bar.x" :y1="bar.y" y2="120" class="spectrum-bar">
+              <line v-for="(bar, index) in partialSpectrumBars" :key="index" :x1="bar.x" :x2="bar.x" :y1="bar.y" y2="120" class="spectrum-bar">
                 <title>{{ bar.harmonic }}× fundamental: {{ bar.amplitude.toPrecision(3) }} ({{ bar.decibels.toFixed(1) }} dB relative to peak)</title>
               </line>
               <text x="48" y="140">0</text>
               <text x="328" y="140" text-anchor="middle">Frequency / musical fundamental</text>
-              <text x="624" y="140" text-anchor="end">{{ partialSpectrum.length / 2 }}×</text>
+              <text x="624" y="140" text-anchor="end">{{ partialSpectrumMaximum.toFixed(2) }}×</text>
             </svg>
             <p v-if="partialSpectrumPeak === 0" class="text-caption" role="status">Silent spectrum: all partial amplitudes are zero. Adjust the source settings to generate sound.</p>
             <p class="text-caption text-medium-emphasis">Magnitude in dB relative to peak ({{ partialSpectrumPeak.toPrecision(3) }}); partials below −60 dB are hidden. {{ draftTrack.tonewheelWavetable.enabled ? 'Selected configuration only, without morphing or LFO motion' : 'Static source only' }}, breath noise, envelopes, effects, and pitch-dependent band limiting are omitted.</p>
@@ -749,8 +749,8 @@
             </v-col>
           </v-row>
 
-          <div v-if="!draftTrack.synthMode || draftTrack.synthMode === 'additive'" class="envelope-section-label envelope-section-label--spaced">Unison</div>
-          <v-row v-if="!draftTrack.synthMode || draftTrack.synthMode === 'additive'" class="compact-row">
+          <div v-if="!draftTrack.synthMode || ['additive', 'partial-bank'].includes(draftTrack.synthMode)" class="envelope-section-label envelope-section-label--spaced">Unison</div>
+          <v-row v-if="!draftTrack.synthMode || ['additive', 'partial-bank'].includes(draftTrack.synthMode)" class="compact-row">
             <v-col cols="12" md="6">
               <EditableSlider :label="'Unison Voices (' + draftTrack.unisonVoices + ')'" :min="1" :max="8" :step="1" v-model="draftTrack.unisonVoices" @update:modelValue="handleTrackDraftChange" />
             </v-col>
@@ -1104,6 +1104,8 @@ import RhythmTrackControls from './RhythmTrackControls.vue';
 import RhythmSoundControls from './RhythmSoundControls.vue';
 import TimeWarpPreview from './TimeWarpPreview.vue';
 import WaveshaperControls from './WaveshaperControls.vue';
+import { compileBankPosition, normalizePartialBank, normalizeBankAmplitudes } from '../audio/partialBank';
+import { emptyModulationValues } from '../audio/modulation';
 import { generatePartialSpectrum, normalizePartialGenerator, type NormalizedPartialGenerator } from '../audio/partialGenerator';
 import {
   interpolateTonewheelDrawbars,
@@ -1306,7 +1308,19 @@ export default defineComponent({
       return generatePartialSpectrum(this.partialGenerator, this.partialWaveform, this.editableTonewheelDrawbars);
     },
     partialSpectrumPreview() {
-      return getSpectrumPreview(this.partialSpectrum);
+      if (this.draftTrack.synthMode !== 'partial-bank') return getSpectrumPreview(this.partialSpectrum);
+      const position = compileBankPosition(normalizePartialBank(this.draftTrack.partialBank));
+      const modulation = emptyModulationValues();
+      const amplitudes = normalizeBankAmplitudes(this.partialSpectrum)
+        .map((amplitude, i) => position((i + 1) / 2, modulation) > 0 ? amplitude : 0);
+      const preview = getSpectrumPreview(amplitudes);
+      const bars = preview.bars.map(bar => ({ ...bar, harmonic: position(bar.harmonic, modulation) })).filter(bar => bar.harmonic > 0);
+      const maximum = Math.max(1, ...bars.map(bar => bar.harmonic));
+      return { ...preview, bars: bars.map(bar => ({ ...bar, x: 48 + bar.harmonic / maximum * 576 })) };
+    },
+    partialSpectrumMaximum(): number {
+      return this.draftTrack.synthMode === 'partial-bank'
+        ? Math.max(1, ...this.partialSpectrumPreview.bars.map(bar => bar.harmonic)) : this.partialSpectrum.length / 2;
     },
     partialSpectrumPeak(): number {
       return this.partialSpectrumPreview.peak;
@@ -1378,7 +1392,7 @@ export default defineComponent({
     },
     handleSynthEngineChange(settings: SynthEngineSettings) {
       Object.assign(this.draftTrack, settings);
-      if (settings.synthMode === 'additive' && !WAVEFORM_OPTIONS.some(option => option.value === this.draftTrack.waveform)) {
+      if (['additive', 'partial-bank'].includes(settings.synthMode) && !WAVEFORM_OPTIONS.some(option => option.value === this.draftTrack.waveform)) {
         this.draftTrack.waveform = 'sine';
       }
       this.handleTrackDraftChange();

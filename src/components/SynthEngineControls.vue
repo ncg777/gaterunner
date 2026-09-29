@@ -1,6 +1,7 @@
 <template>
   <v-select :model-value="engine.synthMode" label="Synth engine" :items="modes" variant="outlined" density="comfortable" @update:modelValue="emit('change', { ...engine, synthMode: $event })" />
-  <ModulationControls v-if="engine.synthMode === 'additive'" :model-value="engine.modulation" @update:modelValue="emit('change', { ...engine, modulation: $event })" />
+  <PartialBankControls v-if="engine.synthMode === 'partial-bank'" :model-value="engine.partialBank" @update:modelValue="emit('change', { ...engine, partialBank: $event })" />
+  <ModulationControls v-if="engine.synthMode === 'additive' || engine.synthMode === 'partial-bank'" :partial-bank="engine.synthMode === 'partial-bank'" :model-value="engine.modulation" @update:modelValue="emit('change', { ...engine, modulation: $event })" />
   <template v-if="engine.synthMode === 'resonant-noise'">
     <p class="text-body-2 mb-4">Real noise excites parallel resonators. Narrow resonance creates pitched whistles; wider bands create breath and turbulent textures. Base frequency is anchored at A4. Pitch tracking follows notes and glide.</p>
     <v-select :model-value="noiseStartingPoint" label="Noise starting point" :items="[...noisePresets, customPreset]" variant="outlined" @update:modelValue="applyPreset('noiseEngine', $event)" />
@@ -47,7 +48,7 @@
       </v-row>
     </v-expansion-panel-text></v-expansion-panel></v-expansion-panels>
   </template>
-  <figure v-if="engine.synthMode !== 'additive'" class="engine-response my-4">
+  <figure v-if="engine.synthMode === 'choir' || engine.synthMode === 'resonant-noise'" class="engine-response my-4">
     <svg viewBox="0 0 600 130" role="img" :aria-label="engine.synthMode === 'choir' ? 'Target vowel formant response' : 'Resonator response at A4'">
       <path :d="responsePath" fill="none" stroke="currentColor" stroke-width="2" />
       <line x1="10" y1="110" x2="590" y2="110" stroke="currentColor" opacity="0.3" />
@@ -56,17 +57,18 @@
     </svg>
     <figcaption class="text-caption text-medium-emphasis">{{ engine.synthMode === 'choir' ? 'Target formant response' : 'Resonator response at A4' }} - relative magnitude - motion, source color and effects omitted.</figcaption>
   </figure>
-  <p v-if="engine.synthMode !== 'additive'" class="text-caption text-medium-emphasis mb-4">Amp and pitch envelopes, polyphony, mono glide, track filter and effects remain available in their tabs. Resonator and vowel motion happen independently for each note.</p>
+  <p v-if="engine.synthMode === 'choir' || engine.synthMode === 'resonant-noise'" class="text-caption text-medium-emphasis mb-4">Amp and pitch envelopes, polyphony, mono glide, track filter and effects remain available in their tabs. Resonator and vowel motion happen independently for each note.</p>
 </template>
 <script setup lang="ts">
 import { computed } from 'vue';
 import EditableSlider from './EditableSlider.vue';
 import ModulationControls from './ModulationControls.vue';
+import PartialBankControls from './PartialBankControls.vue';
 import { choirBands, noiseBands, normalizeSynthEngine, type SynthEngineSettings, type NoiseEngineSettings, type ChoirEngineSettings } from '../audio/synthEngine';
 const props = defineProps<{ track: unknown }>();
 const emit = defineEmits<{ change: [settings: SynthEngineSettings] }>();
 const engine = computed(() => normalizeSynthEngine(props.track));
-const modes = [{ title: 'Additive', value: 'additive' }, { title: 'Resonant noise', value: 'resonant-noise' }, { title: 'Vocal choir', value: 'choir' }];
+const modes = [{ title: 'Additive', value: 'additive' }, { title: 'Partial Bank', value: 'partial-bank' }, { title: 'Resonant noise', value: 'resonant-noise' }, { title: 'Vocal choir', value: 'choir' }];
 const vowels = [{ title: 'Ah / a', value: 'a' }, { title: 'Eh / e', value: 'e' }, { title: 'Ee / i', value: 'i' }, { title: 'Oh / o', value: 'o' }, { title: 'Oo / u', value: 'u' }];
 const noisePresets = [
   { title: 'Balanced resonators', value: {} },

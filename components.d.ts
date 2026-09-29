@@ -13,6 +13,7 @@ declare module 'vue' {
     HelpDialog: typeof import('./src/components/HelpDialog.vue')['default']
     LiveAudioDialog: typeof import('./src/components/LiveAudioDialog.vue')['default']
     ModulationControls: typeof import('./src/components/ModulationControls.vue')['default']
+    PartialBankControls: typeof import('./src/components/PartialBankControls.vue')['default']
     PresetManager: typeof import('./src/components/PresetManager.vue')['default']
     ReverbControls: typeof import('./src/components/ReverbControls.vue')['default']
     RhythmSoundControls: typeof import('./src/components/RhythmSoundControls.vue')['default']
