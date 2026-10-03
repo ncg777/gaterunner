@@ -108,13 +108,14 @@ test('new effect settings share browser bounds, defaults and legacy phaser migra
   for (const [key, value] of Object.entries(native)) assert.deepEqual(value, browser[key as keyof typeof browser]);
 });
 
-test('track phase delays MIDI, WAV and fades by a fraction of one quantization step', async () => {
+test('track phase offsets MIDI and WAV notes without extending the pattern', async () => {
   const options = { bpm: 240, tracks: [{ ...source, phase: 0.5 }], reverb: { enabled: false } };
   const midi = new ToneMidi.Midi(await generateMidi(options));
   assert.equal(midi.tracks[0].notes[0].time, 0.03125);
   const result = await renderWavChannels(options);
   assert.ok(result.left.subarray(0, 1500).every(sample => sample === 0));
   const plain = await renderWavChannels({ ...options, tracks: [source] });
+  assert.equal(result.left.length, plain.left.length);
   assertSamples(result.left.subarray(1500, 4000), plain.left.subarray(0, 2500));
 });
 

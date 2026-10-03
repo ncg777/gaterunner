@@ -40,6 +40,7 @@ const visible = defineModel<boolean>({ required: true });
           <li><strong>Track Gain</strong>: Sets each track's audio level in dB. Use the velocity multiplier to control MIDI note velocity independently.</li>
           <li><strong>Note length</strong>: Multiplies the durations of the selected track's notes, then adds the optional fixed length measured in that track's steps (for example, a denominator of 4 makes one step a sixteenth note).</li>
           <li><strong>Track Delay</strong>: Number of bars to wait before the track starts playing.</li>
+          <li><strong>Track Phase</strong>: Shifts notes by 0-1 steps within each sequence. Notes that cross the sequence end wrap to its beginning. Fractional values preserve the pattern length, repeats, delay, and padding.</li>
           <li><strong>Track Repeats</strong>: Number of times the track's pattern is repeated. After its repeats, the track stays silent until the longest track finishes, then everything loops.</li>
           <li><strong>Track Length View</strong>: The track strip shows each track's delay, repeats, and total duration in beats/bars with compact selectable blocks.</li>
           <li><strong>Tanh Drive</strong>: Applies the selected dB gain before the always-active legacy tanh lookup, independently of the optional waveshaper. The tanh stage is bounded near +/-0.7616 before track gain and downstream effects, not at the final track output.</li>

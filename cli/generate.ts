@@ -16,6 +16,7 @@ import { createWaveshaperProcessor, lookupTransferCurve, TANH_CURVE } from '../s
 import { applyMasterClip } from '../src/audio/masterClip.js';
 import { normalizeWaveshaperSettings, type WaveshaperSettings } from '../src/audio/waveshaper.js';
 import { getStepDurations } from '../src/audio/stepDurations.js';
+import { applyTrackPhase } from '../src/audio/trackPhase.js';
 import {
   DEFAULT_TIME_WARP_CURVE,
   quantizeNormalizedTime,
@@ -420,7 +421,7 @@ function getLoopDurationSecondsFromTrackLengths(prepared: PreparedRenderData): n
 }
 
 function getTrackDelaySeconds(bpm: number, track: NormalizedTrack): number {
-  return track.delay * track.numerator * (60 / bpm) + track.phase * (60 / (bpm * track.denominator));
+  return track.delay * track.numerator * (60 / bpm);
 }
 
 function getTrackRepeatDurationSeconds(bpm: number, entry: TrackRenderData): number {
@@ -491,8 +492,8 @@ function buildTrackEvents(
       }
       const localTime = i * entry.quant;
       const chunkIndex = Math.min(warpChunks - 1, Math.floor(localTime / chunkPeriod));
-      const chunkStart = loopStart + chunkIndex * chunkPeriod;
-      let eventTime = loopStart + localTime;
+      const chunkStart = chunkIndex * chunkPeriod;
+      let eventLocalTime = localTime;
       let duration = baseDuration;
 
       if (warpEnabled) {
@@ -506,12 +507,13 @@ function buildTrackEvents(
           warpedEnd = quantizeNormalizedTime(warpedEnd, quantizeDivisions);
         }
 
-        eventTime = chunkStart + warpedStart * chunkPeriod;
+        eventLocalTime = chunkStart + warpedStart * chunkPeriod;
         if (entry.track.timeWarpNoteLengths) {
           duration = Math.max(0.0005, Math.abs(warpedEnd - warpedStart) * chunkPeriod);
         }
       }
 
+      const eventTime = loopStart + applyTrackPhase(eventLocalTime, entry.track.phase, entry.quant, trackPeriod);
       if (!Number.isFinite(eventTime) || !Number.isFinite(duration)
         || eventTime < 0 || eventTime >= totalLoopDuration || duration <= 0) {
         continue;
@@ -542,7 +544,7 @@ function buildTrackEvents(
     }
   }
 
-  if (warpEnabled) {
+  if (warpEnabled || entry.track.phase > 0) {
     events.sort((left, right) => (left.time === right.time ? left.order - right.order : left.time - right.time));
   }
 

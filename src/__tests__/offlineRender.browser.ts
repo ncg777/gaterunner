@@ -2,6 +2,7 @@ import * as Tone from 'tone';
 export { runPartialBankChecks, runPartialBankRealtimeChecks } from './partialBank.browser';
 export { runWarpedNoteChecks } from './pooledNote.browser';
 export { runOfflineSchedulingChecks } from './offlineScheduling.browser';
+export { runTrackPhaseChecks } from './trackPhase.browser';
 export { runLiveBufferingChecks } from './liveAudio.browser';
 export { runVoiceSleepChecks, runMonoVoiceSleepChecks } from './liveAudioPerformance.browser';
 export { runAudioLifecycleChecks, runTransportSleepChecks } from './audioLifecycle.browser';

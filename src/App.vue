@@ -351,6 +351,7 @@ import { getMasterBus, disposeMasterBus, setMasterGainDb } from './audio/masterB
 import { sleepWhenSilent, type AudioSleep } from './audio/idleAudio';
 import { buildTrackFadeEnvelope } from './audio/trackFade';
 import { getStepDurations } from './audio/stepDurations';
+import { applyTrackPhase } from './audio/trackPhase';
 import { Phaser } from './audio/phaser';
 import { TANH_CURVE } from './audio/trackDistortion';
 import {
@@ -719,7 +720,7 @@ export default defineComponent({
       return track.numerator * (60.0 / this.bpm);
     },
     getTrackDelaySeconds(track: PresetTrackData): number {
-      return track.delay * this.getTrackBarSeconds(track) + track.phase * this.getTrackQuant(track);
+      return track.delay * this.getTrackBarSeconds(track);
     },
     getTrackPatternDuration(track: PresetTrackData, trackNotes: number[][]): number {
       return trackNotes.length * this.getTrackQuant(track);
@@ -1102,8 +1103,8 @@ export default defineComponent({
           }
           const localTime = i * trackQuant;
           const chunkIndex = Math.min(warpChunks - 1, Math.floor(localTime / chunkPeriod));
-          const chunkStart = loopStart + chunkIndex * chunkPeriod;
-          let eventTime = loopStart + localTime;
+          const chunkStart = chunkIndex * chunkPeriod;
+          let eventLocalTime = localTime;
           let duration = baseDuration;
 
           if (warpEnabled) {
@@ -1117,12 +1118,13 @@ export default defineComponent({
               warpedEnd = quantizeNormalizedTime(warpedEnd, quantizeDivisions);
             }
 
-            eventTime = chunkStart + warpedStart * chunkPeriod;
+            eventLocalTime = chunkStart + warpedStart * chunkPeriod;
             if (track.timeWarpNoteLengths) {
               duration = Math.max(0.0005, Math.abs(warpedEnd - warpedStart) * chunkPeriod);
             }
           }
 
+          const eventTime = loopStart + applyTrackPhase(eventLocalTime, track.phase, trackQuant, trackPeriod);
           if (!Number.isFinite(eventTime) || !Number.isFinite(duration)
             || eventTime < 0 || eventTime >= totalLoopDuration || duration <= 0) {
             continue;
@@ -1154,7 +1156,7 @@ export default defineComponent({
         }
       }
 
-      if (warpEnabled) {
+      if (warpEnabled || track.phase > 0) {
         events.sort((left, right) => (left.time === right.time ? left.order - right.order : left.time - right.time));
       }
 

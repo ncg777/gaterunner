@@ -276,8 +276,7 @@ export default defineComponent({
       return this.tracks.map((track, trackIndex) => {
         const sequenceLength = this.parseSequence(track.sequenceInput).length;
         const patternBeats = sequenceLength / Math.max(1, track.denominator);
-        // Include phase so the strip lines up with App scheduling (delay bars + phase steps).
-        const delayBeats = track.delay * track.numerator + track.phase / Math.max(1, track.denominator);
+        const delayBeats = track.delay * track.numerator;
         const paddingBeforeBeats = track.paddingBefore * track.numerator;
         const paddingAfterBeats = track.paddingAfter * track.numerator;
         const activeBeats = (paddingBeforeBeats + patternBeats + paddingAfterBeats) * track.repeats;

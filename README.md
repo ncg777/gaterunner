@@ -34,6 +34,8 @@ It is useful for:
   selected Forte pitch-class set.
 - **Multitrack arrangement:** combine melodic and drum tracks with per-track meter,
   delay, phase, repeats, padding, fades, time warp, mute, and solo.
+  Phase shifts note onsets by 0–1 steps within each sequence, wrapping at its end
+  without changing the pattern or song loop length, including fractional values.
 - **Song-level gating:** use the `B` sequence to switch tracks on and off across
   equal sections of the loop.
 - **Integrated synthesis:** use tonewheel drawbars, sparse multidimensional

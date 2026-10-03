@@ -65,6 +65,7 @@ export interface PresetTrackData {
   drumVelocityBits: number;
   numerator: number;
   denominator: number;
+  /** Onset offset in quantization steps (0-1), wrapped within the sequence without extending it. */
   phase: number;
   synthMode?: SynthMode;
   partialBank?: import('./audio/partialBank.js').PartialBankSettings;
