@@ -1,7 +1,6 @@
 <template>
   <v-select :model-value="engine.synthMode" label="Synth engine" :items="modes" variant="outlined" density="comfortable" @update:modelValue="emit('change', { ...engine, synthMode: $event })" />
   <PartialBankControls v-if="engine.synthMode === 'partial-bank'" :model-value="engine.partialBank" @update:modelValue="emit('change', { ...engine, partialBank: $event })" />
-  <ModulationControls v-if="engine.synthMode === 'additive' || engine.synthMode === 'partial-bank'" :partial-bank="engine.synthMode === 'partial-bank'" :model-value="engine.modulation" @update:modelValue="emit('change', { ...engine, modulation: $event })" />
   <template v-if="engine.synthMode === 'resonant-noise'">
     <p class="text-body-2 mb-4">Real noise excites parallel resonators. Narrow resonance creates pitched whistles; wider bands create breath and turbulent textures. Base frequency is anchored at A4. Pitch tracking follows notes and glide.</p>
     <v-select :model-value="noiseStartingPoint" label="Noise starting point" :items="[...noisePresets, customPreset]" variant="outlined" @update:modelValue="applyPreset('noiseEngine', $event)" />
@@ -15,13 +14,6 @@
       <v-col cols="12" md="6"><EditableSlider :model-value="engine.noiseEngine.oddEven" :label="'Odd/even balance (dB; + favors even): ' + Number(engine.noiseEngine.oddEven).toFixed(2)" :min="-24" :max="24" :step="0.5" @update:modelValue="update('noiseEngine', { oddEven: $event })" /></v-col>
       <v-col cols="12" md="6"><EditableSlider :model-value="engine.noiseEngine.tilt" :label="'Resonator tilt (dB/oct): ' + Number(engine.noiseEngine.tilt).toFixed(2)" :min="-24" :max="6" :step="0.5" @update:modelValue="update('noiseEngine', { tilt: $event })" /></v-col>
       <v-col cols="12" md="6"><EditableSlider :model-value="engine.noiseEngine.dry" :label="'Unfiltered noise mix: ' + Number(engine.noiseEngine.dry).toFixed(2)" :min="0" :max="1" :step="0.01" @update:modelValue="update('noiseEngine', { dry: $event })" /></v-col>
-      <v-col cols="12" md="6"><EditableSlider :model-value="engine.noiseEngine.envelopeAmount" :label="'Resonator envelope (semitones): ' + Number(engine.noiseEngine.envelopeAmount).toFixed(2)" :min="-48" :max="48" :step="0.5" @update:modelValue="update('noiseEngine', { envelopeAmount: $event })" /></v-col>
-      <v-col cols="12" md="6"><EditableSlider :model-value="engine.noiseEngine.attack" :label="'Resonator attack (s): ' + Number(engine.noiseEngine.attack).toFixed(2)" :min="0" :max="10" :step="0.01" @update:modelValue="update('noiseEngine', { attack: $event })" /></v-col>
-      <v-col cols="12" md="6"><EditableSlider :model-value="engine.noiseEngine.decay" :label="'Resonator decay (s): ' + Number(engine.noiseEngine.decay).toFixed(2)" :min="0" :max="10" :step="0.01" @update:modelValue="update('noiseEngine', { decay: $event })" /></v-col>
-      <v-col cols="12" md="6"><EditableSlider :model-value="engine.noiseEngine.sustain" :label="'Resonator sustain: ' + Number(engine.noiseEngine.sustain).toFixed(2)" :min="0" :max="1" :step="0.01" @update:modelValue="update('noiseEngine', { sustain: $event })" /></v-col>
-      <v-col cols="12" md="6"><EditableSlider :model-value="engine.noiseEngine.release" :label="'Resonator release (s): ' + Number(engine.noiseEngine.release).toFixed(2)" :min="0" :max="20" :step="0.01" @update:modelValue="update('noiseEngine', { release: $event })" /></v-col>
-      <v-col cols="12" md="6"><EditableSlider :model-value="engine.noiseEngine.lfoRate" :label="'Resonator LFO rate (Hz): ' + Number(engine.noiseEngine.lfoRate).toFixed(2)" :min="0.01" :max="20" :step="0.01" @update:modelValue="update('noiseEngine', { lfoRate: $event })" /></v-col>
-      <v-col cols="12" md="6"><EditableSlider :model-value="engine.noiseEngine.lfoDepth" :label="'Resonator LFO depth (semitones): ' + Number(engine.noiseEngine.lfoDepth).toFixed(2)" :min="0" :max="24" :step="0.1" @update:modelValue="update('noiseEngine', { lfoDepth: $event })" /></v-col>
     </v-row>
   </template>
   <template v-if="engine.synthMode === 'choir'">
@@ -30,16 +22,12 @@
     <v-row>
       <v-col cols="12" md="6"><v-select :model-value="engine.choirEngine.vowel" label="Starting vowel" :items="vowels" variant="outlined" @update:modelValue="update('choirEngine', { vowel: $event })" /></v-col>
       <v-col cols="12" md="6"><v-select :model-value="engine.choirEngine.targetVowel" label="Target vowel" :items="vowels" variant="outlined" @update:modelValue="update('choirEngine', { targetVowel: $event })" /></v-col>
-      <v-col cols="12" md="6"><EditableSlider :model-value="engine.choirEngine.morph" :label="'Target vowel blend: ' + Number(engine.choirEngine.morph).toFixed(2)" :min="0" :max="1" :step="0.01" @update:modelValue="update('choirEngine', { morph: $event })" /></v-col>
-      <v-col cols="12" md="6"><EditableSlider :model-value="engine.choirEngine.morphTime" :label="'Vowel transition (s; 0 = fixed blend): ' + Number(engine.choirEngine.morphTime).toFixed(2)" :min="0" :max="10" :step="0.01" @update:modelValue="update('choirEngine', { morphTime: $event })" /></v-col>
       <v-col cols="12" md="6"><EditableSlider :model-value="engine.choirEngine.formantShift" :label="'Vocal tract shift (semitones): ' + Number(engine.choirEngine.formantShift).toFixed(2)" :min="-24" :max="24" :step="0.1" @update:modelValue="update('choirEngine', { formantShift: $event })" /></v-col>
       <v-col cols="12" md="6"><EditableSlider :model-value="engine.choirEngine.bandwidth" :label="'Formant bandwidth multiplier: ' + Number(engine.choirEngine.bandwidth).toFixed(2)" :min="0.3" :max="4" :step="0.05" @update:modelValue="update('choirEngine', { bandwidth: $event })" /></v-col>
       <v-col cols="12" md="6"><EditableSlider :model-value="engine.choirEngine.brightness" :label="'Glottal brightness (Hz): ' + Number(engine.choirEngine.brightness).toFixed(0)" :min="500" :max="16000" :step="10" @update:modelValue="update('choirEngine', { brightness: $event })" /></v-col>
       <v-col cols="12" md="6"><EditableSlider :model-value="engine.choirEngine.breath" :label="'Breathy / unvoiced blend: ' + Number(engine.choirEngine.breath).toFixed(2)" :min="0" :max="1" :step="0.01" @update:modelValue="update('choirEngine', { breath: $event })" /></v-col>
       <v-col cols="12" md="6"><EditableSlider :model-value="engine.choirEngine.voices" :label="'Ensemble singers per note: ' + Number(engine.choirEngine.voices).toFixed(0)" :min="1" :max="8" :step="1" @update:modelValue="update('choirEngine', { voices: $event })" /></v-col>
       <v-col cols="12" md="6"><EditableSlider :model-value="engine.choirEngine.detune" :label="'Ensemble spread (cents): ' + Number(engine.choirEngine.detune).toFixed(2)" :min="0" :max="60" :step="0.5" @update:modelValue="update('choirEngine', { detune: $event })" /></v-col>
-      <v-col cols="12" md="6"><EditableSlider :model-value="engine.choirEngine.vibratoRate" :label="'Vibrato rate (Hz): ' + Number(engine.choirEngine.vibratoRate).toFixed(2)" :min="0.1" :max="12" :step="0.1" @update:modelValue="update('choirEngine', { vibratoRate: $event })" /></v-col>
-      <v-col cols="12" md="6"><EditableSlider :model-value="engine.choirEngine.vibratoDepth" :label="'Vibrato depth (cents): ' + Number(engine.choirEngine.vibratoDepth).toFixed(2)" :min="0" :max="100" :step="0.5" @update:modelValue="update('choirEngine', { vibratoDepth: $event })" /></v-col>
     </v-row>
     <v-expansion-panels class="my-3"><v-expansion-panel title="Individual formants"><v-expansion-panel-text>
       <v-row v-for="i in 5" :key="i">
@@ -57,12 +45,11 @@
     </svg>
     <figcaption class="text-caption text-medium-emphasis">{{ engine.synthMode === 'choir' ? 'Target formant response' : 'Resonator response at A4' }} - relative magnitude - motion, source color and effects omitted.</figcaption>
   </figure>
-  <p v-if="engine.synthMode === 'choir' || engine.synthMode === 'resonant-noise'" class="text-caption text-medium-emphasis mb-4">Amp and pitch envelopes, polyphony, mono glide, track filter and effects remain available in their tabs. Resonator and vowel motion happen independently for each note.</p>
+  <p v-if="engine.synthMode === 'choir' || engine.synthMode === 'resonant-noise'" class="text-caption text-medium-emphasis mb-4">Envelopes, resonator motion, vowel transition, and vibrato are in Modulation. Each note has independent motion.</p>
 </template>
 <script setup lang="ts">
 import { computed } from 'vue';
 import EditableSlider from './EditableSlider.vue';
-import ModulationControls from './ModulationControls.vue';
 import PartialBankControls from './PartialBankControls.vue';
 import { choirBands, noiseBands, normalizeSynthEngine, type SynthEngineSettings, type NoiseEngineSettings, type ChoirEngineSettings } from '../audio/synthEngine';
 const props = defineProps<{ track: unknown }>();

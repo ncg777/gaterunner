@@ -44,7 +44,7 @@ const visible = defineModel<boolean>({ required: true });
           <li><strong>Track Repeats</strong>: Number of times the track's pattern is repeated. After its repeats, the track stays silent until the longest track finishes, then everything loops.</li>
           <li><strong>Track Length View</strong>: The track strip shows each track's delay, repeats, and total duration in beats/bars with compact selectable blocks.</li>
           <li><strong>Tanh Drive</strong>: Applies the selected dB gain before the always-active legacy tanh lookup, independently of the optional waveshaper. The tanh stage is bounded near +/-0.7616 before track gain and downstream effects, not at the final track output.</li>
-          <li><strong>Envelopes</strong>: Each track has a separate amp ADSR and pitch ADSR. Pitch Env Amount is in MIDI pitches (can be negative). Pitch Env Shape is a numeric exponential steepness (0 = linear; higher values make the curve steeper).</li>
+          <li><strong>Modulation</strong>: Track envelopes and LFOs live in one tab with compact, collapsible editors: routed sources, amp/pitch/filter envelopes, track and effect LFOs, vector LFOs, and engine-specific motion. Each drum lane's decays, pitch sweeps, and filter envelopes remain in Drum Sounds. Amounts for pitch and filter envelopes are in semitones (can be negative); pitch Curve is exponential steepness (0 = linear).</li>
           <li><strong>Instrument/Modulation/Filter</strong>: Shape each track with amp/pitch envelopes, unison voices, tremolo, vibrato, and a key-following multimode filter.</li>
           <li><strong>Effects</strong>: Add optional per-track feedback echo and send each track into the global pink-noise convolution reverb.</li>
           <li><strong>Reverb</strong>: The global reverb's Dry, Wet, Low Cut, and High Cut apply to playback, browser WAV export, and native CLI WAV rendering. Its pink-noise impulse is energy-normalized in GateRunner rather than by the browser, so the wet level no longer shifts between the playback sample rate and the 48 kHz export. The CLI approximates the convolution with an energy-normalized filtered tap bank. CLI equivalent: <code>--reverb '{"enabled":true,"decay":3,"preDelay":0.02,"dry":0,"wet":-7,"lowCut":39,"highCut":119}'</code>.</li>
@@ -114,7 +114,7 @@ const visible = defineModel<boolean>({ required: true });
         </ul>
 
         <h4 class="mt-3 mb-2">Vector Modulation</h4>
-        <p>Up to eight vector LFOs can animate the morph position. For each axis, the movement is its base value plus the LFO output multiplied by <strong>Global depth</strong> and that axis's <strong>Route</strong>. The final position is constrained to the 0%-100% range. Multiple enabled LFOs are applied in list order.</p>
+        <p>Open <strong>Modulation</strong> to edit up to eight vector LFOs that animate the morph position. For each axis, the movement is its base value plus the LFO output multiplied by <strong>Global depth</strong> and that axis's <strong>Route</strong>. The final position is constrained to the 0%-100% range. Multiple enabled LFOs are applied in list order.</p>
         <ul>
           <li><strong>Shape</strong>: Choose sine, triangle, rising or falling saw, square, sample-and-hold, or smooth random motion.</li>
           <li><strong>Polarity</strong>: Bipolar motion ranges from -1 to +1 around the base position. Unipolar motion ranges from 0 to +1; a negative route can make that motion travel downward instead.</li>

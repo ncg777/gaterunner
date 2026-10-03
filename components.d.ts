@@ -7,6 +7,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    CompactModulationFields: typeof import('./src/components/CompactModulationFields.vue')['default']
     EditableSlider: typeof import('./src/components/EditableSlider.vue')['default']
     EditorSurface: typeof import('./src/components/EditorSurface.vue')['default']
     ExportProgressDialog: typeof import('./src/components/ExportProgressDialog.vue')['default']
@@ -20,6 +21,7 @@ declare module 'vue' {
     RhythmTrackControls: typeof import('./src/components/RhythmTrackControls.vue')['default']
     SynthEngineControls: typeof import('./src/components/SynthEngineControls.vue')['default']
     TimeWarpPreview: typeof import('./src/components/TimeWarpPreview.vue')['default']
+    TrackModulationControls: typeof import('./src/components/TrackModulationControls.vue')['default']
     TrackStrip: typeof import('./src/components/TrackStrip.vue')['default']
     WaveshaperControls: typeof import('./src/components/WaveshaperControls.vue')['default']
     WaveshaperPreview: typeof import('./src/components/WaveshaperPreview.vue')['default']

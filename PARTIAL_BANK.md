@@ -10,7 +10,7 @@ positive ratio of the played note: 1×, 2.37×, √3×, and so on.
    harmonics is a useful starting point because every harmonic has an amplitude.
 2. Choose a position function and adjust its parameters.
 3. Choose a target function and use **Position morph** to move between them.
-4. Expand **Modulation**, add an envelope or LFO, and route it to **Position
+4. Open the **Modulation** tab, add an envelope or LFO, and route it to **Position
    function · a/b/c**, **Target position · a/b/c**, or **Position morph**.
    Route amounts are offsets, in the units shown by the corresponding function.
 

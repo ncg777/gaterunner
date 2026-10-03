@@ -545,10 +545,18 @@ these are configured separately because Tone's lookahead setter changes both.
 
 ### Additive modulation
 
-Open **Generator → Modulation** on an additive track. Add any number of named
+Open the **Modulation** tab on an additive or Partial Bank track. Add any number of named
 envelopes and LFOs, then add routes from sources to destinations. Source editors
 collapse individually, so a large patch can stay compact. Sources and routes can
 be bypassed or removed; removing a source also removes its routes.
+
+The same tab gathers the amp, pitch, and filter envelopes; filter, tremolo,
+vibrato, chorus, flanger, and phaser LFOs; wavetable vector LFOs; and the selected
+engine's resonator or choir motion. Fixed sources show their destination and
+status in compact, collapsible editors. Each drum lane's decays, pitch sweeps,
+and filter envelopes remain in **Drum Sounds**. Effect mix
+and tone controls stay in their effect tabs; wavetable axes and configurations
+stay in Generator. Existing patches, routing, and audio behavior are preserved.
 
 - Spectral destinations: **tilt** (dB/octave), **contrast**, **odd/even balance**
   (dB), **harmonic count**, and **mapping exponent**. Routes offset the existing
