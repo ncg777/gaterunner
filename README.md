@@ -46,6 +46,13 @@ It is useful for:
   and share a working draft through its URL.
 - **Installable web app:** use the hosted PWA or run the Vue application locally.
 
+Version **2026.10.7** adds optional phrase banks, musical sections, conditional
+choices, per-step accents/ties/slides and drum locks, motion curves/sound snapshots,
+shared dub returns, portable samples and resampling. Open **Phrases, motion &
+studio** for these controls. Existing projects retain their original behavior.
+The [development studio guide](DEVELOPMENT_STUDIO.md) covers the demonstration,
+processing rules, compatibility, API, excerpt/stem export and measured performance.
+
 ## Quick Start
 
 ### Try It in the Browser
@@ -413,6 +420,18 @@ GateRunner can optionally gate tracks across the full song loop with a song-leve
 Build the TypeScript CLI with `yarn build:cli`, or run it directly through `tsx`
 with `yarn cli`. Run `yarn cli --help` for the complete option list.
 
+New project commands are `features`, `validate`, `resolve`, `render`, `stems`,
+`bounce`, `sample` and `pack`. For example:
+
+```sh
+yarn cli render --project cli/fixtures/development-demo.json --output throw.wav --start 6 --end 8 --unit bars --cache-dir .render-cache
+yarn cli stems --project cli/fixtures/development-demo.json --output stems --start 6 --end 8 --unit bars
+```
+
+The importable API is `cli/projectApi.ts` (compiled to
+`dist-cli/cli/projectApi.js`). See the [API and routing guide](DEVELOPMENT_STUDIO.md).
+All existing generation flags continue to work.
+
 ### WAV Export
 
 Build or run the TypeScript CLI directly:
@@ -475,6 +494,11 @@ benchmarks that also assert exact numerical equivalence. Animated tonewheel voic
 reuse harmonic samples rather than rebuilding full waveform tables each block.
 
 ### Browser WAV Export
+
+The description below applies to legacy projects. Explicitly developed projects
+run shared browser/native DSP in a worker, with matching scheduling and sample
+assets; their ranges retain full causal warm-up. See
+[rendering and caching](DEVELOPMENT_STUDIO.md#rendering-stems-and-caching).
 
 Offline rendering uses Tone's original audio graph and 128-frame clock ticks,
 yielding after about 8 ms of scheduling work to keep the UI responsive. Browsers

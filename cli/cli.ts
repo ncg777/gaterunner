@@ -6,11 +6,13 @@ import { pathToFileURL } from 'node:url';
 import { parsePresetImportPayload, type PresetData } from '../src/presets.js';
 import { normalizeWaveshaperSettings, type WaveshaperSettings } from '../src/audio/waveshaper.js';
 import { generateMidi, generateWav, type GenerateReverbOptions, type GenerateTrackOptions } from './generate.js';
+import { registerProjectCommands } from './projectCommands.js';
 
-const program = new Command();
+const program = new Command().enablePositionalOptions();
 
 export function presetDataToGeneratorInput(data: PresetData) {
   return {
+    ...(data.studio === undefined ? {} : { studio: data.studio }),
     bpm: data.bpm,
     a4: data.a4,
     masterGain: data.masterGain,
@@ -18,6 +20,7 @@ export function presetDataToGeneratorInput(data: PresetData) {
     bitmaskSequenceInput: data.bitmaskSequenceInput,
     tracks: data.tracks.map(({ id: _id, sequenceInput, ...track }) => ({
       ...track,
+      ...(track.development ? { id: _id } : {}),
       sequence: sequenceInput,
     })),
     reverb: {
@@ -124,8 +127,8 @@ function parseWaveshaperJson(value: string): WaveshaperSettings {
 program
   .name('gaterunner')
   .description('Generate a MIDI/WAV file from a GateRunner sequence')
-  .version('2026.9.17')
-  .requiredOption('-o, --output <file>', 'Output file path')
+  .version('2026.10.7')
+  .option('-o, --output <file>', 'Output file path (required for generation)')
   .option('-f, --format <type>', 'Output format: midi or wav', 'midi')
   .option('--bpm <number>', 'Shared tempo in beats per minute (1-499)', '90')
   .option('--a4 <number>', 'Concert pitch A4 frequency in Hz (380-500)', '440')
@@ -163,6 +166,7 @@ program
   .option('--verbose', 'Print WAV render and encoding timings')
   .action(async (options) => {
     try {
+      if (!options.output) throw new Error("required option '-o, --output <file>' not specified");
       const generatorInput = options.preset
         ? parsePresetFile(options.preset)
         : {
@@ -222,6 +226,7 @@ program
     }
   });
 
+registerProjectCommands(program);
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   program.parse();
 }

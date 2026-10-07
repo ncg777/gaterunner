@@ -60,7 +60,7 @@ export async function encodeWavInWorker(
           reject(new WavWorkerError(String(error)));
         }
       };
-      post({ type: 'init', channels: channels.length, frames: frameCount, sampleRate, dither: options.dither });
+      post({ type: 'init', channels: channels.length, frames: frameCount, sampleRate, dither: options.dither, format: options.format });
     });
   } catch (error) {
     options.signal?.throwIfAborted();

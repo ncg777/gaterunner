@@ -38,6 +38,8 @@ export interface EncodeWavOptions {  /**
    * noise floor increase for the removal of harmonic distortion at low levels.
    */
   dither?: boolean;
+  /** Float WAV preserves stem headroom above full scale; mix exports default to PCM24. */
+  format?: 'pcm24' | 'float32';
 }
 
 export interface WavEncoder {
@@ -52,11 +54,12 @@ export function createWavEncoder(
   sampleRate: number,
   options: EncodeWavOptions = {},
 ): WavEncoder {
-  const bitDepth = 24;
+  const float = options.format === 'float32';
+  const bitDepth = float ? 32 : 24;
   const bytesPerSample = bitDepth / 8;
   const blockAlign = numChannels * bytesPerSample;
   const dataLength = frameCount * blockAlign;
-  const wavBuffer = new ArrayBuffer(44 + dataLength);
+  const wavBuffer = new ArrayBuffer((float ? 58 : 44) + dataLength);
   const view = new DataView(wavBuffer);
   const bytes = new Uint8Array(wavBuffer);
 
@@ -69,13 +72,13 @@ export function createWavEncoder(
   };
 
   writeString('RIFF');
-  view.setUint32(offset, 36 + dataLength, true);
+  view.setUint32(offset, wavBuffer.byteLength - 8, true);
   offset += 4;
   writeString('WAVE');
   writeString('fmt ');
-  view.setUint32(offset, 16, true);
+  view.setUint32(offset, float ? 18 : 16, true);
   offset += 4;
-  view.setUint16(offset, 1, true);
+  view.setUint16(offset, float ? 3 : 1, true);
   offset += 2;
   view.setUint16(offset, numChannels, true);
   offset += 2;
@@ -87,6 +90,16 @@ export function createWavEncoder(
   offset += 2;
   view.setUint16(offset, bitDepth, true);
   offset += 2;
+
+  if (float) {
+    view.setUint16(offset, 0, true); // WAVEFORMATEX extension size.
+    offset += 2;
+    writeString('fact');
+    view.setUint32(offset, 4, true);
+    offset += 4;
+    view.setUint32(offset, frameCount, true);
+    offset += 4;
+  }
   writeString('data');
   view.setUint32(offset, dataLength, true);
   offset += 4;
@@ -104,6 +117,12 @@ export function createWavEncoder(
     for (let frame = startFrame; frame < endFrame; frame += 1) {
       for (let channel = 0; channel < numChannels; channel += 1) {
         const raw = channels[channel][frame];
+        if (float) {
+          if (!Number.isFinite(raw)) throw new Error('Non-finite WAV sample');
+          view.setFloat32(offset + writeIndex * bytesPerSample, raw, true);
+          writeIndex += 1;
+          continue;
+        }
         if (dither) {
           ditherStateA = nextXorshift32(ditherStateA);
           ditherStateB = nextXorshift32(ditherStateB);

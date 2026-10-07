@@ -1,0 +1,52 @@
+{
+  "environment": {
+    "node": "v24.13.0",
+    "platform": "win32",
+    "renderer": "2026.10.7",
+    "sampleRate": 48000
+  },
+  "full": {
+    "elapsedMilliseconds": 21407.9076,
+    "processPeakMemoryBytes": 753057792,
+    "previousProcessPeakBytes": 95391744,
+    "milliseconds": 21407.9076,
+    "cacheHits": 0,
+    "returnCacheHits": 0,
+    "renderedTracks": 3,
+    "workingBufferBytes": 205296000
+  },
+  "cached": {
+    "elapsedMilliseconds": 3756.0432999999975,
+    "processPeakMemoryBytes": 843063296,
+    "previousProcessPeakBytes": 753057792,
+    "milliseconds": 3756.0432999999975,
+    "cacheHits": 3,
+    "returnCacheHits": 1,
+    "renderedTracks": 0,
+    "workingBufferBytes": 205296000
+  },
+  "excerpt": {
+    "elapsedMilliseconds": 1090.479900000002,
+    "processPeakMemoryBytes": 859156480,
+    "previousProcessPeakBytes": 843063296,
+    "milliseconds": 1090.479900000002,
+    "cacheHits": 3,
+    "returnCacheHits": 1,
+    "renderedTracks": 0,
+    "workingBufferBytes": 108816000
+  },
+  "coldExcerpt": {
+    "elapsedMilliseconds": 8483.034699999997,
+    "processPeakMemoryBytes": 891760640,
+    "previousProcessPeakBytes": 859156480,
+    "milliseconds": 8483.034699999997,
+    "cacheHits": 0,
+    "returnCacheHits": 0,
+    "renderedTracks": 3,
+    "workingBufferBytes": 79872000
+  },
+  "cachedSpeedup": 5.699590204404729,
+  "excerptSpeedup": 19.63163887752535,
+  "excerptCacheSpeedup": 7.779175663852199,
+  "note": "Peak memory is the process high-water mark (maxRSS), not independent per-render memory. Working-buffer bytes are an estimate. No quality reduction; excerpts warm from origin."
+}

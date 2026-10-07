@@ -8,6 +8,7 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     CompactModulationFields: typeof import('./src/components/CompactModulationFields.vue')['default']
+    DevelopmentPanel: typeof import('./src/components/DevelopmentPanel.vue')['default']
     EditableSlider: typeof import('./src/components/EditableSlider.vue')['default']
     EditorSurface: typeof import('./src/components/EditorSurface.vue')['default']
     ExportProgressDialog: typeof import('./src/components/ExportProgressDialog.vue')['default']

@@ -1,5 +1,5 @@
 export type WavEncodeRequest =
-  | { type: 'init'; channels: number; frames: number; sampleRate: number; dither?: boolean }
+  | { type: 'init'; channels: number; frames: number; sampleRate: number; dither?: boolean; format?: 'pcm24' | 'float32' }
   | { type: 'chunk'; channels: Float32Array[] };
 
 export type WavEncodeResponse =

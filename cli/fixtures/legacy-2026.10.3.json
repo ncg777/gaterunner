@@ -1,0 +1,498 @@
+{
+  "baselineCommit": "cb79acbb04a1cd388d27d9c2de1679820e673848",
+  "environment": {
+    "node": "v24.13.0",
+    "platform": "win32",
+    "sampleRate": 48000
+  },
+  "fixtures": [
+    {
+      "name": "timing",
+      "input": {
+        "bpm": 300,
+        "forte": "5-35.05",
+        "bitmaskSequenceInput": "1 0 3 2",
+        "tracks": [
+          {
+            "sequence": "1 0 3 2",
+            "denominator": 8,
+            "gain": -18,
+            "release": 0.025,
+            "lengthFactor": 170,
+            "lengthOffset": 0.2,
+            "paddingBefore": 0.05,
+            "paddingAfter": 0.05,
+            "repeats": 2,
+            "phase": 0.3,
+            "fadeIn": 0.1,
+            "fadeOut": 0.1,
+            "timeWarpEnabled": true,
+            "timeWarpCurve": "ease-in",
+            "timeWarpAmount": 70,
+            "timeWarpRepeats": 2,
+            "timeWarpQuantize": 4,
+            "timeWarpNoteLengths": true
+          },
+          {
+            "sequence": "1 0 3 2",
+            "denominator": 8,
+            "gain": -18,
+            "release": 0.025,
+            "delay": 0.05,
+            "polyphony": 2
+          }
+        ]
+      },
+      "midi": "def10187cfb34e708db9f18a66ad6d72751f89dfb2a60d4e6a63e68d946f2e7b",
+      "wav": "e5c277ea49d7101e0d31eb4d9d0336d3b39883f1ef07e1953d24cc313624c525",
+      "left": "d3e114eee95f5b5254f2b6cf96ccc666c8c8012a2c87e1a80f1903bd6cebf7a4",
+      "right": "d3e114eee95f5b5254f2b6cf96ccc666c8c8012a2c87e1a80f1903bd6cebf7a4"
+    },
+    {
+      "name": "mono",
+      "input": {
+        "bpm": 300,
+        "tracks": [
+          {
+            "sequence": "1 2 4 8",
+            "denominator": 8,
+            "gain": -18,
+            "release": 0.025,
+            "lengthFactor": 160,
+            "polyphony": 1,
+            "monoLegato": true,
+            "glideTime": 0.04,
+            "glideMode": "always",
+            "glideCurve": "exponential"
+          }
+        ]
+      },
+      "midi": "75c119cfe776f6a87344ce00111e79751b056caee1a71022030821ff4e45ab92",
+      "wav": "810dedd381408a6ab091bb99f4be6b3b19057b88aa8e909002b75f4f9c58f593",
+      "left": "dfaa38fe28a28697e0dd7abd9dab5750fe069897044cd9f352befa648e10d22f",
+      "right": "dfaa38fe28a28697e0dd7abd9dab5750fe069897044cd9f352befa648e10d22f"
+    },
+    {
+      "name": "drums",
+      "input": {
+        "bpm": 300,
+        "tracks": [
+          {
+            "sequence": "33 1024 33 1024",
+            "denominator": 8,
+            "gain": -18,
+            "release": 0.025,
+            "trackKind": "rhythmic",
+            "drumVelocityBits": 0,
+            "echoEnabled": true,
+            "echoDelay": "1/16",
+            "echoFeedback": 0.15,
+            "echoWet": -20,
+            "reverbWet": -18
+          }
+        ],
+        "reverb": {
+          "enabled": true,
+          "decay": 0.1,
+          "preDelay": 0,
+          "wet": -24
+        }
+      },
+      "midi": "515c4c8e030d126802a6ddf0a2c60a0b0fa76ca74b677c7b717e1b98ca1b6dca",
+      "wav": "c7f9a9d93c45dedd817fb2457fdebe84eacf38e5c0f7cbe0978cbcb1dc593222",
+      "left": "37fecf9d704d4ef7755849c7f3994e68b36ad8acd1edb76c191372d61b44bc68",
+      "right": "37fecf9d704d4ef7755849c7f3994e68b36ad8acd1edb76c191372d61b44bc68"
+    },
+    {
+      "name": "effects",
+      "input": {
+        "bpm": 300,
+        "tracks": [
+          {
+            "sequence": "1 0 3 2",
+            "denominator": 8,
+            "gain": -18,
+            "release": 0.025,
+            "echoEnabled": true,
+            "echoDelay": "1/16",
+            "echoPingPong": true,
+            "echoFeedback": 0.2,
+            "echoWet": -18,
+            "chorusEnabled": true,
+            "flangerEnabled": true,
+            "phaserEnabled": true,
+            "filterEnabled": true,
+            "filterFrequency": 80,
+            "filterLfoEnabled": true,
+            "waveshaper": {
+              "enabled": true,
+              "mode": "tanh",
+              "drive": 3
+            },
+            "tremoloEnabled": true,
+            "vibratoEnabled": true,
+            "reverbWet": -18
+          }
+        ],
+        "reverb": {
+          "enabled": true,
+          "decay": 0.1,
+          "wet": -24
+        }
+      },
+      "midi": "3ced9cd24431b12fea3abb4379c4b1c40f8053145bd14d972a5f97e4bf05da30",
+      "wav": "ab22885e639abd9ec522712e09209802cc1db8bded2001dc14fa6a1c60e8a401",
+      "left": "5a203cfb634c3f276669c6b8d9403d2b311b3c12ddc9092d8e5d6eac6b3fc54b",
+      "right": "775dc670d03fbb1f562004d70fcb07377a09186985862426aa30f02968c0bfc7"
+    },
+    {
+      "name": "generators",
+      "input": {
+        "bpm": 300,
+        "tracks": [
+          {
+            "sequence": "1 2",
+            "denominator": 8,
+            "gain": -18,
+            "release": 0.025,
+            "synthMode": "additive",
+            "waveform": "sawtooth",
+            "partialGenerator": {
+              "type": "tonewheel"
+            },
+            "modulation": {
+              "sources": [
+                {
+                  "id": "l",
+                  "name": "Slow",
+                  "type": "lfo",
+                  "enabled": true,
+                  "waveform": "sine",
+                  "rateHz": 2,
+                  "sync": false,
+                  "syncRate": "1/4",
+                  "phase": 0,
+                  "retrigger": "song",
+                  "unipolar": false
+                }
+              ],
+              "routes": [
+                {
+                  "id": "r",
+                  "enabled": true,
+                  "source": "l",
+                  "target": "pitch",
+                  "amount": 0.2
+                }
+              ]
+            }
+          },
+          {
+            "sequence": "1 2",
+            "denominator": 8,
+            "gain": -18,
+            "release": 0.025,
+            "synthMode": "additive",
+            "waveform": "sawtooth",
+            "partialGenerator": {
+              "type": "waveform"
+            },
+            "modulation": {
+              "sources": [
+                {
+                  "id": "l",
+                  "name": "Slow",
+                  "type": "lfo",
+                  "enabled": true,
+                  "waveform": "sine",
+                  "rateHz": 2,
+                  "sync": false,
+                  "syncRate": "1/4",
+                  "phase": 0,
+                  "retrigger": "song",
+                  "unipolar": false
+                }
+              ],
+              "routes": [
+                {
+                  "id": "r",
+                  "enabled": true,
+                  "source": "l",
+                  "target": "pitch",
+                  "amount": 0.2
+                }
+              ]
+            }
+          },
+          {
+            "sequence": "1 2",
+            "denominator": 8,
+            "gain": -18,
+            "release": 0.025,
+            "synthMode": "noise",
+            "waveform": "sawtooth",
+            "partialGenerator": {
+              "type": "tonewheel"
+            },
+            "modulation": {
+              "sources": [
+                {
+                  "id": "l",
+                  "name": "Slow",
+                  "type": "lfo",
+                  "enabled": true,
+                  "waveform": "sine",
+                  "rateHz": 2,
+                  "sync": false,
+                  "syncRate": "1/4",
+                  "phase": 0,
+                  "retrigger": "song",
+                  "unipolar": false
+                }
+              ],
+              "routes": [
+                {
+                  "id": "r",
+                  "enabled": true,
+                  "source": "l",
+                  "target": "pitch",
+                  "amount": 0.2
+                }
+              ]
+            }
+          },
+          {
+            "sequence": "1 2",
+            "denominator": 8,
+            "gain": -18,
+            "release": 0.025,
+            "synthMode": "choir",
+            "waveform": "sawtooth",
+            "partialGenerator": {
+              "type": "tonewheel"
+            },
+            "modulation": {
+              "sources": [
+                {
+                  "id": "l",
+                  "name": "Slow",
+                  "type": "lfo",
+                  "enabled": true,
+                  "waveform": "sine",
+                  "rateHz": 2,
+                  "sync": false,
+                  "syncRate": "1/4",
+                  "phase": 0,
+                  "retrigger": "song",
+                  "unipolar": false
+                }
+              ],
+              "routes": [
+                {
+                  "id": "r",
+                  "enabled": true,
+                  "source": "l",
+                  "target": "pitch",
+                  "amount": 0.2
+                }
+              ]
+            }
+          },
+          {
+            "sequence": "1 2",
+            "denominator": 8,
+            "gain": -18,
+            "release": 0.025,
+            "synthMode": "partial-bank",
+            "waveform": "sawtooth",
+            "partialGenerator": {
+              "type": "tonewheel"
+            },
+            "modulation": {
+              "sources": [
+                {
+                  "id": "l",
+                  "name": "Slow",
+                  "type": "lfo",
+                  "enabled": true,
+                  "waveform": "sine",
+                  "rateHz": 2,
+                  "sync": false,
+                  "syncRate": "1/4",
+                  "phase": 0,
+                  "retrigger": "song",
+                  "unipolar": false
+                }
+              ],
+              "routes": [
+                {
+                  "id": "r",
+                  "enabled": true,
+                  "source": "l",
+                  "target": "pitch",
+                  "amount": 0.2
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "midi": "957d0561141f639b238300138a494b8ccbf253e7bc58522f631c3fc2b8d8b184",
+      "wav": "09f756d09d5b523e4269fa607526edc42b16f660b7dc4858a9027a8d98b44dc1",
+      "left": "a29df56a4ab831123588cf472fa09aa9fadd152b3adfcd838781d8f79c673019",
+      "right": "a29df56a4ab831123588cf472fa09aa9fadd152b3adfcd838781d8f79c673019"
+    },
+    {
+      "name": "engines",
+      "input": {
+        "bpm": 300,
+        "tracks": [
+          {
+            "sequence": "1 2",
+            "denominator": 8,
+            "gain": -18,
+            "release": 0.025,
+            "synthMode": "additive",
+            "partialGenerator": {
+              "type": "waveform"
+            },
+            "waveform": "sawtooth",
+            "modulation": {
+              "sources": [
+                {
+                  "id": "env",
+                  "name": "Motion",
+                  "type": "envelope",
+                  "enabled": true,
+                  "attack": 0.01,
+                  "decay": 0.05,
+                  "sustain": 0.3,
+                  "release": 0.05,
+                  "curve": 0
+                }
+              ],
+              "routes": [
+                {
+                  "id": "pitch",
+                  "enabled": true,
+                  "source": "env",
+                  "target": "pitch",
+                  "amount": 0.7
+                }
+              ]
+            }
+          },
+          {
+            "sequence": "1 2",
+            "denominator": 8,
+            "gain": -18,
+            "release": 0.025,
+            "synthMode": "resonant-noise",
+            "partialGenerator": {
+              "type": "waveform"
+            },
+            "waveform": "sawtooth",
+            "modulation": {
+              "sources": [
+                {
+                  "id": "env",
+                  "name": "Motion",
+                  "type": "envelope",
+                  "enabled": true,
+                  "attack": 0.01,
+                  "decay": 0.05,
+                  "sustain": 0.3,
+                  "release": 0.05,
+                  "curve": 0
+                }
+              ],
+              "routes": [
+                {
+                  "id": "pitch",
+                  "enabled": true,
+                  "source": "env",
+                  "target": "pitch",
+                  "amount": 0.7
+                }
+              ]
+            }
+          },
+          {
+            "sequence": "1 2",
+            "denominator": 8,
+            "gain": -18,
+            "release": 0.025,
+            "synthMode": "choir",
+            "partialGenerator": {
+              "type": "waveform"
+            },
+            "waveform": "sawtooth",
+            "modulation": {
+              "sources": [
+                {
+                  "id": "env",
+                  "name": "Motion",
+                  "type": "envelope",
+                  "enabled": true,
+                  "attack": 0.01,
+                  "decay": 0.05,
+                  "sustain": 0.3,
+                  "release": 0.05,
+                  "curve": 0
+                }
+              ],
+              "routes": [
+                {
+                  "id": "pitch",
+                  "enabled": true,
+                  "source": "env",
+                  "target": "pitch",
+                  "amount": 0.7
+                }
+              ]
+            }
+          },
+          {
+            "sequence": "1 2",
+            "denominator": 8,
+            "gain": -18,
+            "release": 0.025,
+            "synthMode": "partial-bank",
+            "partialGenerator": {
+              "type": "waveform"
+            },
+            "waveform": "sawtooth",
+            "modulation": {
+              "sources": [
+                {
+                  "id": "env",
+                  "name": "Motion",
+                  "type": "envelope",
+                  "enabled": true,
+                  "attack": 0.01,
+                  "decay": 0.05,
+                  "sustain": 0.3,
+                  "release": 0.05,
+                  "curve": 0
+                }
+              ],
+              "routes": [
+                {
+                  "id": "pitch",
+                  "enabled": true,
+                  "source": "env",
+                  "target": "pitch",
+                  "amount": 0.7
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "midi": "858055be84b3b923fcce98dcc9c3af02644e9d1cd7cdbdfc08e2af7f8f47fa5f",
+      "wav": "f5610da737c1084d7c6060831e5f5297bdddf88badf4aabbc3e89b3595114691",
+      "left": "f54977e1e73e07700b8033d2591243b8c85a7da4453748817aa6cedc3d0959be",
+      "right": "f54977e1e73e07700b8033d2591243b8c85a7da4453748817aa6cedc3d0959be"
+    }
+  ]
+}

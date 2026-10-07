@@ -23,7 +23,7 @@ test('worker encoding bounds transfers, preserves input, falls back and cleans u
       queueMicrotask(() => {
         if (this.terminated) return;
         if (data.type === 'init') {
-          this.encoder = createWavEncoder(data.channels, data.frames, data.sampleRate, { dither: data.dither });
+          this.encoder = createWavEncoder(data.channels, data.frames, data.sampleRate, { dither: data.dither, format: data.format });
         } else {
           if (failChunk) {
             this.onerror?.({ message: 'Simulated worker failure', preventDefault() {} });
@@ -57,6 +57,14 @@ test('worker encoding bounds transfers, preserves input, falls back and cleans u
       failChunk = true;
       assert.deepEqual(await encodeWavInWorker(channels, 48000), expected);
       assert.ok(instances.at(-1)!.terminated);
+      failChunk = false;
+    });
+    await suite.test('float stems keep headroom through worker encoding and fallback', async () => {
+      const stems = [Float32Array.of(-3, -1.5, 0, 2.25)];
+      const expectedFloat = encodeWavFromChannelsSync(stems, 48000, { format: 'float32' });
+      assert.deepEqual(await encodeWavInWorker(stems, 48000, { format: 'float32' }), expectedFloat);
+      failChunk = true;
+      assert.deepEqual(await encodeWavInWorker(stems, 48000, { format: 'float32' }), expectedFloat);
       failChunk = false;
     });
     await suite.test('caller progress errors are propagated without retrying encoding', async () => {
