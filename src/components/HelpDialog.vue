@@ -53,7 +53,7 @@ const visible = defineModel<boolean>({ required: true });
           <li><strong>Phaser</strong>: A classic phaser pedal: a cascade of first-order allpass stages (each stage pair creates one notch) whose poles are spaced one octave apart around the Center frequency and swept by the LFO over ±(Sweep % of 5 octaves). Stages picks the pole count (classic pedals use 4), Feedback resonates the notches, Resonance sharpens each pole, and Wet sets the dry/phase-shifted mix (always at least 50% wet so the notches stay audible).</li>
           <li><strong>Multidimensional Tonewheel</strong>: With the Tonewheel partial source, build a morphable sine-partial spectrum from sparse drawbar configurations and animate its position with routed vector LFOs.</li>
           <li><strong>Breath noise</strong>: Add one filtered pink-noise layer to each melodic event. Level controls the blend, while Harmonic tracks the event's mean pitch to set the filter center.</li>
-          <li><strong>Import/Export</strong>: Export one preset or the full library as JSON for backup and sharing, then import those files later without overwriting your existing presets.</li>
+          <li><strong>Import/Export</strong>: Export one preset or the full library as JSON for backup and sharing, then import those files later without overwriting your existing presets. Libraries use IndexedDB to accommodate embedded samples and large arrangements; existing saved presets migrate automatically. A failed save keeps your previous library and draft.</li>
           <li><strong>WAV Export</strong>: Render and download an offline WAV mix of all tracks in the current draft, including an automatic rest trail for releases and effects.</li>
         </ul>
 

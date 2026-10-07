@@ -1,4 +1,5 @@
 import type { ModulationSettings } from './audio/modulation.js';
+import { readPresetLibraryStorage, writePresetLibraryStorage } from './presetStorage.js';
 import { normalizeDevelopment, normalizeStudio, type TrackDevelopment, type ProjectStudio } from './domain/development.js';
 import { normalizeSynthEngine, LEGACY_NOISE_WAVEFORMS, type SynthMode, type NoiseEngineSettings, type ChoirEngineSettings } from './audio/synthEngine.js';
 import {
@@ -524,7 +525,6 @@ export const DEFAULT_PRESET_DATA: PresetData = {
   },
 };
 
-const STORAGE_KEY_V2 = 'ss3k_preset_library_v2';
 const STORAGE_KEY_V1 = 'ss3k_preset_library_v1';
 const ROOT_FOLDER_ID = null;
 const LEGACY_KEYS = {
@@ -1727,39 +1727,36 @@ function migrateLegacyPreset(): PresetLibrary | null {
   };
 }
 
-export function loadPresetLibrary(): PresetLibrary {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_V2);
-    if (stored) {
-      const parsed = JSON.parse(stored) as unknown;
-      const library = normalizeLibrary(parsed);
-      if (library) {
-        return library;
-      }
+export async function loadPresetLibrary(): Promise<PresetLibrary> {
+  const { value: stored, needsMigration } = await readPresetLibraryStorage();
+  if (stored !== null) {
+    const library = normalizeLibrary(JSON.parse(stored) as unknown);
+    if (library) {
+      if (needsMigration) await savePresetLibrary(library);
+      return library;
     }
+    throw new Error('The saved preset library could not be read. Its stored copy has been preserved.');
+  }
 
-    const legacyStored = localStorage.getItem(STORAGE_KEY_V1);
-    if (legacyStored) {
-      const parsedLegacy = JSON.parse(legacyStored) as unknown;
-      const library = normalizeLibrary(parsedLegacy);
-      if (library) {
-        savePresetLibrary(library);
-        return library;
-      }
+  const legacyStored = localStorage.getItem(STORAGE_KEY_V1);
+  if (legacyStored !== null) {
+    const library = normalizeLibrary(JSON.parse(legacyStored) as unknown);
+    if (library) {
+      await savePresetLibrary(library);
+      return library;
     }
-  } catch (error) {
-    console.warn('Failed to read stored preset library, resetting to defaults.', error);
+    throw new Error('The legacy preset library could not be read. Its stored copy has been preserved.');
   }
 
   const migratedLibrary = migrateLegacyPreset();
   const library = migratedLibrary ?? createDefaultLibrary();
-  savePresetLibrary(library);
+  await savePresetLibrary(library);
   return library;
 }
 
-export function savePresetLibrary(library: PresetLibrary): void {
+export async function savePresetLibrary(library: PresetLibrary): Promise<void> {
   const normalizedLibrary = withNormalizedLibrary(library);
-  localStorage.setItem(STORAGE_KEY_V2, JSON.stringify(normalizedLibrary));
+  await writePresetLibraryStorage(JSON.stringify(normalizedLibrary));
 }
 
 export function getSelectedPreset(library: PresetLibrary): NamedPreset {

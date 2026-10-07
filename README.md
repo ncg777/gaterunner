@@ -161,6 +161,12 @@ single notes.
 
 GateRunner stores sequences as named presets in the browser.
 
+Libraries are stored in IndexedDB, so projects with embedded samples and large
+arrangements can be imported without hitting localStorage's small quota. Existing
+localStorage presets migrate automatically after a successful save. Imports and
+other library changes take effect only after storage commits; a failed save keeps
+the previous library and draft. Export JSON libraries for portable backups.
+
 - The selected preset loads into the working draft.
 - Editing controls updates the working draft immediately for playback, MIDI export, and URL sharing.
 - Use **Save** to update the selected preset.

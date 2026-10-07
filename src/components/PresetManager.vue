@@ -331,6 +331,7 @@
 
 <script lang="ts">
 import { defineComponent, type PropType } from 'vue';
+import { presetStorageErrorMessage } from '../presetStorage';
 import {
   DEFAULT_PRESET_DATA,
   buildPresetLibraryExport,
@@ -443,6 +444,7 @@ export default defineComponent({
       showCreatePresetDialog: false,
       createPresetInput: '',
       presetMenuOpen: false,
+      isPersisting: false,
     };
   },
   computed: {
@@ -608,25 +610,25 @@ export default defineComponent({
       this.presetBrowserNameDialogFolderId = null;
       this.presetBrowserNameInput = '';
     },
-    confirmPresetBrowserNameDialog() {
+    async confirmPresetBrowserNameDialog() {
       if (!this.canSubmitPresetBrowserNameDialog || !this.presetBrowserNameDialogMode) return;
 
       const value = this.presetBrowserNameInput;
       if (this.presetBrowserNameDialogMode === 'new-folder') {
         const result = createFolder(this.presetLibrary, value, this.presetBrowserNameDialogFolderId);
-        this.persistPresetLibrary(result.library);
+        if (!(await this.persistPresetLibrary(result.library))) return;
         this.activePresetFolderId = result.folder.id;
         if (!this.expandedPresetFolderIds.includes(result.folder.id)) {
           this.expandedPresetFolderIds = [...this.expandedPresetFolderIds, result.folder.id];
         }
       } else if (this.presetBrowserNameDialogMode === 'rename-folder' && this.presetBrowserNameDialogTargetId) {
-        this.persistPresetLibrary(renameFolder(this.presetLibrary, this.presetBrowserNameDialogTargetId, value));
+        if (!(await this.persistPresetLibrary(renameFolder(this.presetLibrary, this.presetBrowserNameDialogTargetId, value)))) return;
       } else if (this.presetBrowserNameDialogMode === 'new-preset') {
         const folderId = this.presetBrowserNameDialogFolderId;
         const preset = { ...createNamedPreset(this.buildUniquePresetName(value, folderId), DEFAULT_PRESET_DATA), folderId };
-        this.persistPresetLibrary({ ...this.presetLibrary, presets: [...this.presetLibrary.presets, preset] });
+        if (!(await this.persistPresetLibrary({ ...this.presetLibrary, presets: [...this.presetLibrary.presets, preset] }))) return;
       } else if (this.presetBrowserNameDialogMode === 'rename-preset' && this.presetBrowserNameDialogTargetId) {
-        this.persistPresetLibrary(renamePreset(this.presetLibrary, this.presetBrowserNameDialogTargetId, value));
+        if (!(await this.persistPresetLibrary(renamePreset(this.presetLibrary, this.presetBrowserNameDialogTargetId, value)))) return;
       }
 
       this.cancelPresetBrowserNameDialog();
@@ -666,10 +668,10 @@ export default defineComponent({
       );
       if (!shouldDelete) return;
 
-      this.persistPresetLibrary(result.library);
+      if (!(await this.persistPresetLibrary(result.library))) return;
       this.activePresetFolderId = null;
       if (deletedCurrentPreset && result.selectedPresetId) {
-        this.loadPresetById(result.selectedPresetId, result.library);
+        await this.loadPresetById(result.selectedPresetId, result.library);
       }
     },
     createPresetInActiveFolder() {
@@ -698,9 +700,9 @@ export default defineComponent({
       if (!shouldDelete) return;
 
       const result = deletePreset(this.presetLibrary, presetId);
-      this.persistPresetLibrary(result.library);
+      if (!(await this.persistPresetLibrary(result.library))) return;
       if (deletingCurrent && result.selectedPresetId) {
-        this.loadPresetById(result.selectedPresetId, result.library);
+        await this.loadPresetById(result.selectedPresetId, result.library);
       }
     },
     async mergeTracksFromPreset(presetId: string) {
@@ -738,7 +740,7 @@ export default defineComponent({
       this.moveTargetId = null;
       this.moveDestinationFolderId = null;
     },
-    confirmMoveDialog() {
+    async confirmMoveDialog() {
       if (!this.moveDialogMode || !this.moveTargetId) {
         this.cancelMoveDialog();
         return;
@@ -747,7 +749,7 @@ export default defineComponent({
       const nextLibrary = this.moveDialogMode === 'preset'
         ? movePresetToFolder(this.presetLibrary, this.moveTargetId, this.moveDestinationFolderId)
         : moveFolder(this.presetLibrary, this.moveTargetId, this.moveDestinationFolderId);
-      this.persistPresetLibrary(nextLibrary);
+      if (!(await this.persistPresetLibrary(nextLibrary))) return;
       this.cancelMoveDialog();
     },
     openRenamePresetDialog() {
@@ -759,13 +761,13 @@ export default defineComponent({
       this.showRenamePresetDialog = false;
       this.renamePresetInput = '';
     },
-    confirmPresetRename() {
+    async confirmPresetRename() {
       if (!this.currentPreset) return;
       if (!this.canSubmitPresetRename) {
         this.cancelPresetRename();
         return;
       }
-      this.renameCurrentPreset(this.renamePresetInput);
+      if (!(await this.renameCurrentPreset(this.renamePresetInput))) return;
       this.cancelPresetRename();
     },
     openCreatePresetDialog() {
@@ -786,7 +788,7 @@ export default defineComponent({
       this.showCreatePresetDialog = false;
       this.createPresetInput = '';
     },
-    confirmCreatePreset() {
+    async confirmCreatePreset() {
       if (!this.canSubmitCreatePreset) return;
 
       const folderId = this.activePresetFolderId;
@@ -794,57 +796,72 @@ export default defineComponent({
         ...createNamedPreset(this.buildUniquePresetName(this.createPresetInput, folderId), DEFAULT_PRESET_DATA),
         folderId,
       };
-      this.persistPresetLibrary({
+      if (!(await this.persistPresetLibrary({
         ...this.presetLibrary,
         presets: [...this.presetLibrary.presets, preset],
         selectedPresetId: preset.id,
-      });
+      }))) return;
       this.applyDraftData(preset.data);
       this.cancelCreatePreset();
     },
-    persistPresetLibrary(library: PresetLibrary) {
-      this.presetLibrary = library;
-      savePresetLibrary(library);
-      if (this.activePresetFolderId && !library.folders.some((folder) => folder.id === this.activePresetFolderId)) {
-        this.activePresetFolderId = null;
+    async persistPresetLibrary(library: PresetLibrary): Promise<boolean> {
+      if (this.isPersisting) {
+        this.showNotice('A preset save is still in progress. Please retry when it finishes.', 'info');
+        return false;
       }
-      this.syncDirtyState();
+      this.isPersisting = true;
+      try {
+        await savePresetLibrary(library);
+        this.presetLibrary = library;
+        if (this.activePresetFolderId && !library.folders.some((folder) => folder.id === this.activePresetFolderId)) {
+          this.activePresetFolderId = null;
+        }
+        this.syncDirtyState();
+        return true;
+      } catch (error) {
+        this.showNotice(presetStorageErrorMessage(error), 'error');
+        return false;
+      } finally {
+        this.isPersisting = false;
+      }
     },
-    loadPresetById(presetId: string, libraryOverride?: PresetLibrary) {
+    async loadPresetById(presetId: string, libraryOverride?: PresetLibrary): Promise<boolean> {
       const library = libraryOverride ?? this.presetLibrary;
       const preset = library.presets.find((entry) => entry.id === presetId);
-      if (!preset) return;
+      if (!preset) return false;
 
       const nextLibrary = { ...library, selectedPresetId: preset.id };
-      this.persistPresetLibrary(nextLibrary);
+      if (!(await this.persistPresetLibrary(nextLibrary))) return false;
       this.activePresetFolderId = preset.folderId;
       this.applyDraftData(preset.data);
       this.syncDirtyState();
+      return true;
     },
     buildUniquePresetName(baseName: string, folderId: string | null, excludedPresetId?: string): string {
       return buildUniquePresetNameInFolder(this.presetLibrary, baseName, folderId, excludedPresetId);
     },
-    renameCurrentPreset(baseName?: string) {
+    async renameCurrentPreset(baseName?: string): Promise<boolean> {
       const currentPreset = this.currentPreset;
-      if (!currentPreset) return;
+      if (!currentPreset) return false;
 
       const nextName = this.buildUniquePresetName(baseName ?? currentPreset.name, currentPreset.folderId, currentPreset.id);
-      if (nextName === currentPreset.name) return;
+      if (nextName === currentPreset.name) return true;
 
       const nextLibrary = renamePreset(this.presetLibrary, currentPreset.id, nextName);
-      this.persistPresetLibrary(nextLibrary);
+      if (!(await this.persistPresetLibrary(nextLibrary))) return false;
       this.showNotice(`Renamed preset to "${nextLibrary.presets.find((preset) => preset.id === currentPreset.id)?.name ?? nextName}".`, 'success');
+      return true;
     },
-    saveCurrentPreset() {
+    async saveCurrentPreset() {
       const currentPreset = this.currentPreset;
       if (!currentPreset) return;
 
       const updatedPreset = updatePresetData(currentPreset, this.draftData);
-      this.persistPresetLibrary({
+      if (!(await this.persistPresetLibrary({
         ...this.presetLibrary,
         presets: this.presetLibrary.presets.map((preset) => preset.id === updatedPreset.id ? updatedPreset : preset),
         selectedPresetId: updatedPreset.id,
-      });
+      }))) return;
       this.syncDirtyState();
       this.showNotice(`Saved preset "${updatedPreset.name}".`, 'success');
     },
@@ -862,11 +879,11 @@ export default defineComponent({
         ...createNamedPreset(this.buildUniquePresetName(requestedName, folderId), this.draftData),
         folderId,
       };
-      this.persistPresetLibrary({
+      if (!(await this.persistPresetLibrary({
         ...this.presetLibrary,
         presets: [...this.presetLibrary.presets, newPreset],
         selectedPresetId: newPreset.id,
-      });
+      }))) return;
       this.activePresetFolderId = folderId;
       this.applyDraftData(newPreset.data);
       this.syncDirtyState();
@@ -888,7 +905,7 @@ export default defineComponent({
       const result = deletePreset(this.presetLibrary, currentPreset.id);
       const fallbackPreset = result.library.presets.find((preset) => preset.id === result.selectedPresetId) ?? result.library.presets[0];
       if (!fallbackPreset) return;
-      this.persistPresetLibrary(result.library);
+      if (!(await this.persistPresetLibrary(result.library))) return;
       this.activePresetFolderId = fallbackPreset.folderId;
       this.applyDraftData(fallbackPreset.data);
       this.syncDirtyState();
@@ -953,16 +970,21 @@ export default defineComponent({
           preferredSelectedPresetId: importedLibrary.selectedPresetId,
           singlePresetDestinationFolderId: payload.kind === 'single-preset' ? this.activePresetFolderId : undefined,
         });
-        const nextLibrary = { ...mergeResult.library, selectedPresetId: this.presetLibrary.selectedPresetId };
-        this.persistPresetLibrary(nextLibrary);
-
         if (mergeResult.importedPresets.length === 0) {
           this.showNotice('No presets were imported.', 'warning');
           return;
         }
 
-        if (mergeResult.selectedPresetId && await this.confirmDiscardChanges('Load the imported preset and discard them')) {
-          this.loadPresetById(mergeResult.selectedPresetId, nextLibrary);
+        const shouldLoad = mergeResult.selectedPresetId !== null
+          && await this.confirmDiscardChanges('Load the imported preset and discard them');
+        const nextLibrary = { ...mergeResult.library,
+          selectedPresetId: shouldLoad ? mergeResult.selectedPresetId : this.presetLibrary.selectedPresetId };
+        if (!(await this.persistPresetLibrary(nextLibrary))) return;
+        if (shouldLoad) {
+          const preset = nextLibrary.presets.find(entry => entry.id === mergeResult.selectedPresetId)!;
+          this.activePresetFolderId = preset.folderId;
+          this.applyDraftData(preset.data);
+          this.syncDirtyState();
         }
         this.showNotice(`Imported ${mergeResult.importedPresets.length} preset${mergeResult.importedPresets.length === 1 ? '' : 's'}.`, 'success');
       } catch (error) {
@@ -982,8 +1004,7 @@ export default defineComponent({
       const currentPresetId = this.presetLibrary.selectedPresetId;
       if (!nextPresetId || nextPresetId === currentPresetId) return false;
       if (!(await this.confirmDiscardChanges('Load another preset and discard them'))) return false;
-      this.loadPresetById(nextPresetId);
-      return true;
+      return this.loadPresetById(nextPresetId);
     },
   },
 });
