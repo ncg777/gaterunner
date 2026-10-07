@@ -325,7 +325,7 @@
 <script lang="ts">
 import pkg from '../package.json';
 const appVersion = pkg.version;
-import { defineComponent, markRaw } from 'vue';
+import { defineComponent, markRaw, type PropType } from 'vue';
 import EditableSlider from './components/EditableSlider.vue';
 import EditorSurface from './components/EditorSurface.vue';
 import DevelopmentPanel from './components/DevelopmentPanel.vue';
@@ -408,7 +408,6 @@ import {
   clonePresetTrackData,
   getSelectedPreset,
   hasUrlPresetOverrides,
-  loadPresetLibrary,
   normalizePresetData,
   normalizePresetTrackData,
   sanitizeTrackName,
@@ -530,8 +529,7 @@ interface TrackScheduledEvent {
   settings?: Record<string, number | string | boolean>;
 }
 
-function buildInitialState() {
-  const presetLibrary = loadPresetLibrary();
+function buildInitialState(presetLibrary: PresetLibrary) {
   const selectedPreset = getSelectedPreset(presetLibrary);
   const draft = buildDraftFromUrl(window.location.search, selectedPreset.data);
   const selectedTrackId = draft.tracks[0]?.id ?? null;
@@ -546,10 +544,11 @@ function buildInitialState() {
   };
 }
 
-const initialState = buildInitialState();
-
 export default defineComponent({
   name: 'App',
+  props: {
+    initialLibrary: { type: Object as PropType<PresetLibrary>, required: true },
+  },
   components: {
     EditableSlider,
     EditorSurface,
@@ -561,6 +560,7 @@ export default defineComponent({
     TrackStrip,
   },
   data() {
+    const initialState = buildInitialState(this.initialLibrary);
     return {
       showLiveAudio: false,
       liveBuffering: readLiveBuffering() as LiveBuffering,
