@@ -16,6 +16,8 @@ export interface RenderMeasurements { duration: number; sampleRate: number; peak
 export interface RenderStem { id: string; name: string; kind: 'track' | 'lane' | 'return'; trackIndex?: number;
   channels: StereoChannels; recombine: boolean; stage: 'pre-insert' | 'post-insert' | 'wet' }
 export interface DevelopmentRenderOptions { range?: RenderRange; cache?: RenderCache; signal?: AbortSignal;
+  /** Silence selected sources without changing song timing or random identities. */
+  mutedTrackIds?: readonly string[];
   laneStems?: boolean; preInsertStems?: boolean; blockFrames?: number;
   onProgress?: (progress: { completed: number; total: number; stage: string; cacheHit?: boolean }) => void }
 export interface DevelopmentRenderResult { channels: StereoChannels; preMaster: StereoChannels; stems: RenderStem[];
@@ -90,11 +92,25 @@ export async function renderDevelopment(input: PresetData, options: DevelopmentR
   const dryGain = gain(project.reverb.dry);
   let reverbSettings: WavChannelRenderResult['reverb'] | undefined;
   const total = project.tracks.length + (project.studio?.returns.length ?? 0) + 1;
+  const mutedTrackIds = new Set(options.mutedTrackIds);
   for (let index = 0; index < project.tracks.length; index++) {
     signal?.throwIfAborted();
     const track = project.tracks[index];
     const key = await renderKey({ track, events: resolved.tracks[index].events, index, duration: session.duration,
       bpm: project.bpm, a4: project.a4, reverb: project.reverb, studio: { ...project.studio, assets: project.studio?.assets.map(a => a.hash) } });
+    if (mutedTrackIds.has(track.id)) {
+      trackKeys.push(await renderKey({ mutedTrack: key }));
+      stems.push({ id: track.id, name: track.name, kind: 'track', trackIndex: index,
+        channels: empty(), recombine: true, stage: 'post-insert' });
+      if (options.preInsertStems) stems.push({ id: `${track.id}-pre`, name: `${track.name} · before inserts`,
+        kind: 'track', trackIndex: index, channels: empty(), recombine: false, stage: 'pre-insert' });
+      if (options.laneStems && track.trackKind === 'rhythmic') track.drumLanes.forEach((lane, laneIndex) => {
+        stems.push({ id: `${track.id}-lane-${laneIndex}`, name: `${track.name} · ${lane.voiceId}`,
+          kind: 'lane', trackIndex: index, channels: empty(), recombine: false, stage: 'pre-insert' });
+      });
+      options.onProgress?.({ completed: index + 1, total, stage: track.name });
+      continue;
+    }
     trackKeys.push(key);
     const prefixKey=frames===fullFrames?key:await renderKey({track:key,completedPrefixFrames:frames});
     let raw = await options.cache?.get(key);

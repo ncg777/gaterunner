@@ -226,13 +226,15 @@ seeds, delay and reverb state. There is no unvalidated jump into a song. Early
 excerpts allocate buffers only through their end. Returns process contiguous
 blocks with persistent ring, filter and smoothing state. Existing voices/inserts
 keep their full causal buffers to preserve numerical behavior. Quality remains
-48 kHz/24-bit WAV, with original synthesis, polyphony and modulation resolution.
+48 kHz/24-bit WAV for mix exports, with original synthesis, polyphony and modulation
+resolution. Stem exports use 48 kHz/32-bit float WAV to preserve unmastered samples
+above full scale without clipping.
 
 Track post-insert stems include their track effects and global dry trim. Global
 reverb and each auxiliary return are separate wet stems. Sum only files marked
 `recombine: true` in `stems.json`, then apply master gain and GateRunner master
 soft clipping once. This reproduces the appropriate pre-master mix within Float32
-summation/24-bit encoding rounding. Independently clipped/mastered stems cannot
+summation rounding. Independently clipped/mastered stems cannot
 recombine through nonlinear processing. Optional track/lane pre-insert sources
 are marked `recombine: false`: they omit shared track inserts and cannot reproduce
 a nonlinear drum bus by processing every lane independently. Excerpts crop all
@@ -260,7 +262,9 @@ Browser exports run in a worker; cancellation terminates it. CLI/API AbortSignal
 rendering runs in a cancellable worker, preserving completed disk entries.
 Custom in-process caches yield between tracks and return blocks. Developed browser
 Play prepares audio before starting playback; editing/mute/solo stops prepared
-playback and the next Play prepares the current project. This is suitable for
+playback (including preparation) and the next Play prepares the current project.
+Muting preserves phrase lengths, song activation boundaries and random identities;
+API callers can use `mutedTrackIds` for the same behavior. This is suitable for
 composition previews, with a preparation delay for long projects. Legacy live
 editing keeps its existing behavior.
 

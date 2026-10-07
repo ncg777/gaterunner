@@ -48,13 +48,15 @@ function applyStep(event: DevelopedEvent, control: StepControl, bpm: number, see
   event.duration = control.durationBeats !== undefined ? control.durationBeats * 60 / bpm : event.duration * (control.gate ?? 1);
   const varied = (seededChoice(seed, event.id, 'velocity') * 2 - 1) * (control.velocityVariation ?? 0);
   if (control.velocity !== undefined || varied !== 0) {
+    const previousVelocity = event.velocity;
     event.velocity = Math.max(0, Math.min(1, (control.velocity ?? event.velocity) + varied));
-    event.noteVelocities = event.notes.map(() => event.velocity);
+    event.noteVelocities = event.notes.map((_, index) => Math.max(0, Math.min(1,
+      (control.velocity ?? event.noteVelocities?.[index] ?? previousVelocity) + varied)));
   }
   event.locks = { ...event.locks, ...control.locks };
   if (control.slide !== undefined) { event.locks.glideTime = control.slide; event.locks.glideMode='always'; }
   if (control.legato !== undefined) event.locks.monoLegato = control.legato;
-  event.tie = control.tie;
+  if (control.tie !== undefined) event.tie = control.tie;
   return true;
 }
 /** Arrangement and random choices are resolved in full song coordinates, before slicing. */

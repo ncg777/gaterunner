@@ -747,6 +747,9 @@ export default defineComponent({
       return this.getTrackDelaySeconds(track) + track.repeats * this.getTrackRepeatDuration(track, trackNotes);
     },
     getLoopDurationSecondsFromTrackLengths(): number {
+      if (usesDevelopment({ tracks: this.tracks, studio: this.studio })) {
+        return Math.max(1e-9, ...this.tracks.map(trackDurationBeats)) * 60 / this.bpm;
+      }
       const entries = this.allTrackActualNotes.filter((entry) => entry.notes.length > 0);
       if (entries.length === 0) {
         return 1;
@@ -948,7 +951,7 @@ export default defineComponent({
       }
     },
     toggleTrackMuted(trackId: string) {
-      if (this.developmentPlayer) this.stopSequencer();
+      if (this.developmentPlayer || this.developmentController) this.stopSequencer();
       const state = this.getTrackMixState(trackId);
       this.trackMixStates = {
         ...this.trackMixStates,
@@ -958,7 +961,7 @@ export default defineComponent({
       this.scheduleTrackLoopRebuild();
     },
     toggleTrackSoloed(trackId: string) {
-      if (this.developmentPlayer) this.stopSequencer();
+      if (this.developmentPlayer || this.developmentController) this.stopSequencer();
       const state = this.getTrackMixState(trackId);
       this.trackMixStates = {
         ...this.trackMixStates,
@@ -1041,6 +1044,7 @@ export default defineComponent({
       this.inputDialogValue = '';
     },
     handleTrackDraftChange(nextTrack: PresetTrackData) {
+      this.invalidateDevelopmentPlayback();
       const previousTrack = this.currentTrack ? clonePresetTrackData(this.currentTrack) : null;
       const normalizedTrack = normalizePresetTrackData(nextTrack);
       this.tracks = this.tracks.map((track) => track.id === normalizedTrack.id ? normalizedTrack : track);
@@ -1079,6 +1083,7 @@ export default defineComponent({
         .map(event => ({ ...event, step: event.step ?? 0 }));
     },
     handleBitmaskSequenceInput(nextValue: string) {
+      this.invalidateDevelopmentPlayback();
       this.bitmaskSequenceInput = nextValue;
       this.refreshDirtyState();
       if (this.isRunning) {
@@ -1422,6 +1427,7 @@ export default defineComponent({
       });
     },
     applyDraftData(data: PresetData, options: { preserveTrackMixStates?: boolean } = {}) {
+      this.invalidateDevelopmentPlayback();
       const normalized = clonePresetData(normalizePresetData(data));
       const previousTrackMixStates = this.trackMixStates;
       this.studio = normalizeStudio(normalized.studio);
@@ -1455,7 +1461,7 @@ export default defineComponent({
       this.applyRealtimeSettings();
     },
     applyRealtimeSettings(options: { rebuildLoops?: boolean; createMissingChains?: boolean } = {}) {
-      if (this.developmentPlayer) this.stopSequencer();
+      if (this.developmentPlayer || this.developmentController) this.stopSequencer();
       const rebuildLoops = options.rebuildLoops ?? true;
       const createMissingChains = options.createMissingChains ?? this.isRunning;
       Tone.getTransport().bpm.value = this.bpm;
@@ -1478,10 +1484,12 @@ export default defineComponent({
       this.isDirty = nextDirty;
     },
     handleDraftChange() {
+      this.invalidateDevelopmentPlayback();
       this.applyRealtimeSettings();
       this.refreshDirtyState();
     },
     handleReverbDraftChange(nextReverb: PresetReverbData) {
+      this.invalidateDevelopmentPlayback();
       this.reverbEnabled = nextReverb.enabled;
       this.reverbDecay = nextReverb.decay;
       this.reverbPreDelay = nextReverb.preDelay;
@@ -2866,7 +2874,7 @@ export default defineComponent({
       const totalLoopDuration = this.getLoopDurationSecondsFromTrackLengths();
 
       for (const entry of this.allTrackActualNotes) {
-        if (entry.notes.length === 0 || !this.isTrackAudible(entry.track.id)) {
+        if (!this.isTrackAudible(entry.track.id)) {
           continue;
         }
 
@@ -2961,6 +2969,7 @@ export default defineComponent({
       }
 
       this.isStarting = true;
+      let developmentSignal: AbortSignal | undefined;
       try {
         await this.audioSleep?.cancel();
         this.audioSleep = null;
@@ -2984,15 +2993,18 @@ export default defineComponent({
 
         if (usesDevelopment(this.getDraftData())) {
           const project = this.getDraftData();
+          const controller = markRaw(new AbortController());
+          this.developmentController = controller;
+          developmentSignal = controller.signal;
           if (this.useMidiOutput) {
-            this.developmentSchedule = markRaw(await resolveProjectEvents(project));
+            const resolved = await resolveProjectEvents(project);
+            controller.signal.throwIfAborted();
+            this.developmentSchedule = markRaw(resolved);
+            this.developmentController = null;
           } else {
-            const controller = markRaw(new AbortController()); this.developmentController = controller;
-            project.tracks.forEach(track => { if (!this.audibleTrackIds.has(track.id)) {
-              track.sequenceInput = '0';
-              if (track.development) track.development.patterns.forEach(pattern => { pattern.sequence = '0'; });
-            } });
-            const rendered = await renderBrowserDevelopment(project, { signal: controller.signal });
+            const rendered = await renderBrowserDevelopment(project, { signal: controller.signal,
+              mutedTrackIds: project.tracks.filter(track => !this.audibleTrackIds.has(track.id)).map(track => track.id) });
+            controller.signal.throwIfAborted();
             this.developmentPlayer?.dispose(); this.developmentPlayer = null;
             const buffer = Tone.getContext().createBuffer(2, rendered.preMaster[0].length, rendered.sampleRate);
             buffer.copyToChannel(new Float32Array(rendered.preMaster[0]), 0); buffer.copyToChannel(new Float32Array(rendered.preMaster[1]), 1);
@@ -3015,6 +3027,8 @@ export default defineComponent({
         Tone.getTransport().seconds = 0;
         Tone.getTransport().start();
       } catch (error) {
+        if (developmentSignal?.aborted) return;
+        this.developmentController = null;
         console.error('Unable to start audio playback:', error);
         this.isRunning = false;
         stopLiveDiagnostics(Tone.getContext());
@@ -3029,6 +3043,7 @@ export default defineComponent({
     },
     stopSequencer() {
       this.developmentController?.abort(); this.developmentController = null;
+      this.developmentSchedule = null;
       this.developmentPlayer?.stop(); this.developmentPlayer?.dispose(); this.developmentPlayer = null;
       this.isRunning = false;
       this.stopTrackLoops();
@@ -3036,6 +3051,12 @@ export default defineComponent({
       Tone.getTransport().seconds = 0;
       stopLiveDiagnostics(Tone.getContext());
       this.scheduleAudioSleep();
+    },
+    invalidateDevelopmentPlayback() {
+      if (this.developmentController || this.developmentPlayer || (this.developmentSchedule && this.isRunning)) {
+        this.stopSequencer();
+      }
+      this.developmentSchedule = null;
     },
     handleStudioProjectChange(project: PresetData) {
       if (this.isRunning) this.stopSequencer();

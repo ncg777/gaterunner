@@ -17,7 +17,7 @@ export function supportedFeatures() {
     conditions: ['every', 'first', 'fill', 'probability'], articulation: ['velocity', 'gate', 'durationBeats', 'tie', 'legato', 'slide', 'offsetBeats', 'timingVariation', 'velocityVariation'],
     automation: ['song', 'note', 'linear', 'smooth', 'step', 'snapshots'], returns: ['delay', 'filter', 'saturation', 'gain'],
     samples: ['WAV PCM 8/16/24/32', 'WAV float 32/64', 'mono', 'stereo', 'velocity-layers', 'round-robin', 'seeded-random'],
-    render: { sampleRate: 48000, wavBitDepth: 24, ranges: ['bars', 'beats', 'seconds'], stems: ['tracks', 'pre-insert-drum-lanes', 'returns'],
+    render: { sampleRate: 48000, wavBitDepth: 24, stemWavFormat: 'float32', ranges: ['bars', 'beats', 'seconds'], stems: ['tracks', 'pre-insert-drum-lanes', 'returns'],
       cache: 'validated completed tracks and returns, including completed warm-up prefixes', blockProcessing: 'auxiliary returns', excerptState: 'full warm-up from song origin' },
     parameters: { track: TRACK_PARAMETERS, returns: RETURN_PARAMETERS, drums: Object.fromEntries(DRUM_VOICE_IDS.map(id => [id, getDrumParameterDefinitions(id)])) } };
 }
@@ -50,11 +50,11 @@ export async function exportStems(project: PresetData, directory: string, option
   const selected=rendered.stems.filter(s=>!options.stemStage||options.stemStage==='all'||(options.stemStage==='pre'?s.stage==='pre-insert':s.stage!=='pre-insert'));
   for (const [i, stem] of selected.entries()) {
     options.signal?.throwIfAborted(); const file = join(destination, `${String(i + 1).padStart(2, '0')}-${safeName(stem.id)}.wav`);
-    await writeFile(file, encodeWavFromChannelsSync(stem.channels, rendered.sampleRate));
+    await writeFile(file, encodeWavFromChannelsSync(stem.channels, rendered.sampleRate, { format: 'float32' }));
     files.push({ id: stem.id, name: stem.name, kind: stem.kind, stage: stem.stage, recombine: stem.recombine, file,
       measurements: measureChannels(stem.channels, rendered.sampleRate) });
   }
-  const manifest = { renderer: RENDERER_VERSION, range: rendered.range, sampleRate: rendered.sampleRate,
+  const manifest = { renderer: RENDERER_VERSION, range: rendered.range, sampleRate: rendered.sampleRate, format: 'float32',
     masterGain: project.masterGain, stemStage:options.stemStage ?? 'all',
     instructions: options.stemStage==='pre'?'Dry editing sources; they do not recombine into the wet pre-master mix.':'Sum recombine=true stems for the pre-master mix. Apply master gain and GateRunner soft clip once. Lane/pre-insert files are alternative editing sources.', files };
   const manifestFile = join(destination, 'stems.json'); await writeFile(manifestFile, JSON.stringify(manifest, null, 2) + '\n');

@@ -795,7 +795,7 @@ function getRenderTrailSeconds(prepared: PreparedRenderData): number {
   );
   const hasReverbSend = prepared.reverb.enabled
     && prepared.reverb.wet > -96
-    && prepared.tracks.some((entry) => entry.track.reverbWet > -96);
+    && prepared.tracks.some((entry) => entry.track.reverbWet > -96 || entry.sourceTrack?.development?.enabled);
   const reverbTrail = hasReverbSend ? prepared.reverb.preDelay + prepared.reverb.decay : 0;
   const developedRelease = Math.max(0, ...prepared.tracks.flatMap(entry => entry.scheduledEvents?.map(e => Number(e.settings?.release ?? entry.track.release)) ?? []),
     ...prepared.tracks.flatMap(entry => entry.sourceTrack?.development?.enabled ? entry.sourceTrack.development.samples.map(s => s.release) : []));
@@ -1036,7 +1036,7 @@ function renderPreparedWavChannels(
   maximumSeconds?:number,
 ): WavChannelRenderResult {
   const hasNotes = prepared.tracks.some((entry) => entry.scheduledEvents ? entry.scheduledEvents.length > 0 : entry.actualNotes.some((notes) => notes.length > 0));
-  if (!hasNotes) {
+  if (!hasNotes && prepared.resolvedDuration === undefined) {
     return {
       left: new Float32Array(1),
       right: new Float32Array(1),
@@ -1092,7 +1092,7 @@ function renderPreparedWavChannels(
     const trackRight = new Float32Array(frameCount);
     const filterNoteStarts = events.map(event => event.time).sort((a, b) => a - b);
     const isDrumTrack = entry.track.trackKind === 'rhythmic';
-    const development = entry.sourceTrack?.development;
+    const development = entry.sourceTrack?.development?.enabled ? entry.sourceTrack.development : undefined;
     const drumEchoLeft = isDrumTrack && entry.track.echoEnabled && (entry.track.echoWet > -96 || development?.enabled) ? new Float32Array(frameCount) : null;
     const drumEchoRight = drumEchoLeft ? new Float32Array(frameCount) : null;
     const drumReverbLeft = isDrumTrack && hasReverbSend && (entry.track.reverbWet > -96 || development?.enabled) ? new Float32Array(frameCount) : null;

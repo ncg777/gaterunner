@@ -11,7 +11,7 @@ let encodedFrames = 0;
 scope.onmessage = ({ data }) => {
   try {
     if (data.type === 'init') {
-      encoder = createWavEncoder(data.channels, data.frames, data.sampleRate, { dither: data.dither });
+      encoder = createWavEncoder(data.channels, data.frames, data.sampleRate, { dither: data.dither, format: data.format });
       encodedFrames = 0;
     } else {
       if (!encoder) throw new Error('WAV encoder has not been initialized.');
