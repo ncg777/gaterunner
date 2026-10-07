@@ -7,7 +7,7 @@ sparse phrases, darker hats and echo throws are independent choices.
 
 ## Open the demonstration
 
-Run `yarn dev`, open **Presets → Import**, and select
+Run `yarn dev`, open **Preset Actions → Import JSON**, and select
 `cli/fixtures/development-demo.json`. Select the bass, drums or chords and expand
 **Phrases, motion & studio**. Press Play to prepare and play the developed project.
 The Render tab can preview/download a range, export stems, or bounce a source into
