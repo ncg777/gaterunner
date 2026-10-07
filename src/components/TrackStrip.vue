@@ -73,6 +73,9 @@
               :style="{ flexGrow: entry.delayBeats }"
               :title="`${formatBeats(entry.delayBeats)} beat delay`"
             ></span>
+            <template v-for="section in entry.sections" :key="section.id">
+              <span class="track-timeline-segment repeat" :style="{flexGrow: section.beats}" :title="`${section.name}: ${formatBeats(section.beats)} beats`">{{ section.name }}</span>
+            </template>
             <template v-for="repeat in entry.repeatBlocks" :key="repeat">
               <span
                 v-if="entry.paddingBeforeBeats > 0"
@@ -167,6 +170,7 @@
 <script lang="ts">
 import { defineComponent, type PropType } from 'vue';
 import type { PresetTrackData } from '../presets';
+import { trackDurationBeats } from '../domain/developmentSchedule';
 import {
   buildTrackChunkActivationStates,
   parseBitmaskSequenceInput,
@@ -194,6 +198,7 @@ export interface TrackTimingEntry {
   padBeats: number;
   repeatBlocks: number[];
   chunkStates: boolean[];
+  sections: { id: string; name: string; beats: number }[];
 }
 
 export default defineComponent({
@@ -279,11 +284,13 @@ export default defineComponent({
         const delayBeats = track.delay * track.numerator;
         const paddingBeforeBeats = track.paddingBefore * track.numerator;
         const paddingAfterBeats = track.paddingAfter * track.numerator;
-        const activeBeats = (paddingBeforeBeats + patternBeats + paddingAfterBeats) * track.repeats;
+        const sections = track.development?.enabled ? track.development.sections.map(s => ({id:s.id,name:s.name,beats:s.length*(s.unit==='bars'?track.numerator:1)})) : [];
+        const activeBeats = sections.length ? trackDurationBeats(track) - delayBeats : (paddingBeforeBeats + patternBeats + paddingAfterBeats) * track.repeats;
         const totalBeats = delayBeats + activeBeats;
         const totalBars = track.numerator > 0 ? totalBeats / track.numerator : 0;
         return {
           track,
+          sections,
           trackIndex,
           sequenceLength,
           numerator: track.numerator,
@@ -297,7 +304,7 @@ export default defineComponent({
           totalBeats,
           totalBars,
           padBeats: Math.max(0, loopBeats - totalBeats),
-          repeatBlocks: Array.from({ length: track.repeats }, (_, index) => index + 1),
+          repeatBlocks: sections.length ? [] : Array.from({ length: track.repeats }, (_, index) => index + 1),
           chunkStates: buildTrackChunkActivationStates(masks, trackIndex),
         };
       });

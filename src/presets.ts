@@ -1,4 +1,5 @@
 import type { ModulationSettings } from './audio/modulation.js';
+import { normalizeDevelopment, normalizeStudio, type TrackDevelopment, type ProjectStudio } from './domain/development.js';
 import { normalizeSynthEngine, LEGACY_NOISE_WAVEFORMS, type SynthMode, type NoiseEngineSettings, type ChoirEngineSettings } from './audio/synthEngine.js';
 import {
   cloneWaveshaperSettings,
@@ -58,6 +59,7 @@ export type TrackKind = 'melodic' | 'rhythmic';
 export const MAX_TRACK_POLYPHONY = 16;
 
 export interface PresetTrackData {
+  development?: TrackDevelopment;
   id: string;
   name: string;
   trackKind: TrackKind;
@@ -285,6 +287,7 @@ export interface PresetReverbData {
 }
 
 export interface PresetData {
+  studio?: ProjectStudio;
   bpm: number;
   /** Concert pitch frequency of A4 in Hz (default 440). */
   a4: number;
@@ -841,6 +844,7 @@ export function sanitizeTrackName(name: string | null | undefined, fallbackIndex
 
 export function clonePresetTrackData(track: PresetTrackData): PresetTrackData {
   return {
+    ...(track.development === undefined ? {} : { development: normalizeDevelopment(track.development) }),
     id: track.id,
     name: track.name,
     trackKind: track.trackKind,
@@ -977,6 +981,7 @@ export function normalizePresetTrackData(value: unknown, index = 0): PresetTrack
   const raw = (typeof value === 'object' && value !== null ? value : {}) as Partial<PresetTrackData>;
 
   return {
+    ...(raw.development === undefined ? {} : { development: normalizeDevelopment(raw.development) }),
     id: typeof raw.id === 'string' && raw.id.length > 0 ? raw.id : createTrackId(index),
     name: sanitizeTrackName(raw.name, index),
     trackKind: raw.trackKind === 'rhythmic' ? 'rhythmic' : DEFAULT_PRESET_TRACK_DATA.trackKind,
@@ -1130,6 +1135,7 @@ function normalizeLegacyTrack(value: LegacyTrackFields): PresetTrackData {
 
 export function clonePresetData(data: PresetData): PresetData {
   return {
+    ...(data.studio === undefined ? {} : { studio: normalizeStudio(data.studio) }),
     bpm: data.bpm,
     a4: data.a4,
     masterGain: data.masterGain,
@@ -1143,10 +1149,33 @@ export function clonePresetData(data: PresetData): PresetData {
 /** Appends deep-cloned source tracks while preserving the current song settings. */
 export function mergePresetTracks(current: PresetData, source: PresetData): PresetData {
   const merged = clonePresetData(current);
+  const returnMap = new Map<string, string>();
+  if (source.studio) {
+    const studio = merged.studio ?? normalizeStudio({})!;
+    const used = new Set(studio.returns.map(a => a.id));
+    for (const original of source.studio.returns) {
+      let id = original.id, suffix = 2;
+      while (used.has(id)) id = `${original.id}-import-${suffix++}`;
+      used.add(id); returnMap.set(original.id, id);
+      studio.returns.push({ ...JSON.parse(JSON.stringify(original)), id });
+    }
+    for (const asset of source.studio.assets) if (!studio.assets.some(a => a.hash === asset.hash)) studio.assets.push(JSON.parse(JSON.stringify(asset)));
+    merged.studio = studio;
+  }
   const trackIds = new Set(merged.tracks.map((track) => track.id));
   const trackNames = new Set(merged.tracks.map((track) => track.name));
   const importedTracks = source.tracks.map((sourceTrack, index) => {
     const track = clonePresetTrackData(sourceTrack);
+    if (track.development && returnMap.size) {
+      const remap = (target: string) => target.startsWith('send.') ? `send.${returnMap.get(target.slice(5)) ?? target.slice(5)}` : target;
+      const values = (bag: Record<string, import('./domain/development.js').ControlValue> | undefined) => bag ? Object.fromEntries(Object.entries(bag).map(([key,value]) => [remap(key),value])) : bag;
+      const d = track.development;
+      d.sends = Object.fromEntries(Object.entries(d.sends).map(([id,value]) => [returnMap.get(id) ?? id,value]));
+      d.automation.forEach(curve => { curve.target=remap(curve.target); });
+      d.snapshots.forEach(snapshot => { snapshot.values=values(snapshot.values)!; });
+      [...d.steps, ...d.patterns.flatMap(p=>p.steps ?? [])].forEach(step => { step.locks=values(step.locks); });
+      d.patterns.forEach(pattern => { pattern.overrides=values(pattern.overrides); });
+    }
     const generatedId = createTrackId(merged.tracks.length + index);
     let uniqueId = generatedId;
     let suffix = 2;
@@ -1186,6 +1215,7 @@ export function normalizePresetData(value: unknown): PresetData {
     : [];
 
   return {
+    ...(raw.studio === undefined ? {} : { studio: normalizeStudio(raw.studio) }),
     bpm: clamp(parseInteger(raw.bpm?.toString(), DEFAULT_PRESET_DATA.bpm), 1, 499),
     a4: clamp(parseNumber(raw.a4, DEFAULT_PRESET_DATA.a4), 380, 500),
     masterGain: clamp(parseNumber(raw.masterGain, DEFAULT_PRESET_DATA.masterGain), -96, 12),
@@ -1199,6 +1229,8 @@ export function normalizePresetData(value: unknown): PresetData {
 }
 
 export function arePresetDataEqual(left: PresetData, right: PresetData): boolean {
+  if (JSON.stringify(left.studio) !== JSON.stringify(right.studio)
+    || left.tracks.some((track, index) => JSON.stringify(track.development) !== JSON.stringify(right.tracks[index]?.development))) return false;
   if (left.bpm !== right.bpm
     || left.a4 !== right.a4
     || left.masterGain !== right.masterGain
@@ -1744,9 +1776,13 @@ export function updatePresetData(preset: NamedPreset, data: PresetData): NamedPr
 
 export function buildDraftFromUrl(search: string, baseData: PresetData): PresetData {
   const params = new URLSearchParams(search);
+  if (params.has('project')) {
+    try { return normalizePresetData(JSON.parse(params.get('project')!)); } catch { /* Legacy URL fallback. */ }
+  }
   const firstTrack = baseData.tracks[0] ?? DEFAULT_PRESET_TRACK_DATA;
 
   return normalizePresetData({
+    ...(baseData.studio === undefined ? {} : { studio: baseData.studio }),
     bpm: params.get('bpm') ?? baseData.bpm,
     a4: params.get('a4') ?? baseData.a4,
     masterGain: baseData.masterGain,
@@ -1781,6 +1817,7 @@ export function buildDraftFromUrl(search: string, baseData: PresetData): PresetD
 
 export function hasUrlPresetOverrides(search: string): boolean {
   const params = new URLSearchParams(search);
+  if (params.has('project')) return true;
 
   return ['bpm', 'a4', 'numerator', 'denominator', 'phase', 'waveform', 'sequence', 'octave', 'lengthFactor', 'lengthOffset', 'forte', 'delay', 'repeats', 'timeWarpEnabled', 'timeWarpCurve', 'timeWarpExpression', 'timeWarpRepeats', 'timeWarpAmount', 'timeWarpQuantize', 'timeWarpNoteLengths', 'b']
     .some((key) => params.has(key));
@@ -1817,6 +1854,9 @@ export function parsePresetImportPayload(text: string): PresetImportPayload {
   }
 
   const raw = parsed as Record<string, unknown>;
+  if (raw.type === 'gaterunner-asset-package' && raw.version === 1) {
+    return { version: 2, kind: 'single-preset', exportedAt: isoNow(), preset: createNamedPreset('Sample project', normalizePresetData(raw.project)) };
+  }
   if (raw.version !== 1 && raw.version !== 2) {
     throw new Error('Unsupported preset file version.');
   }

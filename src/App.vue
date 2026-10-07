@@ -250,6 +250,7 @@
         @track-change="handleTrackDraftChange"
         @reverb-change="handleReverbDraftChange"
       />
+      <DevelopmentPanel :project="draftData" :track-id="selectedTrackId" @update:project="handleStudioProjectChange" />
 
       <ExportProgressDialog
         :visible="isExporting"
@@ -327,6 +328,11 @@ const appVersion = pkg.version;
 import { defineComponent, markRaw } from 'vue';
 import EditableSlider from './components/EditableSlider.vue';
 import EditorSurface from './components/EditorSurface.vue';
+import DevelopmentPanel from './components/DevelopmentPanel.vue';
+import { buildLegacyTrackEvents } from './domain/scheduling';
+import { usesDevelopment, normalizeStudio, type ProjectStudio } from './domain/development';
+import { resolveProjectEvents, trackDurationBeats, type ResolvedProject } from './domain/developmentSchedule';
+import { renderBrowserDevelopment } from './audio/browserDevelopment';
 import ExportProgressDialog from './components/ExportProgressDialog.vue';
 import HelpDialog from './components/HelpDialog.vue';
 import LiveAudioDialog from './components/LiveAudioDialog.vue';
@@ -520,6 +526,8 @@ interface TrackScheduledEvent {
   drumVoiceIds?: DrumVoiceId[];
   step: number;
   order: number;
+  locks?: Record<string, number | string | boolean>;
+  settings?: Record<string, number | string | boolean>;
 }
 
 function buildInitialState() {
@@ -545,6 +553,7 @@ export default defineComponent({
   components: {
     EditableSlider,
     EditorSurface,
+    DevelopmentPanel,
     ExportProgressDialog,
     HelpDialog,
     LiveAudioDialog,
@@ -561,6 +570,10 @@ export default defineComponent({
       forte: initialState.draft.forte,
       bitmaskSequenceInput: initialState.draft.bitmaskSequenceInput,
       tracks: initialState.draft.tracks.map((track) => clonePresetTrackData(track)) as PresetTrackData[],
+      studio: normalizeStudio(initialState.draft.studio) as ProjectStudio | undefined,
+      developmentSchedule: null as ResolvedProject | null,
+      developmentPlayer: null as Tone.Player | null,
+      developmentController: null as AbortController | null,
       trackMixStates: {} as Record<string, TrackMixState>,
       selectedTrackId: initialState.selectedTrackId as string | null,
       reverbEnabled: initialState.draft.reverb.enabled,
@@ -730,6 +743,7 @@ export default defineComponent({
         + (track.paddingBefore + track.paddingAfter) * this.getTrackBarSeconds(track);
     },
     getTrackTotalDuration(track: PresetTrackData, trackNotes: number[][]): number {
+      if (track.development?.enabled && track.development.sections.length) return trackDurationBeats(track) * 60 / this.bpm;
       return this.getTrackDelaySeconds(track) + track.repeats * this.getTrackRepeatDuration(track, trackNotes);
     },
     getLoopDurationSecondsFromTrackLengths(): number {
@@ -934,6 +948,7 @@ export default defineComponent({
       }
     },
     toggleTrackMuted(trackId: string) {
+      if (this.developmentPlayer) this.stopSequencer();
       const state = this.getTrackMixState(trackId);
       this.trackMixStates = {
         ...this.trackMixStates,
@@ -943,6 +958,7 @@ export default defineComponent({
       this.scheduleTrackLoopRebuild();
     },
     toggleTrackSoloed(trackId: string) {
+      if (this.developmentPlayer) this.stopSequencer();
       const state = this.getTrackMixState(trackId);
       this.trackMixStates = {
         ...this.trackMixStates,
@@ -1055,112 +1071,12 @@ export default defineComponent({
       noteVelocities?: number[][],
       drumVoiceIds?: DrumVoiceId[][],
     ): TrackScheduledEvent[] {
-      if (trackNotes.length === 0 || !Number.isFinite(totalLoopDuration) || !(totalLoopDuration > 0)) {
-        return [];
+      if (this.developmentSchedule?.tracks[trackIndex]?.track.id === track.id && usesDevelopment(this.getDraftData())) {
+        return this.developmentSchedule.tracks[trackIndex].events.map(event => ({ ...event, step: event.step ?? 0 }));
       }
-
-      const trackQuant = this.getTrackQuant(track);
-      const trackPeriod = trackNotes.length * trackQuant;
-      if (trackPeriod <= 0) {
-        return [];
-      }
-
-      const delaySeconds = this.getTrackDelaySeconds(track);
-      const paddingBeforeSeconds = track.paddingBefore * this.getTrackBarSeconds(track);
-      const repeatPeriod = this.getTrackRepeatDuration(track, trackNotes);
-      const warpAmount = track.timeWarpEnabled ? track.timeWarpAmount / 100 : 0;
-      const warpEnabled = track.timeWarpEnabled && warpAmount > 0;
-      const warpResolution = resolveTimeWarpFunction(track.timeWarpCurve, track.timeWarpExpression);
-      const warpChunks = track.timeWarpEnabled ? Math.max(1, Math.floor(track.timeWarpRepeats)) : 1;
-      const chunkPeriod = trackPeriod / warpChunks;
-      const quantizeDivisions = track.timeWarpQuantize > 0
-        ? Math.max(1, Math.round((trackNotes.length / warpChunks) * track.timeWarpQuantize))
-        : 0;
-      if (![trackQuant, trackPeriod, delaySeconds, paddingBeforeSeconds, repeatPeriod, chunkPeriod].every(Number.isFinite)
-        || !(chunkPeriod > 0)) {
-        return [];
-      }
-      const activationMasks = this.activationMasks;
-      const events: TrackScheduledEvent[] = [];
-      const stepDurations = getStepDurations(trackNotes);
-      let order = 0;
-
-      for (let repeat = 0; repeat < track.repeats; repeat += 1) {
-        const loopStart = delaySeconds + repeat * repeatPeriod + paddingBeforeSeconds;
-        if (!Number.isFinite(loopStart)) {
-          continue;
-        }
-        for (let i = 0; i < trackNotes.length; i += 1) {
-          const notes = trackNotes[i];
-          if (notes.length === 0) {
-            continue;
-          }
-
-          const durSteps = stepDurations[i];
-          const baseDuration = ((durSteps * track.lengthFactor / 100.0) + track.lengthOffset) * trackQuant;
-          if (!Number.isFinite(baseDuration)) {
-            continue;
-          }
-          const localTime = i * trackQuant;
-          const chunkIndex = Math.min(warpChunks - 1, Math.floor(localTime / chunkPeriod));
-          const chunkStart = chunkIndex * chunkPeriod;
-          let eventLocalTime = localTime;
-          let duration = baseDuration;
-
-          if (warpEnabled) {
-            const startNormalized = (localTime - chunkIndex * chunkPeriod) / chunkPeriod;
-            const endNormalized = Math.min(1, startNormalized + (baseDuration / chunkPeriod));
-            let warpedStart = warpNormalizedTime(startNormalized, warpResolution.fn, warpAmount);
-            let warpedEnd = warpNormalizedTime(endNormalized, warpResolution.fn, warpAmount);
-
-            if (quantizeDivisions > 0) {
-              warpedStart = quantizeNormalizedTime(warpedStart, quantizeDivisions);
-              warpedEnd = quantizeNormalizedTime(warpedEnd, quantizeDivisions);
-            }
-
-            eventLocalTime = chunkStart + warpedStart * chunkPeriod;
-            if (track.timeWarpNoteLengths) {
-              duration = Math.max(0.0005, Math.abs(warpedEnd - warpedStart) * chunkPeriod);
-            }
-          }
-
-          const eventTime = loopStart + applyTrackPhase(eventLocalTime, track.phase, trackQuant, trackPeriod);
-          if (!Number.isFinite(eventTime) || !Number.isFinite(duration)
-            || eventTime < 0 || eventTime >= totalLoopDuration || duration <= 0) {
-            continue;
-          }
-
-          const gated = gateEventByActivation({
-            time: eventTime,
-            duration,
-            trackIndex,
-            loopDuration: totalLoopDuration,
-            masks: activationMasks,
-          });
-          if (!gated || !Number.isFinite(gated.time) || !Number.isFinite(gated.duration)
-            || gated.time < 0 || gated.duration <= 0) {
-            continue;
-          }
-
-          events.push({
-            time: gated.time,
-            duration: gated.duration,
-            velocity: this.getTrackVelocity(notes, track.velocityMultiplier),
-            notes,
-            noteVelocities: noteVelocities?.[i]?.map((velocity) => Math.min(1, velocity * track.velocityMultiplier)),
-            drumVoiceIds: drumVoiceIds?.[i],
-            step: i,
-            order,
-          });
-          order += 1;
-        }
-      }
-
-      if (warpEnabled || track.phase > 0) {
-        events.sort((left, right) => (left.time === right.time ? left.order - right.order : left.time - right.time));
-      }
-
-      return events;
+      return buildLegacyTrackEvents({ track, quant: this.getTrackQuant(track), actualNotes: trackNotes,
+        noteVelocities, drumVoiceIds }, this.bpm, totalLoopDuration, trackIndex, this.activationMasks)
+        .map(event => ({ ...event, step: event.step ?? 0 }));
     },
     handleBitmaskSequenceInput(nextValue: string) {
       this.bitmaskSequenceInput = nextValue;
@@ -1317,6 +1233,11 @@ export default defineComponent({
       }
     },
     async renderMixWav(signal?: AbortSignal): Promise<Uint8Array> {
+      if (usesDevelopment(this.getDraftData())) {
+        const rendered = await renderBrowserDevelopment(this.getDraftData(), { signal,
+          onProgress: p => this.setWavExportProgress(5 + 80 * p.completed / p.total, p.stage) });
+        return encodeWavInWorker(rendered.channels, rendered.sampleRate, { signal });
+      }
       signal?.throwIfAborted();
       this.setWavExportProgress(8, 'Preparing render...');
       await this.$nextTick();
@@ -1482,6 +1403,7 @@ export default defineComponent({
     },
     getDraftData(): PresetData {
       return normalizePresetData({
+        ...(this.studio === undefined ? {} : { studio: this.studio }),
         bpm: this.bpm,
         a4: this.a4,
         masterGain: this.masterGain,
@@ -1502,6 +1424,8 @@ export default defineComponent({
     applyDraftData(data: PresetData, options: { preserveTrackMixStates?: boolean } = {}) {
       const normalized = clonePresetData(normalizePresetData(data));
       const previousTrackMixStates = this.trackMixStates;
+      this.studio = normalizeStudio(normalized.studio);
+      this.developmentSchedule = null;
       this.bpm = normalized.bpm;
       this.a4 = normalized.a4;
       this.masterGain = normalized.masterGain;
@@ -1531,6 +1455,7 @@ export default defineComponent({
       this.applyRealtimeSettings();
     },
     applyRealtimeSettings(options: { rebuildLoops?: boolean; createMissingChains?: boolean } = {}) {
+      if (this.developmentPlayer) this.stopSequencer();
       const rebuildLoops = options.rebuildLoops ?? true;
       const createMissingChains = options.createMissingChains ?? this.isRunning;
       Tone.getTransport().bpm.value = this.bpm;
@@ -2823,6 +2748,10 @@ export default defineComponent({
       }
     },
     async getMidi(): Promise<Midi> {
+      if (usesDevelopment(this.getDraftData())) {
+        const { generateDevelopedMidi } = await import('./audio/developmentRender');
+        return new Midi(await generateDevelopedMidi(this.getDraftData()));
+      }
       const midi = new Midi();
       
       midi.header.setTempo(this.bpm);
@@ -3053,6 +2982,30 @@ export default defineComponent({
           throw lastError instanceof Error ? lastError : new Error('Audio context did not resume.');
         }
 
+        if (usesDevelopment(this.getDraftData())) {
+          const project = this.getDraftData();
+          if (this.useMidiOutput) {
+            this.developmentSchedule = markRaw(await resolveProjectEvents(project));
+          } else {
+            const controller = markRaw(new AbortController()); this.developmentController = controller;
+            project.tracks.forEach(track => { if (!this.audibleTrackIds.has(track.id)) {
+              track.sequenceInput = '0';
+              if (track.development) track.development.patterns.forEach(pattern => { pattern.sequence = '0'; });
+            } });
+            const rendered = await renderBrowserDevelopment(project, { signal: controller.signal });
+            this.developmentPlayer?.dispose(); this.developmentPlayer = null;
+            const buffer = Tone.getContext().createBuffer(2, rendered.preMaster[0].length, rendered.sampleRate);
+            buffer.copyToChannel(new Float32Array(rendered.preMaster[0]), 0); buffer.copyToChannel(new Float32Array(rendered.preMaster[1]), 1);
+            setMasterGainDb(getMasterBus(), this.masterGain);
+            const player = markRaw(new Tone.Player({ url: buffer, onstop: () => {
+              this.isRunning = false; this.developmentController=null; this.scheduleAudioSleep();
+              window.setTimeout(()=>{if(this.developmentPlayer===player&&!this.isRunning){player.dispose();this.developmentPlayer=null;}},0);
+            } }));
+            player.connect(getMasterBus().input); this.developmentPlayer = player;
+            this.isRunning = true; player.start(); return;
+          }
+        }
+
         // Build every audible graph and voice pool before the transport starts. Creating
         // them in first-note callbacks can consume more than the whole lookahead window.
         resetLiveScheduling(Tone.getContext());
@@ -3075,12 +3028,18 @@ export default defineComponent({
       }
     },
     stopSequencer() {
+      this.developmentController?.abort(); this.developmentController = null;
+      this.developmentPlayer?.stop(); this.developmentPlayer?.dispose(); this.developmentPlayer = null;
       this.isRunning = false;
       this.stopTrackLoops();
       Tone.getTransport().stop();
       Tone.getTransport().seconds = 0;
       stopLiveDiagnostics(Tone.getContext());
       this.scheduleAudioSleep();
+    },
+    handleStudioProjectChange(project: PresetData) {
+      if (this.isRunning) this.stopSequencer();
+      this.applyDraftData(project, { preserveTrackMixStates: true }); this.refreshDirtyState();
     },
     scheduleAudioSleep() {
       // Repeated Stop retains the same pending suspend so Play can await it.
@@ -3102,7 +3061,9 @@ export default defineComponent({
         return;
       }
 
-      const arr = event.notes;
+      const developed=usesDevelopment({tracks:this.tracks,studio:this.studio});
+      const arr = developed&&track.trackKind!=='rhythmic'
+        ? limitPolyphony(event.notes,track.polyphony):event.notes;
       if (arr.length === 0) {
         return;
       }
@@ -3113,6 +3074,12 @@ export default defineComponent({
       const drumVoiceIds = event.drumVoiceIds;
 
       if (this.useMidiOutput) {
+        if (developed && track.trackKind !== 'rhythmic' && track.polyphony === 1 && this.midiOutput) {
+          const glide = Number(event.locks?.glideTime ?? event.settings?.glideTime ?? track.glideTime);
+          const time = performance.now() + Math.max(0, (Number(when) - Tone.now()) * 1000);
+          this.midiOutput.send([0xb0 + track.midiChannel - 1, 65, glide > 0 ? 127 : 0], time);
+          this.midiOutput.send([0xb0 + track.midiChannel - 1, 5, Math.round(Math.min(1, glide / 5) * 127)], time);
+        }
         for (let index = 0; index < arr.length; index += 1) {
           this.playNoteWithMidi(arr[index], noteVelocities?.[index] ?? vel, noteDuration, when, track.midiChannel);
         }

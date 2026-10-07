@@ -1,6 +1,6 @@
 {
   "name": "gaterunner",
-  "version": "2026.10.3",
+  "version": "2026.10.7",
   "scripts": {
     "build": "run-p type-check \"build-only {@}\" --",
     "build-only": "vite build",
@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "type-check": "vue-tsc --build --force",
     "bench:wav": "tsx cli/bench.ts",
-    "cli": "tsx cli/cli.ts"
+    "cli": "tsx cli/cli.ts",
+    "test": "node --experimental-test-module-mocks --import tsx --test cli/*.test.ts src/__tests__/*.test.ts",
+    "bench:development": "tsx cli/benchDevelopment.ts"
   },
   "dependencies": {
     "@mdi/font": "7.4.47",
