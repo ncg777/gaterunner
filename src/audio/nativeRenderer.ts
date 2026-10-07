@@ -1211,7 +1211,19 @@ function renderPreparedWavChannels(
     const isMonoTrack = entry.track.trackKind !== 'rhythmic' && isMonophonic(entry.track.polyphony);
     const glideState = createMonoGlideState();
     const voiceEvents = planNativeVoices(events, entry.track.polyphony, entry.track.monoLegato);
+    const continuousMono = isMonoTrack && !!development?.enabled;
     const monoPhases = new Map<number, number>();
+    // Developed mono voices retain filter history; legacy fingerprints stay unchanged.
+    const monoFilters = new Map<number, { signature: string; filters: ReturnType<typeof createStereoFilter> }>();
+    const monoChoirs = new Map<number, ReturnType<typeof createChoirProcessor>>();
+    const voiceFilters = (voice: number, settings: NormalizedTrack) => {
+      const signature = [settings.filterEnabled, settings.filterType, settings.filterRolloff].join(':');
+      const previous = continuousMono ? monoFilters.get(voice) : undefined;
+      if (previous?.signature === signature) return previous.filters;
+      const filters = createStereoFilter(settings, sampleRate);
+      if (continuousMono) monoFilters.set(voice, { signature, filters });
+      return filters;
+    };
     let monoFrame = 0;
     let monoIncrement = 0;
     let monoSample: { signature: string; state: SamplePlaybackState } | undefined;
@@ -1353,8 +1365,10 @@ function renderPreparedWavChannels(
       for (const [noteIndex, midiNote] of voicedNotes.entries()) {
         const voiceCount = isAdditive ? eventTrack.unisonVoices : 1;
         const noteDuration = isMonoTrack ? duration : voiceEvent.noteDurations[noteIndex];
-        const voiceEndFrame = Math.min(frameCount, Math.ceil(Math.min(voiceEvent.stopTime,
-          start + noteDuration + Math.max(0.005, voiceRelease) + (eventTrack.filterEnabled ? 2 : 0)) * sampleRate));
+        // Use the same frame boundary as the next attack. Ceil(stopTime)
+        // would double-render one sample when an attack falls between frames.
+        const voiceEndFrame = Math.min(frameCount, (continuousMono ? Math.floor : Math.ceil)(voiceEvent.stopTime * sampleRate),
+          Math.ceil((start + noteDuration + Math.max(0.005, voiceRelease) + (eventTrack.filterEnabled ? 2 : 0)) * sampleRate));
 
         const sampleSource = development?.enabled ? development.samples.find(s => s.lane === undefined) : undefined;
         if (sampleSource) {
@@ -1368,8 +1382,8 @@ function renderPreparedWavChannels(
           const sampler = createSampleVoice(asset, sampleSource, midiNote, held, sampleRate, sampleState,
             keepSample ? start - voiceEvent.envelopeStart : 0);
           if(isMonoTrack)monoSample={signature,state:sampleState};
-          const stop = Math.min(frameCount, Math.ceil(Math.min(voiceEvent.stopTime, start + held + sampleSource.release) * sampleRate));
-          const sampleFilter=createStereoFilter(eventTrack,sampleRate),sampleCutoff=createFilterCutoff(eventTrack,[midiNote],held,prepared.a4,start,prepared.bpm,filterNoteStarts);
+          const stop = Math.min(frameCount, (continuousMono ? Math.floor : Math.ceil)(voiceEvent.stopTime * sampleRate), Math.ceil((start + held + sampleSource.release) * sampleRate));
+          const sampleFilter=voiceFilters(-1,eventTrack),sampleCutoff=createFilterCutoff(eventTrack,[midiNote],held,prepared.a4,start,prepared.bpm,filterNoteStarts);
           const cutoffAt=compileControl(development,'filterFrequency',eventTrack.filterFrequency,start*prepared.bpm/60,event.locks,undefined,slewBeats);
           const qAt=compileControl(development,'filterQ',eventTrack.filterQ,start*prepared.bpm/60,event.locks,undefined,slewBeats);
           const gainAt=compileControl(development,'filterGain',eventTrack.filterGain,start*prepared.bpm/60,event.locks,undefined,slewBeats);
@@ -1403,11 +1417,13 @@ function renderPreparedWavChannels(
           let phase = isMonoTrack ? ((monoPhases.get(voice) ?? initialPhase) + Math.max(0, startFrame - monoFrame) * monoIncrement) % 1 : initialPhase;
           let tonewheelOscillator = staticTonewheelOscillator;
           let wavetableWeights = staticWavetableWeights;
-          const choir = createChoirProcessor(isAdditive && !isBank ? waveform : 'sine', sampleRate);
+          const choir = (continuousMono ? monoChoirs.get(voice) : undefined)
+            ?? createChoirProcessor(isAdditive && !isBank ? waveform : 'sine', sampleRate);
+          if (continuousMono) monoChoirs.set(voice, choir);
           const engineSource = isAdditive ? null : (isMonoTrack ? monoEngineSources.get(voice) : undefined)
             ?? createNativeEngineSource(engine, sampleRate, (trackIndex + 1) * 65537 + startFrame + noteIndex * 97 + voice);
           if (isMonoTrack && engineSource) monoEngineSources.set(voice, engineSource);
-          const [voiceFilter] = createStereoFilter(eventTrack, sampleRate);
+          const [voiceFilter] = voiceFilters(voice, eventTrack);
           const voiceCutoff = createFilterCutoff(eventTrack, [midiNote], noteDuration, prepared.a4, start, prepared.bpm,
             filterNoteStarts);
           const cutoffControl=compileControl(development,'filterFrequency',eventTrack.filterFrequency,start*prepared.bpm/60,event.locks,undefined,slewBeats);
