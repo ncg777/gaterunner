@@ -20,7 +20,7 @@
     "register-service-worker": "^1.7.2",
     "roboto-fontface": "*",
     "tone": "15.1.22",
-    "ultra-mega-enumerator": "^2026.7.4",
+    "ultra-mega-enumerator": "^2026.8.25",
     "vue": "^3.4.31",
     "vuetify": "^3.6.14",
     "webmidi": "^3.1.12"

@@ -3499,7 +3499,7 @@ __metadata:
     tone: "npm:15.1.22"
     tsx: "npm:^4.21.0"
     typescript: "npm:^5.8.3"
-    ultra-mega-enumerator: "npm:^2026.7.4"
+    ultra-mega-enumerator: "npm:^2026.8.25"
     unplugin-fonts: "npm:^1.1.1"
     unplugin-vue-components: "npm:^0.27.2"
     vite: "npm:^5.4.10"
@@ -5712,13 +5712,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ultra-mega-enumerator@npm:^2026.7.4":
-  version: 2026.7.4
-  resolution: "ultra-mega-enumerator@npm:2026.7.4"
+"ultra-mega-enumerator@npm:^2026.8.25":
+  version: 2026.8.25
+  resolution: "ultra-mega-enumerator@npm:2026.8.25"
   dependencies:
     "@types/node": "npm:^22.5.1"
     yarn: "npm:^1.22.22"
-  checksum: 10c0/cbffdc760b4df846ffaa104ab3ff30411d4bed7ffcc17d96b1818cd7372f6b78372f723e2208ec08c7810f580615d6e97528ffe6bd0a0badd3d48fd72f83dfda
+  checksum: 10c0/30267ff7376913ba13cc61ab429992d5e117991483e407b84b030ebff0b4df981a6975d461bfed0a02f57de08e9b2ab5c38f2c315b2ecd2d296341f1dc8cee76
   languageName: node
   linkType: hard
 

@@ -60,7 +60,7 @@ unchanged. Diagnostics now identify the native versus compatibility backend.
 Reproduce in PowerShell (single-preset JSON export):
 
 ```powershell
-$env:PROFILE_PRESET = 'D:\compositions\weather-inside-glass\presets\01-a-room-full-of-refractions.json'
+$env:PROFILE_PRESET = (Resolve-Path '../../Dropbox/Projects/ncg777-musique/AI/compositions/weather-inside-glass/presets/01-a-room-full-of-refractions.json').Path
 $env:PROFILE_CASES = 'baseline,full,baseline,full'
 $env:PROFILE_SECONDS = '15'
 $env:PROFILE_OUTPUT = 'dist/live-weather-comparison'
