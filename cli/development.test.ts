@@ -250,7 +250,7 @@ test('cancellation preserves only completed tracks and resumption uses them',asy
   const aborted=new AbortController();aborted.abort();await assert.rejects(renderDevelopment(project,{signal:aborted.signal}),/abort/i);
 });
 test('feature query names supported controls and demo has sample assets, sparse/fill sections and throw',async()=>{
-  assert.equal(supportedFeatures().version,'2026.10.7');const demo=await loadProject('cli/fixtures/development-demo.json');
+  assert.equal(supportedFeatures().version,'2026.10.9');const demo=await loadProject('cli/fixtures/development-demo.json');
   assert.equal(validateProject(demo).valid,true);assert.equal(demo.studio!.assets.length,2);
   const resolved=await resolveProjectEvents(demo);assert.equal(resolved.beats,64);assert.equal(resolved.tracks.length,3);
   assert.ok(resolved.tracks[0].events.some(e=>e.sectionId==='bass-sparse'));assert.ok(resolved.tracks[1].events.some(e=>e.sectionId==='drums-fill'));

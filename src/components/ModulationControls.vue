@@ -57,11 +57,17 @@
 import { computed } from 'vue';
 import { MODULATION_TARGETS, normalizeModulation, type ModulationSettings, type ModulationSource, type ModulationRoute } from '../audio/modulation';
 import { LFO_WAVEFORM_OPTIONS, LFO_SYNC_RATE_OPTIONS } from '../audio/lfo';
-const props = defineProps<{ modelValue: ModulationSettings; partialBank?: boolean }>();
+import { GENERATOR_MODULATION, type GeneratorMode } from '../audio/generatorSettings';
+const props = defineProps<{ modelValue: ModulationSettings; partialBank?: boolean; generatorMode?: GeneratorMode }>();
 const emit = defineEmits<{ 'update:modelValue': [value: ModulationSettings] }>();
 const settings = computed(() => props.modelValue);
 const sourceOptions = computed(() => settings.value.sources.map(s => ({ title: s.name, value: s.id })));
 const targetOptions = computed(() => Object.entries(MODULATION_TARGETS)
+  .filter(([value]) => {
+    const targets: Record<GeneratorMode, string[]> = { modal: ['modalDamping'], pulse: ['pulseWidth'], fm: ['fmIndex'], pluck: ['pluckBrightness'], granular: ['grainPosition', 'grainSize'] };
+    if (props.generatorMode) return ['pitch', 'level', 'pan', 'cutoff', 'resonance', 'filterGain', ...targets[props.generatorMode]].includes(value);
+    return !Object.hasOwn(GENERATOR_MODULATION, value);
+  })
   .filter(([value]) => props.partialBank || !/^(position|target)/.test(value))
   .map(([value, d]) => ({ title: d.title, value })));
 const phaseOptions = [{ title: 'Each voice attack', value: 'note' }, { title: 'Song start', value: 'song' }, { title: 'Free running', value: 'free' }];
@@ -84,7 +90,7 @@ function removeSource(id: string) {
   commit({ sources: settings.value.sources.filter(s => s.id !== id), routes: settings.value.routes.filter(r => r.source !== id) });
 }
 function addRoute() {
-  commit({ ...settings.value, routes: [...settings.value.routes, { id: crypto.randomUUID(), source: settings.value.sources[0].id, target: 'spectralTilt', amount: 0 }] });
+  commit({ ...settings.value, routes: [...settings.value.routes, { id: crypto.randomUUID(), source: settings.value.sources[0].id, target: props.generatorMode ? targetOptions.value[0].value : 'spectralTilt', amount: 0 }] });
 }
 function updateRoute(id: string, change: Partial<ModulationRoute>) {
   commit({ ...settings.value, routes: settings.value.routes.map(r => r.id === id ? { ...r, ...change } : r) });

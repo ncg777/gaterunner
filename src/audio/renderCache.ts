@@ -1,5 +1,5 @@
 import type { WavChannelRenderResult } from './nativeRenderer.js';
-export const RENDERER_VERSION = '2026.10.7-development-5';
+export const RENDERER_VERSION = '2026.10.9-generators-1';
 export function canonicalJSON(value: unknown): string {
   return JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
     ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);

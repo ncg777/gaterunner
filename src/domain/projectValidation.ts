@@ -105,6 +105,9 @@ function validateNormalizedProject(input: unknown): { project: PresetData; diagn
     if(track?.development?.enabled===true&&(typeof track.id!=='string'||!track.id.length))issue(`tracks.${index}.id`,'Developed tracks require a saved stable ID');
   });
   for (const [index, track] of project.tracks.entries()) {
+    if (track.trackKind === 'melodic' && track.synthMode === 'granular' && !assets.has(track.generatorEngines?.granular.asset ?? '')) {
+      issue(`tracks.${index}.generatorEngines.granular.asset`, 'Choose an available sample asset for Granular');
+    }
     const d = track.development, path = `tracks.${index}.development`;
     if (!d) continue;
     const definitions = parameterDefinitions(track.drumLanes, [...returnIds],track.trackKind);

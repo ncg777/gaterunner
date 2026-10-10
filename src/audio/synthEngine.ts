@@ -1,7 +1,10 @@
 import { normalizeModulation, type ModulationSettings } from './modulation.js';
 import { normalizePartialBank, type PartialBankSettings } from './partialBank.js';
+import { isGeneratorMode, normalizeGeneratorEngines, type GeneratorEngines, type GeneratorMode } from './generatorSettings.js';
+import type { GeneratorSample } from './generatorDSP.js';
+export { isGeneratorMode } from './generatorSettings.js';
 /** Engine settings are shared by presets, the Web Audio voices and the native WAV renderer. */
-export type SynthMode = 'additive' | 'partial-bank' | 'resonant-noise' | 'choir';
+export type SynthMode = 'additive' | 'partial-bank' | 'resonant-noise' | 'choir' | GeneratorMode;
 export type Vowel = 'a' | 'e' | 'i' | 'o' | 'u';
 export interface NoiseEngineSettings {
   color: 'white' | 'pink' | 'brown';
@@ -17,6 +20,9 @@ export interface ChoirEngineSettings {
   formantOffsets: number[]; formantGains: number[];
 }
 export interface SynthEngineSettings {
+  generatorEngines: GeneratorEngines;
+  /** Resolved at playback time; PCM remains in the project's existing asset pool. */
+  generatorSample?: GeneratorSample;
   partialBank: PartialBankSettings;
   modulation: ModulationSettings;
   synthMode: SynthMode;
@@ -72,8 +78,8 @@ export function normalizeChoirEngine(value: unknown): ChoirEngineSettings {
 /** Resolve routing without rebuilding either engine's controls on every audio tick. */
 export function resolveSynthMode(value: unknown): SynthMode {
   const r = object(value);
-  if (r.synthMode === 'additive' || r.synthMode === 'partial-bank' || r.synthMode === 'resonant-noise' || r.synthMode === 'choir') {
-    return r.synthMode;
+  if (r.synthMode === 'additive' || r.synthMode === 'partial-bank' || r.synthMode === 'resonant-noise' || r.synthMode === 'choir' || isGeneratorMode(String(r.synthMode))) {
+    return r.synthMode as SynthMode;
   }
   const source = object(r.partialGenerator);
   // Explicit modes win. Do not reinterpret inactive waveform metadata in mathematical/tonewheel sources.
@@ -91,12 +97,23 @@ export function normalizeSynthEngine(value: unknown): SynthEngineSettings {
     : wave === 'clarinet' ? { bands: 6, oddEven: -24, resonance: 30 }
     : wave === 'saxophone' ? { color: 'white', bands: 8, resonance: 12, tilt: -4 } : {};
   return {
+    generatorEngines: normalizeGeneratorEngines(r.generatorEngines),
     synthMode: resolveSynthMode(r),
     partialBank: normalizePartialBank(r.partialBank),
     modulation: normalizeModulation(r.modulation),
     noiseEngine: normalizeNoiseEngine({ ...noiseDefaults, ...object(r.noiseEngine) }),
     choirEngine: normalizeChoirEngine({ ...(wave === 'choir-oh' ? { vowel: 'o', targetVowel: 'a' } : {}), ...object(r.choirEngine) }),
   };
+}
+
+export function resolveGeneratorEngine(value: unknown, assets: readonly GeneratorSample[] = [], requireSample = true): SynthEngineSettings {
+  const settings = normalizeSynthEngine(value);
+  if (settings.synthMode === 'granular') {
+    const hash = settings.generatorEngines.granular.asset;
+    settings.generatorSample = assets.find(asset => asset.hash === hash);
+    if (!settings.generatorSample && requireSample) throw new Error(hash ? `Missing granular sample asset ${hash}` : 'Choose an imported sample for Granular');
+  }
+  return settings;
 }
 
 // Five parallel vocal-tract resonances. Pitch and formant position are independent.

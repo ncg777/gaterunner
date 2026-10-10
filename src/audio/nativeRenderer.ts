@@ -2,7 +2,9 @@ import { buildLegacyTrackEvents as buildTrackEvents } from '../domain/scheduling
 import { evaluateControl, compileControl, TRACK_PARAMETERS, usesDevelopment, type TrackDevelopment, type ProjectStudio } from '../domain/development.js';
 import type { DevelopedEvent, ResolvedProject } from '../domain/developmentSchedule.js';
 import type { PresetData, PresetTrackData } from '../presets.js';
-import { selectSample, createSampleVoice, type SamplePlaybackState } from './sampleAssets.js';
+import { selectSample, createSampleVoice, sampleContentHash, type SamplePlaybackState } from './sampleAssets.js';
+import { GeneratorDSP } from './generatorDSP.js';
+import { isGeneratorMode, type GeneratorEngines } from './generatorSettings.js';
 import { auxiliaryTailSeconds } from './auxiliaryReturns.js';
 import { MODULATION_TARGETS, type ModulationValues, type ModulationTime } from './modulation.js';
 import { trackDurationBeats } from '../domain/developmentSchedule.js';
@@ -102,6 +104,7 @@ export interface GenerateTrackOptions extends Partial<NativeEffectSettings> {
   denominator?: number;
   /** Oscillator shape metadata (not used by MIDI export). */
   synthMode?: SynthMode;
+  generatorEngines?: GeneratorEngines;
   modulation?: ModulationSettings;
   partialBank?: import('./partialBank.js').PartialBankSettings;
   noiseEngine?: NoiseEngineSettings;
@@ -266,6 +269,7 @@ export interface GenerateReverbOptions {
 
 export interface GenerateOptions extends Partial<NativeEffectSettings> {
   studio?: ProjectStudio;
+  generatorEngines?: GeneratorEngines;
   synthMode?: SynthMode;
   modulation?: ModulationSettings;
   partialBank?: import('./partialBank.js').PartialBankSettings;
@@ -614,7 +618,7 @@ function normalizeTracks(options: GenerateOptions): NormalizedTrack[] {
     unisonVoices: clamp(track.unisonVoices ?? fallbackTrack.unisonVoices, 1, 8),
     unisonDetune: clamp(track.unisonDetune ?? fallbackTrack.unisonDetune, 0, 100),
     tonewheelDrawbars: normalizeTonewheelDrawbars(track.tonewheelDrawbars),
-    ...normalizeSynthEngine({ ...track, modulation: track.modulation ?? options.modulation, synthMode: track.synthMode ?? options.synthMode, partialBank: track.partialBank ?? options.partialBank, noiseEngine: track.noiseEngine ?? options.noiseEngine, choirEngine: track.choirEngine ?? options.choirEngine, waveform: track.waveform ?? fallbackTrack.waveform, partialGenerator: track.partialGenerator ?? options.partialGenerator }),
+    ...normalizeSynthEngine({ ...track, generatorEngines: track.generatorEngines ?? options.generatorEngines, modulation: track.modulation ?? options.modulation, synthMode: track.synthMode ?? options.synthMode, partialBank: track.partialBank ?? options.partialBank, noiseEngine: track.noiseEngine ?? options.noiseEngine, choirEngine: track.choirEngine ?? options.choirEngine, waveform: track.waveform ?? fallbackTrack.waveform, partialGenerator: track.partialGenerator ?? options.partialGenerator }),
     partialGenerator: normalizeTrackPartialGenerator(track.partialGenerator ?? options.partialGenerator, track.waveform ?? fallbackTrack.waveform),
     tonewheelWavetable: track.tonewheelWavetable ?? fallbackTrack.tonewheelWavetable,
     tremoloEnabled: Boolean(track.tremoloEnabled ?? fallbackTrack.tremoloEnabled),
@@ -726,6 +730,7 @@ async function prepareRenderData(options: GenerateOptions): Promise<PreparedRend
     activationMasks: parseBitmaskSequenceInput(options.bitmaskSequenceInput).masks,
     tracks: trackData,
     reverb: normalizeReverb(options),
+    studio: options.studio,
   };
 }
 
@@ -1002,7 +1007,14 @@ export async function renderWavChannels(
     return { left: channels[0], right: channels[1], reverbLeft: null, reverbRight: null, sampleRate: rendered.sampleRate,
       a4: options.a4 ?? 440, masterGain: options.masterGain ?? 0, reverb: { ...normalizeReverb(options), dry: 0, enabled: false } };
   }
-  return renderPreparedWavChannels(await prepareRenderData(options), selectedTrackIndex);
+  const prepared = await prepareRenderData(options);
+  for (const entry of prepared.tracks) {
+    if (entry.track.trackKind === 'rhythmic' || entry.track.synthMode !== 'granular') continue;
+    const asset = prepared.studio?.assets.find(a => a.hash === entry.track.generatorEngines?.granular.asset);
+    if (!asset) throw new Error('Choose an imported sample for Granular');
+    if (await sampleContentHash(asset.channels, asset.sampleRate) !== asset.hash) throw new Error(`Sample content hash mismatch: ${asset.name}`);
+  }
+  return renderPreparedWavChannels(prepared, selectedTrackIndex);
 }
 
 /** Reuses the established native voices and their state, with a shared resolved schedule. */
@@ -1098,11 +1110,16 @@ function renderPreparedWavChannels(
     const drumReverbLeft = isDrumTrack && hasReverbSend && (entry.track.reverbWet > -96 || development?.enabled) ? new Float32Array(frameCount) : null;
     const drumReverbRight = drumReverbLeft ? new Float32Array(frameCount) : null;
     const engine = normalizeSynthEngine(entry.track);
+    const generatorMode = isGeneratorMode(engine.synthMode) ? engine.synthMode : undefined;
+    const generatorSample = generatorMode === 'granular'
+      ? prepared.studio?.assets.find(a => a.hash === engine.generatorEngines.granular.asset) : undefined;
+    if (generatorMode === 'granular' && !generatorSample) throw new Error('Choose an imported sample for Granular');
+    const monoGenerators = new Map<number, { dsp: GeneratorDSP; frame: number; frequency: number; noteStart: number; duration: number; values: ModulationValues }>();
     const isBank = engine.synthMode === 'partial-bank';
     const isAdditive = engine.synthMode === 'additive' || isBank;
     const monoBanks = new Map<number, ReturnType<typeof createPartialBankOscillator>>();
     const hasMelodicSample=development?.enabled&&!isDrumTrack&&development.samples.some(s=>s.lane===undefined);
-    const originalModulation = compileModulation(isAdditive||hasMelodicSample ? engine.modulation : { sources: [], routes: [] });
+    const originalModulation = compileModulation(isAdditive||hasMelodicSample||generatorMode ? engine.modulation : { sources: [], routes: [] });
     let currentLocks: DevelopedEvent['locks'];
     let currentModBase:DevelopedEvent['settings'];
     const developedModulation = development?.enabled && (development.automation.some(c => c.target.startsWith('modulation.'))
@@ -1370,7 +1387,7 @@ function renderPreparedWavChannels(
         const voiceEndFrame = Math.min(frameCount, (continuousMono ? Math.floor : Math.ceil)(voiceEvent.stopTime * sampleRate),
           Math.ceil((start + noteDuration + Math.max(0.005, voiceRelease) + (eventTrack.filterEnabled ? 2 : 0)) * sampleRate));
 
-        const sampleSource = development?.enabled ? development.samples.find(s => s.lane === undefined) : undefined;
+        const sampleSource = development?.enabled && generatorMode !== 'granular' ? development.samples.find(s => s.lane === undefined) : undefined;
         if (sampleSource) {
           const asset = selectSample(sampleSource, prepared.studio?.assets ?? [], event.velocity,
             development!.seed ^ (prepared.studio?.seed ?? 0), event.id ?? `${start}`, event.sampleOrdinal ?? eventIndex);
@@ -1420,7 +1437,7 @@ function renderPreparedWavChannels(
           const choir = (continuousMono ? monoChoirs.get(voice) : undefined)
             ?? createChoirProcessor(isAdditive && !isBank ? waveform : 'sine', sampleRate);
           if (continuousMono) monoChoirs.set(voice, choir);
-          const engineSource = isAdditive ? null : (isMonoTrack ? monoEngineSources.get(voice) : undefined)
+          const engineSource = isAdditive || generatorMode ? null : (isMonoTrack ? monoEngineSources.get(voice) : undefined)
             ?? createNativeEngineSource(engine, sampleRate, (trackIndex + 1) * 65537 + startFrame + noteIndex * 97 + voice);
           if (isMonoTrack && engineSource) monoEngineSources.set(voice, engineSource);
           const [voiceFilter] = voiceFilters(voice, eventTrack);
@@ -1442,6 +1459,15 @@ function renderPreparedWavChannels(
             ?? createPartialBankOscillator({ ...fallbackSource, tonewheelWavetable: eventTrack.tonewheelWavetable,
               unisonVoices: voiceCount, unisonDetune: eventTrack.unisonDetune }, engine.partialBank, modulation, bankTiming) : null;
           if (bankOscillator) { bankOscillator.setTiming(bankTiming); if (isMonoTrack) monoBanks.set(voice, bankOscillator); }
+          const previousGenerator = isMonoTrack ? monoGenerators.get(voice) : undefined;
+          const generator = generatorMode ? previousGenerator?.dsp ?? new GeneratorDSP(generatorMode, engine.generatorEngines, sampleRate, generatorSample) : null;
+          if (generator) {
+            if (previousGenerator) for (let gapFrame = previousGenerator.frame; gapFrame < startFrame; gapFrame++) {
+              generator.sample(previousGenerator.frequency, gapFrame / sampleRate - previousGenerator.noteStart, previousGenerator.duration, previousGenerator.values);
+            }
+            if (!previousGenerator || !voiceEvent.legato || !eventTrack.monoLegato) generator.attack(frequency, !!previousGenerator);
+          }
+          let lastGeneratorFrequency = frequency;
           for (let frame = startFrame; frame < voiceEndFrame; frame += 1) {
             const t = (frame - startFrame) / sampleRate;
             if (modulation.active) modulation.sample({ time: frame / sampleRate,
@@ -1484,8 +1510,11 @@ function renderPreparedWavChannels(
               ? getGlideFrequency(glidePlan, t) / glidePlan.toFrequency : 1;
             const modulationPitchRatio = modulation.active ? 2 ** (mod.pitch / 12) : 1;
             const playbackFrequency = frequency * pitchEnvelopeRatio * glideRatio * modulationPitchRatio;
+            lastGeneratorFrequency = playbackFrequency;
             const engineElapsed = (frame / sampleRate) - voiceEvent.envelopeStart;
-            const oscillatorSample = bankOscillator
+            const oscillatorSample = generator
+              ? generator.sample(playbackFrequency, engineElapsed, releaseTime - voiceEvent.envelopeStart, mod)
+              : bankOscillator
               ? bankOscillator.sample(playbackFrequency, frame / sampleRate, sampleRate)
               : spectralOscillator
               ? spectralOscillator(phase, playbackFrequency / 2, frame / sampleRate, sampleRate)
@@ -1514,6 +1543,8 @@ function renderPreparedWavChannels(
               phase -= Math.floor(phase);
             }
           }
+          if (generator && isMonoTrack) monoGenerators.set(voice, { dsp: generator, frame: voiceEndFrame,
+            frequency: lastGeneratorFrequency, noteStart: voiceEvent.envelopeStart, duration: releaseTime - voiceEvent.envelopeStart, values: { ...mod } });
           if (isMonoTrack) monoPhases.set(voice, phase);
         }
         if (isMonoTrack) monoFrame = voiceEndFrame;

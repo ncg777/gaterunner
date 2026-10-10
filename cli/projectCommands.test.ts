@@ -18,7 +18,7 @@ test('project subcommands own their output and verbose flags; exported reports a
     const project=normalizePresetData({bpm:300,tracks:[{id:'bass',sequenceInput:'1 2',gain:-20,release:0.01,
       development:normalizeDevelopment({enabled:true,seed:3})}]});
     const input=join(directory,'project.json');await writeFile(input,JSON.stringify(project));
-    assert.equal(JSON.parse(run('features')).version,'2026.10.7');
+    assert.equal(JSON.parse(run('features')).version,'2026.10.9');
     assert.equal(JSON.parse(run('validate','--project',input)).valid,true);
     const events=join(directory,'events.json');run('resolve','--project',input,'--output',events);assert.ok(JSON.parse(await readFile(events,'utf8')).tracks[0].events.length);
     const output=join(directory,'range.wav'),report=join(directory,'report.json');

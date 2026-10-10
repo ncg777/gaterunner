@@ -71,6 +71,7 @@ export interface PresetTrackData {
   /** Onset offset in quantization steps (0-1), wrapped within the sequence without extending it. */
   phase: number;
   synthMode?: SynthMode;
+  generatorEngines?: import('./audio/generatorSettings.js').GeneratorEngines;
   partialBank?: import('./audio/partialBank.js').PartialBankSettings;
   modulation?: ModulationSettings;
   noiseEngine?: NoiseEngineSettings;

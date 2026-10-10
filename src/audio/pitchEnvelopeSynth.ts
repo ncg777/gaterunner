@@ -1,5 +1,7 @@
 ﻿import * as Tone from 'tone';
 import { EngineSource } from './engineSource';
+import { GeneratorSource } from './generatorSource';
+import { isGeneratorMode } from './generatorSettings';
 import { VoiceModulation } from './voiceModulation';
 import { SpectralVoice } from './spectralVoice';
 import { PartialBankVoice } from './partialBankVoice';
@@ -72,7 +74,7 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   private _pitchEnvelopeShape = 0;
   private voiceFilterOptions: VoiceFilterOptions;
   private filterBaseFrequency = 20000;
-  protected engineSource: EngineSource | null = null;
+  protected engineSource: EngineSource | GeneratorSource | null = null;
   private engineSignature = "";
   private engineMode: SynthEngineSettings['synthMode'] = 'additive';
   private engineEvents: EngineEvent[] = [];
@@ -284,7 +286,8 @@ export class PitchEnvelopeSynth extends Tone.Synth {
   }
 
   private setEngine(engine: SynthEngineSettings): void {
-    const signature = JSON.stringify(engine);
+    const { generatorSample, ...portableEngine } = engine;
+    const signature = JSON.stringify([portableEngine, generatorSample?.hash]);
     if (signature === this.engineSignature) return;
     this.engineSettings = engine;
     this.syncModulation();
@@ -302,7 +305,9 @@ export class PitchEnvelopeSynth extends Tone.Synth {
       if (!this.spectralVoice) this.oscillator.connect(this.envelope);
     }
     else {
-      this.engineSource = new EngineSource(this.context, this.frequency, this.detune, engine);
+      this.engineSource = isGeneratorMode(engine.synthMode)
+        ? new GeneratorSource(this.context, this.frequency, this.detune, engine)
+        : new EngineSource(this.context, this.frequency, this.detune, engine);
       this.engineSource.output.connect(this.envelope);
       this.restoreEngineEvents();
     }
@@ -407,22 +412,24 @@ export class PitchEnvelopeSynth extends Tone.Synth {
 
   private syncModulation(): void {
     const bank = this.engineSettings.synthMode === 'partial-bank';
+    const generator = isGeneratorMode(this.engineSettings.synthMode);
+    const additive = this.engineSettings.synthMode === 'additive';
     // A standalone bank voice must also work without the app's amplitude-source snapshot.
     if (bank && !this.spectralSource) this.spectralSource = {
       waveform: 'sine', partialGenerator: normalizePartialGenerator({ type: 'waveform' }),
       tonewheelDrawbars: [], tonewheelWavetable: { enabled: false, dimensions: [], configurations: [], lfos: [] },
       unisonVoices: 1, unisonDetune: 0,
     };
-    const settings = this.engineSettings.synthMode === 'additive' || bank
+    const settings = additive || bank || generator
       ? normalizeModulation(this.engineSettings.modulation) : normalizeModulation(undefined);
-    const signature = JSON.stringify([settings, this.spectralSource, bank ? this.engineSettings.partialBank : null, this.voiceFilterOptions.Q, this.voiceFilterOptions.gain]);
+    const signature = JSON.stringify([this.engineSettings.synthMode, settings, this.spectralSource, bank ? this.engineSettings.partialBank : null, this.voiceFilterOptions.Q, this.voiceFilterOptions.gain]);
     if (signature === this.modulationSignature) return;
     this.modulationSignature = signature;
     if (this.spectralVoice && (this.spectralVoice instanceof PartialBankVoice) !== bank) {
       this.spectralVoice.dispose();
       this.spectralVoice = null;
     }
-    if (this.spectralSource && (bank || hasSpectralModulation(settings))) {
+    if (this.spectralSource && (bank || (additive && hasSpectralModulation(settings)))) {
       if (!this.spectralVoice) {
         this.spectralVoice = bank
           ? new PartialBankVoice(this.context, this.frequency, this.detune, this.spectralSource, this.engineSettings.partialBank)
@@ -443,8 +450,14 @@ export class PitchEnvelopeSynth extends Tone.Synth {
     if (!this.modulation && (bank || compileModulation(settings).active)) {
       this.modulation = new VoiceModulation(this.context, this.detune, this.filter, () =>
         hasVoiceActivity(this.engineEvents, this.context.currentTime, this.toSeconds(this.envelope.release), this.filterTailSeconds()), {
-          write: (v, t, ramp) => this.spectralVoice?.write(v, t, ramp),
-          refresh: time => this.spectralVoice?.refresh(time),
+          write: (v, t, ramp) => {
+            this.spectralVoice?.write(v, t, ramp);
+            if (this.engineSource instanceof GeneratorSource) this.engineSource.write(v, t, ramp);
+          },
+          refresh: time => {
+            this.spectralVoice?.refresh(time);
+            if (this.engineSource instanceof GeneratorSource) this.engineSource.refresh(time);
+          },
           needsClock: () => this.engineSettings.synthMode === 'partial-bank',
         });
       for (const event of this.engineEvents) {

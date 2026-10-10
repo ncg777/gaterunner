@@ -245,6 +245,7 @@
         v-show="!trackStripExpanded"
         :track="currentTrack"
         :reverb="reverbSettings"
+        :assets="studio?.assets ?? []"
         :bpm="bpm"
         :midi-output="useMidiOutput"
         @track-change="handleTrackDraftChange"
@@ -370,7 +371,8 @@ import { setTremoloSpread, setChorusSpread } from './audio/tremolo';
 import { getLfoFrequencyHz, type LfoWaveform } from './audio/lfo';
 import { FilterLfo } from './audio/filterLfo';
 import { CHOIR_FORMANT_BANDS, getChoirFormantBandGainLinear, type FormantBand } from './audio/choir';
-import { normalizeSynthEngine, resolveSynthMode } from './audio/synthEngine';
+import { normalizeSynthEngine, resolveSynthMode, resolveGeneratorEngine } from './audio/synthEngine';
+import { prepareProjectGenerators } from './audio/generatorSource';
 import { setFilterSettings } from './audio/filterSettings';
 import { PitchEnvelopeSynth } from './audio/pitchEnvelopeSynth';
 import { MonoGlideSynth } from './audio/monoGlideSynth';
@@ -1271,7 +1273,8 @@ export default defineComponent({
       try {
         // Every voice must exist before startRendering(): Tone builds the native render
         // graph at that point, so anything scheduled later is silently left out.
-        rendered = await renderOfflineAudio((offlineContext) => {
+        rendered = await renderOfflineAudio(async (offlineContext) => {
+          await prepareProjectGenerators(offlineContext, schedulableTracks.map(entry => entry.track), this.studio?.assets ?? []);
           try {
             this.trackOfflineRenderProgress(offlineContext, renderDuration, (ratio) => {
               this.setWavExportProgress(
@@ -2433,7 +2436,7 @@ export default defineComponent({
             volume: this.getPartialOscillatorVolume(track, partials),
           } as unknown as Tone.PolySynthOptions<Tone.Synth<Tone.SynthOptions>>['options']['oscillator'];
           const voiceOptions = {
-            engine: normalizeSynthEngine(track),
+            engine: resolveGeneratorEngine(track, this.studio?.assets ?? [], false),
             spectralSource: {
               partialGenerator: normalizePartialGenerator(track.partialGenerator), waveform: track.waveform,
               tonewheelDrawbars: track.tonewheelDrawbars, tonewheelWavetable: track.tonewheelWavetable,
@@ -3020,6 +3023,8 @@ export default defineComponent({
 
         // Build every audible graph and voice pool before the transport starts. Creating
         // them in first-note callbacks can consume more than the whole lookahead window.
+        if (!this.useMidiOutput) await prepareProjectGenerators(Tone.getContext(),
+          this.tracks.filter(track => track.trackKind === 'melodic' && this.audibleTrackIds.has(track.id)), this.studio?.assets ?? []);
         resetLiveScheduling(Tone.getContext());
         this.applyRealtimeSettings({ rebuildLoops: false, createMissingChains: true });
         this.isRunning = true;

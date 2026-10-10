@@ -370,7 +370,7 @@
         </v-window-item>
 
         <v-window-item v-if="!midiOutput && draftTrack.trackKind !== 'rhythmic'" value="generator" class="control-tab-panel">
-          <SynthEngineControls :track="draftTrack" @change="handleSynthEngineChange" />
+          <SynthEngineControls :track="draftTrack" :assets="assets" @change="handleSynthEngineChange" />
           <template v-if="!draftTrack.synthMode || ['additive', 'partial-bank'].includes(draftTrack.synthMode)">
           <v-row class="compact-row">
             <v-col cols="12">
@@ -877,6 +877,10 @@ export default defineComponent({
     WaveshaperControls,
   },
   props: {
+    assets: {
+      type: Array as PropType<import('../domain/development').SampleAsset[]>,
+      default: () => [],
+    },
     track: {
       type: Object as PropType<PresetTrackData | null>,
       default: null,

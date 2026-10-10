@@ -12,6 +12,7 @@ declare module 'vue' {
     EditableSlider: typeof import('./src/components/EditableSlider.vue')['default']
     EditorSurface: typeof import('./src/components/EditorSurface.vue')['default']
     ExportProgressDialog: typeof import('./src/components/ExportProgressDialog.vue')['default']
+    GeneratorControls: typeof import('./src/components/GeneratorControls.vue')['default']
     HelpDialog: typeof import('./src/components/HelpDialog.vue')['default']
     LiveAudioDialog: typeof import('./src/components/LiveAudioDialog.vue')['default']
     ModulationControls: typeof import('./src/components/ModulationControls.vue')['default']

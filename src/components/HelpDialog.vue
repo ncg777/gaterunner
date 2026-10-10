@@ -34,7 +34,7 @@ const visible = defineModel<boolean>({ required: true });
           <li><strong>Rhythmic tracks</strong>: Add a rhythmic track to use a synthesized GM-oriented drum kit instead of the melodic pitch-class encoder. Its ordered lanes map to GM percussion notes, with lane 1 using the least-significant velocity bits. Each sequence value is a decimal BigInt mask; the selected 1-7 velocity bits per lane allow simultaneous hits and velocity variation. Assign an XOR group (1-8) to choke other members of that group so only one can be active; the default is no group. When two grouped voices fire on the same step, the later/higher lane wins. Rhythmic tracks default to MIDI channel 10, but the channel remains editable for hardware routing.</li>
           <li><strong>Numerator/Denominator</strong>: Set per-track rhythmic grid while all tracks share one tempo.</li>
           <li><strong>Tracks</strong>: Each preset can contain multiple tracks with their own MIDI channel, waveform, gain, sequence, octave shift, note length, amp/pitch envelopes, polyphony, modulation, waveshaper, tanh drive, chorus, flanger, phaser, filter, echo, and reverb send.</li>
-          <li><strong>Generator</strong>: Choose Additive, Resonant noise, or Vocal choir. Each engine has its own sound controls; envelopes, glide, the track filter and effects remain shared.</li>
+          <li><strong>Generator</strong>: Choose Additive, Partial Bank, Resonant noise, Vocal choir, Modal percussion, Variable pulse, Two-operator FM, Plucked string or Granular sampler. Envelopes, glide, the track filter and effects remain shared.</li>
           <li><strong>Sequence</strong>: Input a sequence of numbers per track to generate notes based on their binary representation.</li>
           <li><strong>Octave Shift</strong>: Adjusts the octave of the notes played for the selected track.</li>
           <li><strong>Track Gain</strong>: Sets each track's audio level in dB. Use the velocity multiplier to control MIDI note velocity independently.</li>
@@ -63,7 +63,13 @@ const visible = defineModel<boolean>({ required: true });
           <li><strong>Waveform spectra</strong>: Sine has only the fundamental; sawtooth has signed 1/n coefficients; square has odd 1/n coefficients; triangle has alternating odd 1/n² coefficients. Periodic waveforms use up to 64 harmonics, limited further by pitch during playback. Fixed-duty pulse spectra are also available.</li>
           <li><strong>Pulse 25% and 12.5%</strong>: Use fixed narrow-duty spectra for brighter, leaner tones without a per-voice PWM graph.</li>
           <li><strong>Breath noise</strong>: Adds one pink-noise source per track event. Level sets its gain and Harmonic sets the pitch-relative center of its band-pass filter.</li>
-          <li><strong>Legacy presets</strong>: Retired FM and virtual-analog fields are ignored during import, while compatible waveform, envelope, sequence, and effect settings are retained.</li>
+          <li><strong>Modal percussion</strong>: Bell, bar, glass or harmonic modes with independent decays, high-mode damping, strike brightness and a noise transient.</li>
+          <li><strong>Variable pulse</strong>: Continuous width with 1–64 harmonics; route an envelope or LFO to Pulse width in Modulation.</li>
+          <li><strong>Two-operator FM</strong>: Sine carrier/modulator, fractional ratio, modulation index and modulation ADSR. Route additional motion to FM index.</li>
+          <li><strong>Plucked string</strong>: Seeded excitation, fractional-delay tuning (20–8,000 Hz), string decay, brightness and pluck position. Overlapping mono legato notes preserve the string.</li>
+          <li><strong>Granular sampler</strong>: Import a WAV in Studio → Samples and choose it in Grain sample. Root note, size, density, position, scatter and seed shape the cloud. Up to 32 windowed grains overlap per voice; stereo assets become mono before pan/effects.</li>
+          <li><strong>Generator modulation</strong>: New matrix destinations include Modal damping, Pulse width, FM index, Pluck brightness, Grain position and Grain size. Shared pitch, level, pan and filter routes also work. Live browser sources require HTTPS or localhost.</li>
+          <li><strong>Legacy presets</strong>: Retired generatorType/fmSynth and virtual-analog fields are ignored during import. The new Two-operator FM engine uses its own settings. Existing waveforms, envelopes, sequences and effects are retained.</li>
         </ul>
 
         <h4 class="mt-3 mb-2">Procedural Partial Sources</h4>

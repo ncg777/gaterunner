@@ -1,6 +1,7 @@
 <template>
   <v-select :model-value="engine.synthMode" label="Synth engine" :items="modes" variant="outlined" density="comfortable" @update:modelValue="emit('change', { ...engine, synthMode: $event })" />
   <PartialBankControls v-if="engine.synthMode === 'partial-bank'" :model-value="engine.partialBank" @update:modelValue="emit('change', { ...engine, partialBank: $event })" />
+  <GeneratorControls v-if="isGeneratorMode(engine.synthMode)" :mode="engine.synthMode" :settings="engine.generatorEngines" :assets="assets ?? []" @update:settings="emit('change', { ...engine, generatorEngines: $event })" />
   <template v-if="engine.synthMode === 'resonant-noise'">
     <p class="text-body-2 mb-4">Real noise excites parallel resonators. Narrow resonance creates pitched whistles; wider bands create breath and turbulent textures. Base frequency is anchored at A4. Pitch tracking follows notes and glide.</p>
     <v-select :model-value="noiseStartingPoint" label="Noise starting point" :items="[...noisePresets, customPreset]" variant="outlined" @update:modelValue="applyPreset('noiseEngine', $event)" />
@@ -51,11 +52,15 @@
 import { computed } from 'vue';
 import EditableSlider from './EditableSlider.vue';
 import PartialBankControls from './PartialBankControls.vue';
+import GeneratorControls from './GeneratorControls.vue';
+import { isGeneratorMode } from '../audio/generatorSettings';
+import type { SampleAsset } from '../domain/development';
 import { choirBands, noiseBands, normalizeSynthEngine, type SynthEngineSettings, type NoiseEngineSettings, type ChoirEngineSettings } from '../audio/synthEngine';
-const props = defineProps<{ track: unknown }>();
+const props = defineProps<{ track: unknown; assets?: readonly SampleAsset[] }>();
 const emit = defineEmits<{ change: [settings: SynthEngineSettings] }>();
 const engine = computed(() => normalizeSynthEngine(props.track));
-const modes = [{ title: 'Additive', value: 'additive' }, { title: 'Partial Bank', value: 'partial-bank' }, { title: 'Resonant noise', value: 'resonant-noise' }, { title: 'Vocal choir', value: 'choir' }];
+const modes = [{ title: 'Additive', value: 'additive' }, { title: 'Partial Bank', value: 'partial-bank' }, { title: 'Resonant noise', value: 'resonant-noise' }, { title: 'Vocal choir', value: 'choir' },
+  { title: 'Modal percussion', value: 'modal' }, { title: 'Variable pulse', value: 'pulse' }, { title: 'Two-operator FM', value: 'fm' }, { title: 'Plucked string', value: 'pluck' }, { title: 'Granular sampler', value: 'granular' }];
 const vowels = [{ title: 'Ah / a', value: 'a' }, { title: 'Eh / e', value: 'e' }, { title: 'Ee / i', value: 'i' }, { title: 'Oh / o', value: 'o' }, { title: 'Oo / u', value: 'u' }];
 const noisePresets = [
   { title: 'Balanced resonators', value: {} },

@@ -2,7 +2,7 @@
   <div class="track-modulation">
     <p class="text-caption text-medium-emphasis">Track envelopes and LFOs. Expand a source to edit it; its destination stays visible when collapsed.</p>
 
-    <ModulationControls v-if="additive" :model-value="engine.modulation" :partial-bank="engine.synthMode === 'partial-bank'" @update:modelValue="updateMatrix" />
+    <ModulationControls v-if="additive || isGeneratorMode(engine.synthMode)" :model-value="engine.modulation" :partial-bank="engine.synthMode === 'partial-bank'" :generator-mode="isGeneratorMode(engine.synthMode) ? engine.synthMode : undefined" @update:modelValue="updateMatrix" />
 
     <template v-for="section in ['Envelope', 'LFO'] as const" :key="section">
       <h3 class="text-subtitle-2">{{ section === 'Envelope' ? 'Envelopes' : 'LFOs' }} · fixed destinations</h3>
@@ -56,6 +56,7 @@ import CompactModulationFields from './CompactModulationFields.vue';
 import type { ModulationField } from './modulationFields';
 import { clonePresetTrackData, MODULATION_RATE_OPTIONS, SKEW_LFO_WAVEFORM_OPTIONS, PITCH_ENVELOPE_SHAPE_MIN, PITCH_ENVELOPE_SHAPE_MAX, type PresetTrackData } from '../presets';
 import { normalizeSynthEngine } from '../audio/synthEngine';
+import { isGeneratorMode } from '../audio/generatorSettings';
 import { LFO_WAVEFORM_OPTIONS, LFO_SYNC_RATE_OPTIONS, LFO_PHASE_MODE_OPTIONS } from '../audio/lfo';
 import { MAX_WAVETABLE_LFOS, type TonewheelWavetableLfo } from '../audio/tonewheelWavetable';
 import type { ModulationSettings } from '../audio/modulation';

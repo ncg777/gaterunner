@@ -1,8 +1,10 @@
 import { createSkewLfoState, getLfoFrequencyHz, LFO_SYNC_RATE_VALUES, LFO_WAVEFORM_VALUES,
   sampleLfoAtTime, type LfoSyncRateValue, type LfoWaveform } from './lfo.js';
+import { GENERATOR_MODULATION } from './generatorSettings.js';
 
 /** Amounts are offsets in destination units; routes sum before destination limits. */
 export const MODULATION_TARGETS = {
+  ...GENERATOR_MODULATION,
   positionA: { title: 'Position function · a', unit: 'parameter offset', min: -1200, max: 1200, step: 0.01 },
   positionB: { title: 'Position function · b', unit: 'parameter offset', min: -100, max: 100, step: 0.01 },
   positionC: { title: 'Position function · c', unit: 'parameter offset', min: -32, max: 32, step: 0.01 },
@@ -36,7 +38,8 @@ export type ModulationSource = ModulationEnvelope | ModulationLfo;
 export interface ModulationRoute { id: string; source: string; target: ModulationTarget; amount: number; enabled: boolean }
 export interface ModulationSettings { sources: ModulationSource[]; routes: ModulationRoute[] }
 export type ModulationValues = Record<ModulationTarget, number>;
-export const emptyModulationValues = (): ModulationValues => ({ spectralTilt: 0, spectralContrast: 0,
+export const emptyModulationValues = (): ModulationValues => ({ pulseWidth: 0, fmIndex: 0, modalDamping: 0,
+  pluckBrightness: 0, grainPosition: 0, grainSize: 0, spectralTilt: 0, spectralContrast: 0,
   positionA: 0, positionB: 0, positionC: 0, targetA: 0, targetB: 0, targetC: 0, positionMorph: 0,
   spectralBalance: 0, harmonicCount: 0, mappingExponent: 0, pitch: 0, level: 0, pan: 0, cutoff: 0, resonance: 0, filterGain: 0 });
 const record = (v: unknown): Record<string, unknown> => v && typeof v === 'object' ? v as Record<string, unknown> : {};

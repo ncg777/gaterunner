@@ -13,7 +13,8 @@ import { DiskRenderCache } from './diskRenderCache.js';
 
 export { validateProject, normalizePresetData as normalizeProject, resolveProjectEvents, parameterDefinitions, importWavAsset };
 export function supportedFeatures() {
-  return { version: '2026.10.7', renderer: RENDERER_VERSION, patterns: true, arrangements: true,
+  return { version: '2026.10.9', renderer: RENDERER_VERSION, patterns: true, arrangements: true,
+    generators: ['additive', 'partial-bank', 'resonant-noise', 'choir', 'modal', 'pulse', 'fm', 'pluck', 'granular'],
     conditions: ['every', 'first', 'fill', 'probability'], articulation: ['velocity', 'gate', 'durationBeats', 'tie', 'legato', 'slide', 'offsetBeats', 'timingVariation', 'velocityVariation'],
     automation: ['song', 'note', 'linear', 'smooth', 'step', 'snapshots'], returns: ['delay', 'filter', 'saturation', 'gain'],
     samples: ['WAV PCM 8/16/24/32', 'WAV float 32/64', 'mono', 'stereo', 'velocity-layers', 'round-robin', 'seeded-random'],

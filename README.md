@@ -39,14 +39,20 @@ It is useful for:
 - **Song-level gating:** use the `B` sequence to switch tracks on and off across
   equal sections of the loop.
 - **Integrated synthesis:** use tonewheel drawbars, sparse multidimensional
-  wavetables, spectral transforms, vector LFOs, unison, glide, filters, and effects.
+  wavetables, spectral transforms, modal percussion, variable pulse spectra,
+  two-operator FM, plucked strings, granular samples, modulation, filters, and effects.
 - **Browser and CLI export:** generate MIDI for a DAW or render deterministic WAV
   files; CLI rendering supports reusable workers and parallel tracks.
 - **Portable projects:** save named presets locally, import or export JSON libraries,
   and share a working draft through its URL.
 - **Installable web app:** use the hosted PWA or run the Vue application locally.
 
-Version **2026.10.7** adds optional phrase banks, musical sections, conditional
+Version **2026.10.9** adds five generators: **Modal percussion**, **Variable pulse**,
+**Two-operator FM**, **Plucked string**, and **Granular sampler**. Select them in
+**Generator → Synth engine**. Their sound controls, envelopes, modulation and
+effects work in browser playback, browser WAV export and native CLI rendering.
+
+Version **2026.10.7** added optional phrase banks, musical sections, conditional
 choices, per-step accents/ties/slides and drum locks, motion curves/sound snapshots,
 shared dub returns, portable samples and resampling. Open **Phrases, motion &
 studio** for these controls. Existing projects retain their original behavior.
@@ -201,7 +207,7 @@ wavetable from the **Generator** tab.
 
 ### Melodic Sound Palette
 
-Choose **Additive**, **Partial Bank**, **Resonant noise**, or **Vocal choir** in the Generator tab.
+Choose among nine synth engines in the Generator tab.
 
 - **Additive** keeps tonewheel drawbars, classic Fourier waveforms, sequence and binary
   partial sources, spectrum transforms, unison, and multidimensional wavetable morphing.
@@ -217,7 +223,7 @@ Choose **Additive**, **Partial Bank**, **Resonant noise**, or **Vocal choir** in
   shift, bandwidth, brightness, breath, 1-8 ensemble singers, detune and vibrato. Each
   formant also has its own tuning offset and gain. Zero transition time fixes the blend;
   otherwise every attack starts at the first vowel and moves toward the target blend.
-- All four engines use the shared amp/pitch envelopes, polyphony, mono glide, track
+- The original four engines use the shared amp/pitch envelopes, polyphony, mono glide, track
   filter, modulation, waveshaper and effects. Resonator and formant motion is per voice.
   Choir ensemble controls replace additive unison. Additive and Partial Bank retain
   the separate breath layer; noise and choir have their own noise/breath controls.
@@ -231,6 +237,57 @@ Choose **Additive**, **Partial Bank**, **Resonant noise**, or **Vocal choir** in
 
 These are controllable source/filter instruments, not sampled woodwind or choir libraries.
 The formant architecture follows the [source/filter model](https://dsprelated.com/freebooks/pasp/Formant_Synthesis_Models.html).
+
+### Generators Added in 2026.10.9
+
+- **Modal percussion** strikes 1–16 independently decaying sine modes. Bell, bar,
+  glass and harmonic registrations provide frequency ratios. Ring decay controls
+  the fundamental's time to fall 60 dB; high mode damping shortens higher modes.
+  Strike brightness controls their relative amplitudes; strike noise adds a brief
+  attack. This is a compact modal instrument, not a complete physical simulation.
+- **Variable pulse** continuously varies the width of the existing signed
+  pulse-spectrum family, with 1–64 harmonics. Route an envelope or LFO to
+  **Pulse width** for animated timbres. Like the fixed pulse spectra, this is a
+  Fourier source; it does not promise an exact rectangular waveform.
+- **Two-operator FM** uses a sine carrier, a sine modulator, a fractional frequency
+  ratio and a modulation index, with an independent modulation ADSR. **FM index**
+  is also a matrix destination. Four-times oversampling and a low-pass decimator
+  reduce aliasing; the index is reduced near Nyquist to limit sidebands. Extreme
+  settings can still alias. The new `synthMode: "fm"` is separate from the retired
+  `generatorType`/`fmSynth` fields, which remain ignored on legacy import.
+- **Plucked string** uses seeded, position-colored excitation in a fractional-delay
+  feedback loop. String decay controls loop loss; brightness controls additional
+  high-frequency damping. **Pluck brightness** is a matrix destination. Tuning is
+  clamped to 20–8,000 Hz (or one quarter of the sample rate, if lower).
+- **Granular sampler** selects one existing sample asset. Import a WAV in
+  **Phrases, motion & studio → Samples**, then select it in **Grain sample**.
+  Root note defines sample tuning; grain size, density, position, position scatter,
+  pitch scatter and seed shape the cloud. **Grain position** and **Grain size**
+  are matrix destinations. Hann windows and overlap normalization bound the level;
+  each voice has a pool of 32 grains and skips launches when that pool is full.
+  Grains wrap within the complete sample. Release stops new launches; existing
+  grains finish within the shared amp envelope's release. Stereo assets are mixed
+  to mono before track pan/effects. Granular takes precedence over a studio melodic
+  sample replacement; other engines still allow those replacements.
+
+All five use the shared amp/pitch envelopes, voice filter, polyphony, mono glide,
+pitch/level/pan/filter modulation, track inserts and sends. They have one source
+per note; additive unison and wavetable controls apply to Additive and Partial
+Bank. Modal and plucked attacks restrike unless an overlapping mono legato note
+retains the source. Grain size/position edits affect new grains while sounding
+grains retain their captured window and position.
+
+Controls persist under `generatorEngines` in presets, project URLs and CLI
+`--tracks` input. Granular stores an asset hash, with PCM in the project's existing
+`studio.assets` pool. Preset libraries and portable project packages retain both;
+missing or modified sample assets fail playback/export explicitly. Use portable
+packages for large samples rather than embedding them in URLs.
+
+Browser sources use an AudioWorklet and require a secure context (HTTPS or
+localhost). The browser and native renderer share the sample-level DSP; pitch and
+control-clock alignment can still differ between render paths. The processor module
+loads once per audio context, and each context shares one uploaded copy of a sample
+across its granular voices. Existing generators do not require the new worklet.
 
 ### Procedural Partial Sources
 
