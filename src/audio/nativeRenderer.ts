@@ -11,7 +11,8 @@ import { trackDurationBeats } from '../domain/developmentSchedule.js';
 import { compileModulation, emptyModulationValues, type ModulationSettings } from './modulation.js';
 import { hasSpectralModulation } from './spectralModulation.js';
 import { createSpectralOscillator } from './native/spectralOscillator.js';
-import { normalizeSynthEngine, type SynthMode, type NoiseEngineSettings, type ChoirEngineSettings } from './synthEngine.js';
+import { normalizeSynthEngine, engineCombinationGain, type EngineCombinationSettings, type SynthMode, type NoiseEngineSettings, type ChoirEngineSettings } from './synthEngine.js';
+import { createNativeModulator } from './native/nativeModulator.js';
 import { createNativeEngineSource } from './native/nativeEngineSource.js';
 import { createPartialBankOscillator } from './native/partialBankOscillator.js';
 import { Midi } from './midi.js';
@@ -88,6 +89,7 @@ import { createNativeNoise, nativeKickCycles } from './native/nativeDrumVoice.js
 import { NativeEnvelopeAutomation, prepareNativeMonoEnvelopes } from './native/nativeEnvelopeAutomation.js';
 
 export interface GenerateTrackOptions extends Partial<NativeEffectSettings> {
+  engineCombination?: EngineCombinationSettings;
   id?: string;
   development?: TrackDevelopment;
   /** Optional display name for the track. */
@@ -268,6 +270,7 @@ export interface GenerateReverbOptions {
 }
 
 export interface GenerateOptions extends Partial<NativeEffectSettings> {
+  engineCombination?: EngineCombinationSettings;
   studio?: ProjectStudio;
   generatorEngines?: GeneratorEngines;
   synthMode?: SynthMode;
@@ -345,7 +348,7 @@ export interface WavRenderOptions {
 
 let pcs12Initialized = false;
 
-type NormalizedTrack = Required<Omit<GenerateTrackOptions, 'generatorType' | 'fmSynth' | 'virtualAnalogSynth' | 'development' | 'id'>>;
+type NormalizedTrack = Required<Omit<GenerateTrackOptions, 'generatorType' | 'fmSynth' | 'virtualAnalogSynth' | 'development' | 'id' | 'engineCombination'>> & Pick<GenerateTrackOptions, 'engineCombination'>;
 export type NormalizedReverb = Required<GenerateReverbOptions>;
 
 export interface WavChannelRenderResult {
@@ -1009,10 +1012,15 @@ export async function renderWavChannels(
   }
   const prepared = await prepareRenderData(options);
   for (const entry of prepared.tracks) {
-    if (entry.track.trackKind === 'rhythmic' || entry.track.synthMode !== 'granular') continue;
-    const asset = prepared.studio?.assets.find(a => a.hash === entry.track.generatorEngines?.granular.asset);
-    if (!asset) throw new Error('Choose an imported sample for Granular');
-    if (await sampleContentHash(asset.channels, asset.sampleRate) !== asset.hash) throw new Error(`Sample content hash mismatch: ${asset.name}`);
+    if (entry.track.trackKind === 'rhythmic') continue;
+    const c = entry.track.engineCombination;
+    const layers = c && c.mode !== 'off' && c.depth > 0 ? [entry.track, c.engineB] : [entry.track];
+    for (const layer of layers) {
+      if (layer.synthMode !== 'granular') continue;
+      const asset = prepared.studio?.assets.find(a => a.hash === layer.generatorEngines?.granular.asset);
+      if (!asset) throw new Error('Choose an imported sample for Granular');
+      if (await sampleContentHash(asset.channels, asset.sampleRate) !== asset.hash) throw new Error(`Sample content hash mismatch: ${asset.name}`);
+    }
   }
   return renderPreparedWavChannels(prepared, selectedTrackIndex);
 }
@@ -1110,6 +1118,12 @@ function renderPreparedWavChannels(
     const drumReverbLeft = isDrumTrack && hasReverbSend && (entry.track.reverbWet > -96 || development?.enabled) ? new Float32Array(frameCount) : null;
     const drumReverbRight = drumReverbLeft ? new Float32Array(frameCount) : null;
     const engine = normalizeSynthEngine(entry.track);
+    const combination = engine.engineCombination;
+    const combined = combination && combination.mode !== 'off' && combination.depth > 0 ? combination : undefined;
+    const modulatorAsset = combined?.engineB.synthMode === 'granular'
+      ? prepared.studio?.assets.find(a => a.hash === combined.engineB.generatorEngines.granular.asset) : undefined;
+    if (combined?.engineB.synthMode === 'granular' && !modulatorAsset) throw new Error('Choose an imported sample for Engine B Granular');
+    const monoModulators = new Map<number, ReturnType<typeof createNativeModulator>>();
     const generatorMode = isGeneratorMode(engine.synthMode) ? engine.synthMode : undefined;
     const generatorSample = generatorMode === 'granular'
       ? prepared.studio?.assets.find(a => a.hash === engine.generatorEngines.granular.asset) : undefined;
@@ -1422,6 +1436,14 @@ function renderPreparedWavChannels(
           continue;
         }
 
+        const modulatorRelease = isMonoTrack ? voiceEvents.filter(e => e.envelopeStart === voiceEvent.envelopeStart).at(-1)! : null;
+        const modulatorTiming = { noteStart: voiceEvent.envelopeStart,
+          releaseTime: modulatorRelease ? modulatorRelease.time + modulatorRelease.duration : start + noteDuration, bpm: prepared.bpm };
+        const modulator = combined ? (isMonoTrack ? monoModulators.get(noteIndex) : undefined)
+          ?? createNativeModulator(combined.engineB, sampleRate, (trackIndex + 1) * 65537 + startFrame + noteIndex * 97,
+            modulatorTiming, modulatorAsset) : undefined;
+        if (modulator && isMonoTrack) { modulator.setTiming(modulatorTiming, !voiceEvent.legato || !eventTrack.monoLegato); monoModulators.set(noteIndex, modulator); }
+        const modulationGains = modulator ? new Float32Array(Math.max(0, voiceEndFrame - startFrame)) : undefined;
         for (let voice = 0; voice < voiceCount; voice += 1) {
           const detuneOffset = voiceCount === 1 ? 0 : ((voice / (voiceCount - 1)) - 0.5) * eventTrack.unisonDetune;
           const frequency = midiToFrequency(midiNote + detuneOffset / 100, prepared.a4);
@@ -1527,7 +1549,9 @@ function renderPreparedWavChannels(
               : partialOscillator
                 ? partialOscillator(phase, playbackFrequency, sampleRate)
                 : tonewheelOscillator?.(phase, playbackFrequency / 2, sampleRate) ?? 0;
-            const sample = choir(voiceFilter(oscillatorSample * voiceGain * env,
+            if (modulator && voice === 0) modulationGains![frame - startFrame] = engineCombinationGain(
+              modulator.sample(playbackFrequency / 2 ** (detuneOffset / 1200) * combined!.frequencyRatio, frame / sampleRate), combined!.mode, combined!.depth);
+            const sample = choir(voiceFilter(oscillatorSample * (modulationGains?.[frame - startFrame] ?? 1) * voiceGain * env,
               voiceCutoff(t) * (development?.enabled ? 2 ** ((Number(cutoffControl(frame / sampleRate * prepared.bpm / 60)) - eventTrack.filterFrequency) / 12) : 1)
                 * (modulation.active ? 2 ** (mod.cutoff / 12) : 1),
               Number(qControl(frame / sampleRate * prepared.bpm / 60)) + mod.resonance,

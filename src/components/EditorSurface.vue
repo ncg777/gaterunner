@@ -1,7 +1,7 @@
 <template>
-  <v-responsive class="editor-surface align-center mx-auto pa-2 pb-8">
-    <div class="control-tabs-layout">
-      <v-tabs v-model="activeControlTab" :direction="$vuetify.display.xs ? 'horizontal' : 'vertical'" class="control-tabs" color="primary">
+  <v-responsive class="editor-surface align-center mx-auto pa-2 pb-8" :class="{ 'editor-surface--source': sourceOnly }">
+    <div class="control-tabs-layout" :class="{ 'control-tabs-layout--source': sourceOnly }">
+      <v-tabs v-if="!sourceOnly" v-model="activeControlTab" :direction="$vuetify.display.xs ? 'horizontal' : 'vertical'" class="control-tabs" color="primary">
         <v-tab value="sequence" prepend-icon="mdi-format-list-numbered">Sequence</v-tab>
         <v-tab v-if="!midiOutput && draftTrack.trackKind === 'rhythmic'" value="drum-sounds" prepend-icon="mdi-album">Drum Sounds</v-tab>
         <v-tab value="playback" prepend-icon="mdi-play-circle-outline">Playback</v-tab>
@@ -370,6 +370,20 @@
         </v-window-item>
 
         <v-window-item v-if="!midiOutput && draftTrack.trackKind !== 'rhythmic'" value="generator" class="control-tab-panel">
+          <template v-if="!sourceOnly">
+            <v-select :model-value="combination.mode" label="Combine engines" :items="combinationModes" variant="outlined" density="comfortable" @update:modelValue="updateCombination({ mode: $event })" />
+            <p class="text-body-2 mb-4">Engine A is the carrier. Engine B shapes its amplitude. Both follow the track's notes, envelope, glide, filter and effects.</p>
+            <template v-if="combination.mode !== 'off'">
+              <EditableSlider :model-value="combination.depth * 100" :label="'Modulation depth (' + Math.round(combination.depth * 100) + '%)'" :min="0" :max="100" :step="1" @update:modelValue="updateCombination({ depth: $event / 100 })" />
+              <EditableSlider :model-value="combination.frequencyRatio" :label="'Engine B frequency ratio (' + combination.frequencyRatio.toFixed(3) + ' × note)'" :min="0.125" :max="8" :step="0.125" @update:modelValue="updateCombination({ frequencyRatio: $event })" />
+              <p class="text-caption mb-4">{{ combination.mode === 'am' ? 'AM: B varies A from silence to full amplitude.' : 'RM: B multiplies A with a bipolar signal, creating sum and difference frequencies.' }} Depth blends from the original A sound.</p>
+              <v-tabs v-model="engineSlot" color="primary" class="mb-4" aria-label="Engine to edit">
+                <v-tab value="a">Engine A · Carrier</v-tab><v-tab value="b">Engine B · Modulator</v-tab>
+              </v-tabs>
+            </template>
+          </template>
+          <EditorSurface v-if="!sourceOnly && combination.mode !== 'off' && engineSlot === 'b'" source-only :track="secondaryTrack" :reverb="reverb" :bpm="bpm" :assets="assets" @track-change="handleSecondEngineChange" />
+          <template v-else>
           <SynthEngineControls :track="draftTrack" :assets="assets" @change="handleSynthEngineChange" />
           <template v-if="!draftTrack.synthMode || ['additive', 'partial-bank'].includes(draftTrack.synthMode)">
           <v-row class="compact-row">
@@ -577,6 +591,14 @@
               </v-col>
             </v-row>
           </template>
+          </template>
+          <v-row v-if="sourceOnly && ['additive', 'partial-bank'].includes(draftTrack.synthMode ?? 'additive')">
+            <v-col cols="12" md="6"><EditableSlider v-model="draftTrack.unisonVoices" label="Engine B unison voices" :min="1" :max="8" :step="1" @update:modelValue="handleTrackDraftChange" /></v-col>
+            <v-col cols="12" md="6"><EditableSlider v-model="draftTrack.unisonDetune" label="Engine B unison spread (cents)" :min="0" :max="100" :step="1" @update:modelValue="handleTrackDraftChange" /></v-col>
+          </v-row>
+          <v-expansion-panels v-if="sourceOnly" class="mt-4"><v-expansion-panel title="Engine B modulation"><v-expansion-panel-text>
+            <TrackModulationControls source-only :track="draftTrack" @update:track="draftTrack = $event; handleTrackDraftChange()" />
+          </v-expansion-panel-text></v-expansion-panel></v-expansion-panels>
           </template>
         </v-window-item>
 
@@ -816,7 +838,7 @@ import { defineComponent, type PropType } from 'vue';
 import EditableSlider from './EditableSlider.vue';
 import SynthEngineControls from './SynthEngineControls.vue';
 import TrackModulationControls from './TrackModulationControls.vue';
-import type { SynthEngineSettings } from '../audio/synthEngine';
+import { normalizeEngineCombination, normalizeSynthEngine, type EngineCombinationSettings, type SynthEngineSettings } from '../audio/synthEngine';
 import ReverbControls from './ReverbControls.vue';
 import RhythmTrackControls from './RhythmTrackControls.vue';
 import RhythmSoundControls from './RhythmSoundControls.vue';
@@ -877,6 +899,7 @@ export default defineComponent({
     WaveshaperControls,
   },
   props: {
+    sourceOnly: { type: Boolean, default: false },
     assets: {
       type: Array as PropType<import('../domain/development').SampleAsset[]>,
       default: () => [],
@@ -983,11 +1006,21 @@ export default defineComponent({
         title: value === 0 ? 'Off' : `${value} subdivisions per step`,
         value,
       })),
-      activeControlTab: 'sequence' as string,
+      activeControlTab: (this.sourceOnly ? 'generator' : 'sequence') as string,
+      engineSlot: 'a',
+      combinationModes: [
+        { title: 'Single engine', value: 'off' },
+        { title: 'Amplitude modulation (AM)', value: 'am' },
+        { title: 'Ring modulation (RM)', value: 'rm' },
+      ],
       selectedTonewheelConfigurationIndex: 0,
     };
   },
   computed: {
+    combination(): EngineCombinationSettings { return normalizeEngineCombination(this.draftTrack.engineCombination); },
+    secondaryTrack(): PresetTrackData {
+      return clonePresetTrackData({ ...this.draftTrack, ...this.combination.engineB, engineCombination: undefined });
+    },
     partialGenerator(): NormalizedPartialGenerator {
       const selectedSource = this.draftTrack.tonewheelWavetable.enabled
         ? this.draftTrack.tonewheelWavetable.configurations[this.selectedTonewheelConfigurationIndex]?.source
@@ -1089,6 +1122,18 @@ export default defineComponent({
     },
   },
   methods: {
+    updateCombination(change: Partial<EngineCombinationSettings>) {
+      this.draftTrack.engineCombination = normalizeEngineCombination({ ...this.combination, ...change });
+      if (this.draftTrack.engineCombination.mode === 'off') this.engineSlot = 'a';
+      this.handleTrackDraftChange();
+    },
+    handleSecondEngineChange(track: PresetTrackData) {
+      this.updateCombination({ engineB: { ...normalizeSynthEngine(track),
+        waveform: track.waveform, partialGenerator: normalizePartialGenerator(track.partialGenerator),
+        tonewheelDrawbars: track.tonewheelDrawbars, tonewheelWavetable: track.tonewheelWavetable,
+        unisonVoices: track.unisonVoices, unisonDetune: track.unisonDetune,
+      } });
+    },
     timeWarpCurvePath(curve: string): string {
       return curve === CUSTOM_TIME_WARP_CURVE
         ? makeTimeWarpCurvePath(curve, this.draftTrack.timeWarpExpression)
@@ -1326,6 +1371,19 @@ export default defineComponent({
   min-height: 470px;
   border: 1px solid var(--panel-border-soft);
   background: var(--panel-inset);
+}
+
+.editor-surface.editor-surface--source {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0 !important;
+}
+
+.control-tabs-layout--source {
+  display: block;
+  min-height: 0;
 }
 
 .control-tabs {

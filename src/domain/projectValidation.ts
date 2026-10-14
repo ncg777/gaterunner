@@ -108,6 +108,11 @@ function validateNormalizedProject(input: unknown): { project: PresetData; diagn
     if (track.trackKind === 'melodic' && track.synthMode === 'granular' && !assets.has(track.generatorEngines?.granular.asset ?? '')) {
       issue(`tracks.${index}.generatorEngines.granular.asset`, 'Choose an available sample asset for Granular');
     }
+    const c = track.engineCombination;
+    if (track.trackKind === 'melodic' && c && c.mode !== 'off' && c.depth > 0 && c.engineB.synthMode === 'granular'
+      && !assets.has(c.engineB.generatorEngines.granular.asset)) {
+      issue(`tracks.${index}.engineCombination.engineB.generatorEngines.granular.asset`, 'Choose an available sample asset for Engine B Granular');
+    }
     const d = track.development, path = `tracks.${index}.development`;
     if (!d) continue;
     const definitions = parameterDefinitions(track.drumLanes, [...returnIds],track.trackKind);

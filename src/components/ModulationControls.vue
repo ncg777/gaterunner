@@ -58,7 +58,7 @@ import { computed } from 'vue';
 import { MODULATION_TARGETS, normalizeModulation, type ModulationSettings, type ModulationSource, type ModulationRoute } from '../audio/modulation';
 import { LFO_WAVEFORM_OPTIONS, LFO_SYNC_RATE_OPTIONS } from '../audio/lfo';
 import { GENERATOR_MODULATION, type GeneratorMode } from '../audio/generatorSettings';
-const props = defineProps<{ modelValue: ModulationSettings; partialBank?: boolean; generatorMode?: GeneratorMode }>();
+const props = defineProps<{ modelValue: ModulationSettings; partialBank?: boolean; generatorMode?: GeneratorMode; sourceOnly?: boolean }>();
 const emit = defineEmits<{ 'update:modelValue': [value: ModulationSettings] }>();
 const settings = computed(() => props.modelValue);
 const sourceOptions = computed(() => settings.value.sources.map(s => ({ title: s.name, value: s.id })));
@@ -69,6 +69,7 @@ const targetOptions = computed(() => Object.entries(MODULATION_TARGETS)
     return !Object.hasOwn(GENERATOR_MODULATION, value);
   })
   .filter(([value]) => props.partialBank || !/^(position|target)/.test(value))
+  .filter(([value]) => !props.sourceOnly || !['pan', 'cutoff', 'resonance', 'filterGain'].includes(value))
   .map(([value, d]) => ({ title: d.title, value })));
 const phaseOptions = [{ title: 'Each voice attack', value: 'note' }, { title: 'Song start', value: 'song' }, { title: 'Free running', value: 'free' }];
 const envelopeFields = [
