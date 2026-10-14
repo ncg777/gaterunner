@@ -47,7 +47,13 @@ It is useful for:
   and share a working draft through its URL.
 - **Installable web app:** use the hosted PWA or run the Vue application locally.
 
-Version **2026.10.9** adds five generators: **Modal percussion**, **Variable pulse**,
+Version **2026.10.13** adds an optional second synth engine per melodic track.
+In **Generator**, choose **Amplitude modulation (AM)** or **Ring modulation (RM)**
+under **Combine engines**, then edit **Engine A · Carrier** and **Engine B · Modulator**.
+Set modulation depth and B's frequency ratio to shape the result. Existing projects
+default to **Single engine** and retain their original sound.
+
+Version **2026.10.9** added five generators: **Modal percussion**, **Variable pulse**,
 **Two-operator FM**, **Plucked string**, and **Granular sampler**. Select them in
 **Generator → Synth engine**. Their sound controls, envelopes, modulation and
 effects work in browser playback, browser WAV export and native CLI rendering.
@@ -237,6 +243,28 @@ Choose among nine synth engines in the Generator tab.
 
 These are controllable source/filter instruments, not sampled woodwind or choir libraries.
 The formant architecture follows the [source/filter model](https://dsprelated.com/freebooks/pasp/Formant_Synthesis_Models.html).
+
+### Combining Two Engines
+
+Each melodic track can use any synth mode for A and B independently, including
+tonewheel, waveform, sequence, binary, Partial Bank, noise, choir, and the five newer
+generators. B has its own spectrum, wavetable, unison (for additive/Partial Bank),
+sample selection and source modulation. Its frequency ratio ranges from 0.125 to
+8 times the played note. Both sources follow the track's pitch envelope and glide.
+The combined signal uses the track's amplitude envelope, filter and effects.
+
+AM varies A's amplitude with a unipolar B signal; RM multiplies A by bipolar B,
+producing sum and difference frequencies. B is bounded to −1…1 before multiplication.
+Depth blends between the original A sound and the combined sound. At zero depth or
+in Single engine mode, B is bypassed entirely and requires no sample asset.
+Switching back to Single engine retains B's settings for later use.
+
+The optional `engineCombination` object stores `mode` (`off`, `am`, `rm`), `depth`
+(0–1), `frequencyRatio`, and `engineB` (the second engine's settings). A keeps the
+existing top-level track fields, so older presets and URLs require no migration.
+The settings survive preset import/export, URL sharing and CLI `--tracks`/`--preset`
+input, and affect browser playback, browser WAV export and native CLI rendering.
+MIDI retains the track's original note events.
 
 ### Generators Added in 2026.10.9
 

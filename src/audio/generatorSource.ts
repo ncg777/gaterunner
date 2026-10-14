@@ -1,7 +1,7 @@
 import * as Tone from 'tone';
 import { GENERATOR_MODULATION, isGeneratorMode, type GeneratorMode } from './generatorSettings.js';
 import type { GeneratorSample } from './generatorDSP.js';
-import { resolveGeneratorEngine, resolveSynthMode, type SynthEngineSettings } from './synthEngine.js';
+import { normalizeSynthEngine, resolveGeneratorEngine, resolveSynthMode, type SynthEngineSettings } from './synthEngine.js';
 import { sampleContentHash } from './sampleAssets.js';
 import type { ModulationTime, ModulationValues } from './modulation.js';
 
@@ -49,7 +49,12 @@ export async function prepareGeneratorContext(context: Tone.BaseContext, samples
 }
 
 export async function prepareProjectGenerators(context: Tone.BaseContext, tracks: readonly unknown[], assets: readonly GeneratorSample[] = []) {
-  const generators = tracks.filter(track => isGeneratorMode(resolveSynthMode(track)));
+  const layers = tracks.flatMap(track => {
+    if (track && typeof track === 'object' && 'trackKind' in track && track.trackKind === 'rhythmic') return [];
+    const c = normalizeSynthEngine(track).engineCombination;
+    return c && c.mode !== 'off' && c.depth > 0 ? [track, c.engineB] : [track];
+  });
+  const generators = layers.filter(track => isGeneratorMode(resolveSynthMode(track)));
   if (!generators.length) return;
   const samples = generators.map(track => resolveGeneratorEngine(track, assets).generatorSample).filter((a): a is GeneratorSample => !!a);
   await prepareGeneratorContext(context, samples);

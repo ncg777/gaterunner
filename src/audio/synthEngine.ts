@@ -2,6 +2,10 @@ import { normalizeModulation, type ModulationSettings } from './modulation.js';
 import { normalizePartialBank, type PartialBankSettings } from './partialBank.js';
 import { isGeneratorMode, normalizeGeneratorEngines, type GeneratorEngines, type GeneratorMode } from './generatorSettings.js';
 import type { GeneratorSample } from './generatorDSP.js';
+import { normalizePartialSourceSnapshot } from './partialWavetable.js';
+import { normalizeTrackPartialGenerator } from './partialGenerator.js';
+import { normalizeTonewheelDrawbars, normalizeTonewheelWavetable } from './sourceSettings.js';
+import type { SpectralSourceSettings } from './spectralModulation.js';
 export { isGeneratorMode } from './generatorSettings.js';
 /** Engine settings are shared by presets, the Web Audio voices and the native WAV renderer. */
 export type SynthMode = 'additive' | 'partial-bank' | 'resonant-noise' | 'choir' | GeneratorMode;
@@ -20,6 +24,8 @@ export interface ChoirEngineSettings {
   formantOffsets: number[]; formantGains: number[];
 }
 export interface SynthEngineSettings {
+  /** Omitted in legacy projects: Engine A follows its original signal path. */
+  engineCombination?: EngineCombinationSettings;
   generatorEngines: GeneratorEngines;
   /** Resolved at playback time; PCM remains in the project's existing asset pool. */
   generatorSample?: GeneratorSample;
@@ -28,6 +34,40 @@ export interface SynthEngineSettings {
   synthMode: SynthMode;
   noiseEngine: NoiseEngineSettings;
   choirEngine: ChoirEngineSettings;
+}
+export type EngineLayerSettings = Omit<SynthEngineSettings, 'engineCombination'> & SpectralSourceSettings;
+export interface EngineCombinationSettings {
+  mode: 'off' | 'am' | 'rm';
+  depth: number;
+  frequencyRatio: number;
+  engineB: EngineLayerSettings;
+}
+export function normalizeEngineCombination(value: unknown): EngineCombinationSettings {
+  const r = object(value), b = object(r.engineB);
+  const engine = normalizeSynthEngine({ ...b, engineCombination: undefined });
+  // These destinations belong to the shared track chain, downstream of the combination.
+  engine.modulation.routes = engine.modulation.routes.filter(route => !['pan', 'cutoff', 'resonance', 'filterGain'].includes(route.target));
+  const source = normalizePartialSourceSnapshot({
+    waveform: typeof b.waveform === 'string' ? b.waveform : 'sine',
+    partialGenerator: normalizeTrackPartialGenerator(b.partialGenerator, typeof b.waveform === 'string' ? b.waveform : 'sine'),
+    tonewheelDrawbars: normalizeTonewheelDrawbars(b.tonewheelDrawbars),
+  });
+  return {
+    mode: choice(r.mode, ['off', 'am', 'rm'], 'off'),
+    depth: number(r.depth, 1, 0, 1),
+    frequencyRatio: number(r.frequencyRatio, 1, 0.125, 8),
+    engineB: { ...engine, ...source,
+      tonewheelWavetable: normalizeTonewheelWavetable(b.tonewheelWavetable),
+      unisonVoices: Math.round(number(b.unisonVoices, 1, 1, 8)),
+      unisonDetune: number(b.unisonDetune, 0, 0, 100),
+    },
+  };
+}
+/** AM maps the bipolar modulator to 0..1; RM retains its polarity. Depth crossfades from A. */
+export function engineCombinationGain(b: number, mode: EngineCombinationSettings['mode'], depth: number): number {
+  if (mode === 'off' || depth === 0) return 1;
+  const bounded = Math.max(-1, Math.min(1, b));
+  return 1 - depth + depth * (mode === 'am' ? (1 + bounded) / 2 : bounded);
 }
 export const DEFAULT_NOISE_ENGINE: NoiseEngineSettings = {
   color: 'pink', frequency: 440, keyTrack: 1, resonance: 18, bands: 4,
@@ -97,6 +137,7 @@ export function normalizeSynthEngine(value: unknown): SynthEngineSettings {
     : wave === 'clarinet' ? { bands: 6, oddEven: -24, resonance: 30 }
     : wave === 'saxophone' ? { color: 'white', bands: 8, resonance: 12, tilt: -4 } : {};
   return {
+    ...(r.engineCombination === undefined ? {} : { engineCombination: normalizeEngineCombination(r.engineCombination) }),
     generatorEngines: normalizeGeneratorEngines(r.generatorEngines),
     synthMode: resolveSynthMode(r),
     partialBank: normalizePartialBank(r.partialBank),
@@ -112,6 +153,10 @@ export function resolveGeneratorEngine(value: unknown, assets: readonly Generato
     const hash = settings.generatorEngines.granular.asset;
     settings.generatorSample = assets.find(asset => asset.hash === hash);
     if (!settings.generatorSample && requireSample) throw new Error(hash ? `Missing granular sample asset ${hash}` : 'Choose an imported sample for Granular');
+  }
+  const combination = settings.engineCombination;
+  if (combination && combination.mode !== 'off' && combination.depth > 0) {
+    Object.assign(combination.engineB, resolveGeneratorEngine(combination.engineB, assets, requireSample));
   }
   return settings;
 }

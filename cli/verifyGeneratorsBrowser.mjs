@@ -41,10 +41,14 @@ try {
     const result = await evaluate(`(async () => {
       const root = document.querySelector('#app'); const app = root.__vue_app__._instance?.proxy ?? root._vnode?.component?.proxy;
       const results = [];
-      for (const mode of ['modal','pulse','fm','pluck','granular']) {
+      const scenarios = ['modal','pulse','fm','pluck','granular'].map(mode => ({ mode, second: false }));
+      scenarios.push(...['additive','partial-bank','resonant-noise','choir','modal','pulse','fm','pluck','granular'].map(mode => ({ mode, second: true })));
+      for (const { mode, second } of scenarios) {
         const project = app.getDraftData(); project.bpm = 240;
-        project.tracks = [{ ...project.tracks[0], synthMode: mode, sequenceInput: '1 3', release: 0.05,
-          generatorEngines: { granular: { asset: '${asset.hash}' } } }];
+        project.tracks = [{ ...project.tracks[0], synthMode: second ? 'additive' : mode, sequenceInput: '1 3', release: 0.05,
+          generatorEngines: { granular: { asset: '${asset.hash}' } },
+          engineCombination: second ? { mode: 'rm', depth: 0.75, frequencyRatio: 1.5, engineB: {
+            synthMode: mode, generatorEngines: { granular: { asset: '${asset.hash}' } } } } : undefined }];
         project.studio = { version: 1, seed: 0, returns: [], assets: [${JSON.stringify(asset)}] };
         app.applyDraftData(project); await app.startSequencer();
         if (!app.isRunning) throw new Error(mode + ': production playback failed');
@@ -58,15 +62,26 @@ try {
           peak = Math.max(peak, Math.abs(value) / 0x800000);
         }
         if (peak < 0.001) throw new Error(mode + ': production WAV must contain audible sound');
-        results.push({ mode, wavBytes: wav.length, peak });
+        results.push({ mode, second, wavBytes: wav.length, peak });
       }
       return { version: app.appVersion, production: results };
     })()`);
     console.log(JSON.stringify(result, null, 2)); writeFileSync(`${output}/production.json`, JSON.stringify(result, null, 2) + '\n');
   } else {
     const report = await evaluate(`import('/gaterunner/src/__tests__/generators.browser.ts').then(module => module.runGeneratorChecks())`);
+    const dualEngine = await evaluate(`import('/gaterunner/src/__tests__/dualEngine.browser.ts').then(module => module.runDualEngineChecks())`);
+    report.dualEngine = dualEngine;
     if (errors.length) throw new Error(JSON.stringify(errors));
     writeFileSync(`${output}/report.json`, JSON.stringify(report, null, 2) + '\n'); console.log(JSON.stringify(report, null, 2));
     const screenshot = await send('Page.captureScreenshot', { format: 'png' }); writeFileSync(`${output}/generators.png`, Buffer.from(screenshot.data, 'base64'));
+    await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+    const mobileLayout = await evaluate(`(() => {
+      const source = document.querySelector('.editor-surface--source');
+      return source && { width: source.getBoundingClientRect().width, panelWidth: source.querySelector('.control-tab-content').getBoundingClientRect().width,
+        viewport: innerWidth, scrollWidth: document.documentElement.scrollWidth };
+    })()`);
+    if (!mobileLayout || mobileLayout.panelWidth < mobileLayout.width * 0.85 || mobileLayout.scrollWidth > mobileLayout.viewport + 1) throw new Error(`Mobile engine layout: ${JSON.stringify(mobileLayout)}`);
+    const mobileScreenshot = await send('Page.captureScreenshot', { format: 'png' }); writeFileSync(`${output}/generators-mobile.png`, Buffer.from(mobileScreenshot.data, 'base64'));
   }
 } finally { writeFileSync(`${output}/vite.log`, log); socket?.close(); chrome?.kill(); vite.kill(); }

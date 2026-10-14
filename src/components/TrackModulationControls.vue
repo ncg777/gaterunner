@@ -1,10 +1,10 @@
 <template>
   <div class="track-modulation">
-    <p class="text-caption text-medium-emphasis">Track envelopes and LFOs. Expand a source to edit it; its destination stays visible when collapsed.</p>
+    <p class="text-caption text-medium-emphasis">{{ sourceOnly ? 'Engine B source motion. The track amplitude envelope, filter and effects are shared.' : 'Track envelopes and LFOs. Expand a source to edit it; its destination stays visible when collapsed.' }}</p>
 
-    <ModulationControls v-if="additive || isGeneratorMode(engine.synthMode)" :model-value="engine.modulation" :partial-bank="engine.synthMode === 'partial-bank'" :generator-mode="isGeneratorMode(engine.synthMode) ? engine.synthMode : undefined" @update:modelValue="updateMatrix" />
+    <ModulationControls v-if="additive || isGeneratorMode(engine.synthMode)" :model-value="engine.modulation" :source-only="sourceOnly" :partial-bank="engine.synthMode === 'partial-bank'" :generator-mode="isGeneratorMode(engine.synthMode) ? engine.synthMode : undefined" @update:modelValue="updateMatrix" />
 
-    <template v-for="section in ['Envelope', 'LFO'] as const" :key="section">
+    <template v-for="section in sections" :key="section">
       <h3 class="text-subtitle-2">{{ section === 'Envelope' ? 'Envelopes' : 'LFOs' }} · fixed destinations</h3>
       <v-expansion-panels variant="accordion" multiple>
         <v-expansion-panel v-for="panel in panels.filter(p => p.type === section)" :key="panel.id" :value="panel.id">
@@ -61,7 +61,7 @@ import { LFO_WAVEFORM_OPTIONS, LFO_SYNC_RATE_OPTIONS, LFO_PHASE_MODE_OPTIONS } f
 import { MAX_WAVETABLE_LFOS, type TonewheelWavetableLfo } from '../audio/tonewheelWavetable';
 import type { ModulationSettings } from '../audio/modulation';
 
-const props = defineProps<{ track: PresetTrackData }>();
+const props = defineProps<{ track: PresetTrackData; sourceOnly?: boolean }>();
 const emit = defineEmits<{ 'update:track': [track: PresetTrackData] }>();
 const engine = computed(() => normalizeSynthEngine(props.track));
 const additive = computed(() => props.track.trackKind !== 'rhythmic' && ['additive', 'partial-bank'].includes(engine.value.synthMode));
@@ -110,8 +110,9 @@ const panels = computed<Panel[]>(() => {
     { id: 'flanger', name: 'Flanger LFO', type: 'LFO', target: 'Flanger delay', enabledKey: 'flangerEnabled', enabledLabel: 'Flanger on', help: 'Delay, feedback, and wet mix are in Flanger.', fields: [select('flangerRate', 'Cycle length', MODULATION_RATE_OPTIONS), number('flangerDepth', 'Depth (0–1)', 0, 1)] },
     { id: 'phaser', name: 'Phaser LFO', type: 'LFO', target: 'Phaser frequency', enabledKey: 'phaserEnabled', enabledLabel: 'Phaser on', help: 'Center, stages, feedback, resonance, and wet mix are in Phaser.', fields: [select('phaserRate', 'Cycle length', MODULATION_RATE_OPTIONS), number('phaserDepth', 'Sweep (%)', 0, 100, 1)] },
   );
-  return result;
+  return props.sourceOnly ? result.filter(panel => panel.group) : result;
 });
+const sections = computed(() => (['Envelope', 'LFO'] as const).filter(section => !props.sourceOnly || panels.value.some(panel => panel.type === section)));
 function panelModel(panel: Panel): Record<string, unknown> {
   return (panel.group ? engine.value[panel.group] : props.track) as unknown as Record<string, unknown>;
 }
