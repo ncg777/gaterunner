@@ -12,7 +12,8 @@ export class PartialBankVoice {
   private banks = new Set<Bank>();
   private position: ReturnType<typeof compileBankPosition>;
   constructor(private context: Tone.BaseContext, private frequency: Tone.Signal<'frequency'>,
-    private detune: Tone.Signal<'cents'>, private settings: SpectralSourceSettings, bank: PartialBankSettings) {
+    private detune: Tone.Signal<'cents'>, private settings: SpectralSourceSettings, bank: PartialBankSettings,
+    private readFrequency: (time: number, values: ModulationValues) => number = time => Number(frequency.getValueAtTime(time))) {
     this.output = new Tone.Gain({ context, gain: 1 });
     this.position = compileBankPosition(bank);
   }
@@ -81,7 +82,7 @@ export class PartialBankVoice {
     const banks = [...this.banks].filter(b => b.start <= timing.time + 1e-9 && b.end > timing.time);
     if (!banks.length) return;
     const spectrum = normalizeBankAmplitudes(spectralSpectrumAtTime(this.settings, values, timing));
-    const fundamental = Number(this.frequency.getValueAtTime(timing.time)) * 2;
+    const fundamental = this.readFrequency(timing.time, values) * 2;
     const detune = Number(this.detune.getValueAtTime(timing.time));
     for (const b of banks) {
       const unisonGain = b.count === 1 ? 1 : 10 ** ((-6 - b.count * 1.1) / 20);

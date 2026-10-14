@@ -55,6 +55,19 @@ test('native rendering preserves old PCM and MIDI with an inactive second engine
   assert.notDeepEqual(am.left, baseline.left); assert.notDeepEqual(rm.left, am.left);
 });
 
+test('rhythmic rendering ignores retained melodic Engine B settings', async () => {
+  const data = project({ mode: 'rm', engineB: { synthMode: 'granular' } });
+  data.tracks[0].trackKind = 'rhythmic';
+  const drums = normalizePresetData(data);
+  assert.ok(validateProject(drums).valid);
+  const rendered = await renderWavChannels(presetDataToGeneratorInput(drums));
+  drums.tracks[0].engineCombination = undefined;
+  const baseline = await renderWavChannels(presetDataToGeneratorInput(drums));
+  assert.ok(energy(baseline.left) > 1e-8);
+  assert.deepEqual(rendered.left, baseline.left);
+  assert.deepEqual(rendered.right, baseline.right);
+});
+
 test('all Engine B modes render audible finite audio, including unison, mono glide and granular assets', async () => {
   const asset = await createSampleAsset([Float32Array.from({ length: 4800 }, (_, i) => Math.sin(2 * Math.PI * 220 * i / 48000))], 48000, 'Sine');
   for (const synthMode of ['additive', 'partial-bank', 'resonant-noise', 'choir', 'modal', 'pulse', 'fm', 'pluck', 'granular']) {

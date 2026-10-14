@@ -1119,7 +1119,7 @@ function renderPreparedWavChannels(
     const drumReverbRight = drumReverbLeft ? new Float32Array(frameCount) : null;
     const engine = normalizeSynthEngine(entry.track);
     const combination = engine.engineCombination;
-    const combined = combination && combination.mode !== 'off' && combination.depth > 0 ? combination : undefined;
+    const combined = !isDrumTrack && combination && combination.mode !== 'off' && combination.depth > 0 ? combination : undefined;
     const modulatorAsset = combined?.engineB.synthMode === 'granular'
       ? prepared.studio?.assets.find(a => a.hash === combined.engineB.generatorEngines.granular.asset) : undefined;
     if (combined?.engineB.synthMode === 'granular' && !modulatorAsset) throw new Error('Choose an imported sample for Engine B Granular');

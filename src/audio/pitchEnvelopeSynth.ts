@@ -343,7 +343,8 @@ export class PitchEnvelopeSynth extends Tone.Synth {
     }
     if (this.modulatorMode !== c.engineB.synthMode) {
       this.modulatorSource?.dispose();
-      this.modulatorSource = new ModulatorSource(this.context, this.frequency, this.detune, c.engineB, c.frequencyRatio);
+      this.modulatorSource = new ModulatorSource(this.context, this.frequency, this.detune, c.engineB, c.frequencyRatio,
+        () => this.toSeconds(this.envelope.release));
       Tone.connect(this.modulatorSource.output, this.modulatorScale!);
       this.modulatorMode = c.engineB.synthMode;
       this.restoreEngineEvents(this.modulatorSource);

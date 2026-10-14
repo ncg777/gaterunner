@@ -20,7 +20,8 @@ export class ModulatorSource {
   private events: VoiceEvent[] = [];
   private mode: EngineLayerSettings['synthMode'];
   constructor(private context: Tone.BaseContext, private parentFrequency: Tone.Signal<'frequency'>,
-    private parentDetune: Tone.Signal<'cents'>, settings: EngineLayerSettings, frequencyRatio: number) {
+    private parentDetune: Tone.Signal<'cents'>, settings: EngineLayerSettings, frequencyRatio: number,
+    private releaseSeconds: () => number = () => 0) {
     this.mode = settings.synthMode;
     this.frequency = new Tone.Signal({ context, value: 0, units: 'frequency' });
     this.detune = new Tone.Signal({ context, value: 0, units: 'cents' });
@@ -29,13 +30,17 @@ export class ModulatorSource {
     this.ratio.connect(this.frequency);
     Tone.connect(parentDetune, this.detune);
     this.source = settings.synthMode === 'partial-bank'
-      ? new PartialBankVoice(context, this.frequency, this.detune, settings, settings.partialBank)
+      // An audio-driven Signal reports only its intrinsic zero to getValueAtTime.
+      // Read the upstream note/ratio automation so the bank can taper high partials.
+      ? new PartialBankVoice(context, this.frequency, this.detune, settings, settings.partialBank,
+        (time, values) => Number(parentFrequency.getValueAtTime(time)) * Number(this.ratio.factor.getValueAtTime(time))
+          * 2 ** (Number(parentDetune.getValueAtTime(time)) / 1200 + values.pitch / 12))
       : settings.synthMode === 'additive' ? new SpectralVoice(context, this.frequency, this.detune, settings)
       : isGeneratorMode(settings.synthMode) ? new GeneratorSource(context, this.frequency, this.detune, settings)
       : new EngineSource(context, this.frequency, this.detune, settings);
     this.filter = new Tone.Filter({ context });
     this.motion = new VoiceModulation(context, this.detune, this.filter,
-      () => hasVoiceActivity(this.events, context.currentTime, 0, 0), {
+      () => hasVoiceActivity(this.events, context.currentTime, this.releaseSeconds()), {
         write: (values, timing, ramp) => {
           if (!(this.source instanceof EngineSource)) this.source.write(values, timing, ramp);
         },

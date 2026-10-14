@@ -5,6 +5,8 @@ import { normalizeEngineCombination, resolveGeneratorEngine } from '../audio/syn
 import { prepareProjectGenerators } from '../audio/generatorSource';
 import { PitchEnvelopeSynth } from '../audio/pitchEnvelopeSynth';
 import { MonoGlideSynth } from '../audio/monoGlideSynth';
+import { ModulatorSource } from '../audio/modulatorSource';
+import { PartialBankVoice } from '../audio/partialBankVoice';
 import { renderOfflineAudio } from '../audio/offlineRender';
 import { createSampleAsset } from '../audio/sampleAssets';
 import type App from '../App.vue';
@@ -59,6 +61,8 @@ export async function runDualEngineChecks() {
     check(energy(pcm, 19200) < 1e-10, `${mode}: B must end with shared envelope`);
     results.push({ mode, rms: Math.sqrt(energy(pcm)) });
   }
+  results.push(await checkMonoModulatorRelease());
+  results.push(await checkModulatorBandLimit());
   // Start with A additive so preparation must discover the worklet engine in B.
   const root = document.querySelector('#app') as HTMLElement & { __vue_app__?: { _instance?: { proxy?: InstanceType<typeof App> } }; _vnode?: { component?: { proxy?: InstanceType<typeof App> } } };
   const app = root.__vue_app__?._instance?.proxy ?? root._vnode?.component?.proxy;
@@ -91,4 +95,60 @@ export async function runDualEngineChecks() {
   const wav = await app.renderMixWav(); check(wav.length > 44, 'Combined app WAV export must complete');
   results.push({ browserBypassExact: true, sidebands: true, guiIndependent: true, playback: true, wavBytes: wav.length });
   return results;
+}
+
+async function checkModulatorBandLimit() {
+  const settings = normalizeEngineCombination({ engineB: { synthMode: 'partial-bank',
+    partialGenerator: { type: 'waveform', waveform: 'sine', harmonicCount: 1 } } }).engineB;
+  let source: ModulatorSource | undefined, frequency: Tone.Signal<'frequency'> | undefined, detune: Tone.Signal<'cents'> | undefined;
+  const buffer = await renderOfflineAudio(context => {
+    frequency = new Tone.Signal({ context, value: 1406.25, units: 'frequency' });
+    detune = new Tone.Signal({ context, value: 0, units: 'cents' });
+    source = new ModulatorSource(context, frequency, detune, settings, 8);
+    source.output.toDestination(); source.note(1406.25, 0.01); source.attack(0.01, false, 0.25);
+  }, 0.3, 1, rate);
+  source?.dispose(); frequency?.dispose(); detune?.dispose();
+  let reference: PartialBankVoice | undefined;
+  const expected = await renderOfflineAudio(context => {
+    frequency = new Tone.Signal({ context, value: 11250, units: 'frequency' });
+    detune = new Tone.Signal({ context, value: 0, units: 'cents' });
+    reference = new PartialBankVoice(context, frequency, detune, settings, settings.partialBank);
+    reference.output.toDestination(); reference.attack(0.01, false, 0.25);
+  }, 0.3, 1, rate);
+  reference?.dispose(); frequency?.dispose(); detune?.dispose();
+  const browserEnergy = energy(buffer.getChannelData(0), 2400, 9600), referenceEnergy = energy(expected.getChannelData(0), 2400, 9600);
+  check(Math.abs(browserEnergy / referenceEnergy - 1) < 0.02,
+    `Engine B Partial Bank must apply its frequency ratio to the Nyquist taper: ${browserEnergy} vs ${referenceEnergy}`);
+  return { modulatorBandLimit: true };
+}
+
+async function checkMonoModulatorRelease() {
+  class InspectableMono extends MonoGlideSynth {
+    get modulatorOutput() { return this.modulatorSource!.output; }
+  }
+  const context = new Tone.Context({ lookAhead: 0.02, updateInterval: 0.005 });
+  let synth: InspectableMono | undefined, meter: Tone.Analyser | undefined;
+  try {
+    await context.resume();
+    const track = normalizePresetTrackData({ engineCombination: { mode: 'rm', engineB: {
+      synthMode: 'fm', generatorEngines: { fm: { index: 0 } }, modulation: {
+        sources: [{ id: 'fade', type: 'envelope', attack: 0, decay: 0, sustain: 1, release: 0.3 }],
+        routes: [{ source: 'fade', target: 'level', amount: -24 }],
+      },
+    } } });
+    await prepareProjectGenerators(context, [track]);
+    synth = new InspectableMono({ context, engine: resolveGeneratorEngine(track),
+      envelope: { attack: 0.001, decay: 0, sustain: 1, release: 1 } });
+    meter = new Tone.Analyser({ context, type: 'waveform', size: 2048 });
+    synth.modulatorOutput.connect(meter);
+    synth.triggerAttack(110, context.now());
+    await new Promise(resolve => setTimeout(resolve, 150));
+    const held = energy(meter.getValue() as Float32Array);
+    synth.triggerRelease(context.now());
+    await new Promise(resolve => setTimeout(resolve, 450));
+    const released = energy(meter.getValue() as Float32Array);
+    check(held > 1e-6 && released > held * 20,
+      `Engine B modulation must continue through the shared mono release: ${held} -> ${released}`);
+    return { monoModulatorRelease: true };
+  } finally { synth?.dispose(); meter?.dispose(); await context.close(); }
 }
