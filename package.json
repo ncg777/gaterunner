@@ -10,11 +10,13 @@
     "type-check": "vue-tsc --build --force",
     "bench:wav": "tsx cli/bench.ts",
     "cli": "tsx cli/cli.ts",
+    "mcp": "tsx cli/mcp.ts",
     "test": "node --experimental-test-module-mocks --import tsx --test cli/*.test.ts src/__tests__/*.test.ts",
     "bench:development": "tsx cli/benchDevelopment.ts"
   },
   "dependencies": {
     "@mdi/font": "7.4.47",
+    "@modelcontextprotocol/server": "^2.3.1",
     "@tonejs/midi": "^2.0.28",
     "commander": "^14.0.3",
     "register-service-worker": "^1.7.2",
@@ -23,9 +25,11 @@
     "ultra-mega-enumerator": "^2026.8.25",
     "vue": "^3.4.31",
     "vuetify": "^3.6.14",
-    "webmidi": "^3.1.12"
+    "webmidi": "^3.1.12",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "^2.3.1",
     "@tsconfig/node22": "^22.0.0",
     "@types/node": "^22.9.0",
     "@vitejs/plugin-vue": "^5.1.4",

@@ -2,6 +2,7 @@
 node_modules
 /dist
 /dist-cli
+.gaterunner-mcp/
 
 # local env files
 .env.local

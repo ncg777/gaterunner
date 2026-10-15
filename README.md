@@ -11,6 +11,7 @@ WAV, a reusable preset, or a shareable URL.
 **Read next:** [Quick Start](#quick-start) | [Examples](#examples) |
 [Encoding](#how-the-encoding-works) | [Feature Guide](#feature-guide) |
 [CLI](#cli-and-automation) | [Developer Guide](#developer-guide) |
+[MCP server](MCP.md) |
 [Contributing](#contributing)
 
 ## Why GateRunner?
@@ -557,6 +558,15 @@ yarn cli stems --project cli/fixtures/development-demo.json --output stems --sta
 The importable API is `cli/projectApi.ts` (compiled to
 `dist-cli/cli/projectApi.js`). See the [API and routing guide](DEVELOPMENT_STUDIO.md).
 All existing generation flags continue to work.
+
+### MCP Server
+
+The local [MCP server](MCP.md) lets compatible AI assistants inspect and edit
+projects, render short previews, and export portable projects, MIDI, WAV and stems.
+It uses the stable MCP v2 SDK and supports protocol revision `2026-07-28`, with
+compatibility for older clients. Build with `yarn build:cli`, then configure your
+MCP host to launch `node dist-cli/cli/mcp.js --workspace /path/to/projects`.
+The [setup guide](MCP.md#build-and-connect) includes a complete host configuration.
 
 ### WAV Export
 
