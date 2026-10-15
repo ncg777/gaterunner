@@ -40,8 +40,8 @@ export async function runTrackPhaseChecks(app: InstanceType<typeof App>) {
         }
         const midi = await app.getMidi();
         check(midi.tracks[0].notes.length === events.reduce((sum, event) => sum + event.notes.length, 0), 'MIDI lost phased notes');
-        const label = document.querySelector('.track-timeline-meta span')?.textContent?.trim();
-        check(label === '4.1 beats · 4.1 bars', `Phase changed the displayed track length: ${label}`);
+        const label = document.querySelector('.track-meta-description')?.textContent?.trim();
+        check(label?.endsWith('· 4.1 beats') ?? false, `Phase changed the displayed track length: ${label}`);
       }
       app.tracks[0].phase = 0.5;
       await app.$nextTick();

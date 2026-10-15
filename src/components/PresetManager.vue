@@ -21,7 +21,7 @@
         <v-menu v-model="presetMenuOpen" location="bottom end">
           <template #activator="{ props }">
             <v-btn v-bind="props" class="preset-menu-btn" color="secondary" variant="tonal" append-icon="mdi-chevron-down">
-              Preset Actions
+              Project
             </v-btn>
           </template>
           <v-list density="compact" class="preset-action-menu">
@@ -46,6 +46,7 @@
             <v-list-item title="Import JSON" prepend-icon="mdi-file-import-outline" @click="triggerPresetImport" />
           </v-list>
         </v-menu>
+        <v-btn class="project-save-button" icon="mdi-content-save-outline" variant="text" size="small" title="Save preset" aria-label="Save preset" :disabled="!currentPreset || !isDirty" @click="saveCurrentPreset" />
       </div>
     </div>
 

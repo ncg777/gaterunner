@@ -1,5 +1,5 @@
-﻿<template>
-  <div>
+<template>
+  <div class="track-arranger">
     <div class="track-activation">
       <button
         type="button"
@@ -30,6 +30,9 @@
       </div>
     </div>
 
+    <div class="timeline-scroll">
+    <div class="timeline-content" :style="{ width: `${zoom * 100}%` }">
+    <div class="timeline-ruler"><span class="ruler-heading">TRACK / PATTERN</span><div class="ruler-beats"><span v-for="beat in rulerBeats" :key="beat" :style="{ left: `${beat / loopDurationBeats * 100}%` }">{{ formatBeats(beat) }}</span><span class="ruler-unit">BEATS</span></div><span class="ruler-heading ruler-tools">M / S</span></div>
     <div class="track-timeline" aria-label="Track lengths in beats">
       <div
         v-for="entry in trackTimingEntries"
@@ -37,15 +40,18 @@
         role="button"
         tabindex="0"
         class="track-timeline-row"
+        :style="{ '--track-color': trackColors[entry.trackIndex % trackColors.length] }"
         :class="{
           selected: entry.track.id === selectedTrackId,
           dragging: entry.track.id === draggedTrackId,
           'drop-target': entry.track.id === dropTargetTrackId,
+          'track-is-muted': !isTrackAudible(entry.track.id),
         }"
         draggable="true"
         @click="$emit('select-track', entry.track.id)"
-        @keydown.enter.prevent="$emit('select-track', entry.track.id)"
-        @keydown.space.prevent="$emit('select-track', entry.track.id)"
+        @dblclick="$emit('edit-track', entry.track.id)"
+        @keydown.enter.self.prevent="$emit('select-track', entry.track.id)"
+        @keydown.space.self.prevent="$emit('select-track', entry.track.id)"
         @dragstart="onDragStart(entry.track.id, $event)"
         @dragover.prevent="onDragOver(entry.track.id)"
         @dragleave="onDragLeave(entry.track.id)"
@@ -53,55 +59,61 @@
         @dragend="onDragEnd"
       >
         <div class="track-timeline-meta">
+          <span class="track-number">{{ String(entry.trackIndex + 1).padStart(2, '0') }}</span>
+          <v-icon class="track-kind-icon" size="17">{{ entry.track.trackKind === 'rhythmic' ? 'mdi-album' : 'mdi-piano' }}</v-icon>
+          <div class="track-meta-text">
           <input
             class="track-name-input"
             :value="entry.track.name"
             :aria-label="`Track name for ${entry.track.name || 'unnamed track'}`"
             @click.stop
+            @dblclick.stop
             @focus="$emit('select-track', entry.track.id)"
             @input="$emit('track-name-input', entry.track.id, ($event.target as HTMLInputElement).value)"
             @blur="$emit('commit-track-name', entry.track.id)"
             @keydown.enter.prevent="($event.target as HTMLInputElement).blur()"
           />
-          <span>{{ formatBeats(entry.totalBeats) }} beats · {{ formatBars(entry.totalBars) }} bars</span>
+          <span class="track-meta-description">{{ entry.track.trackKind === 'rhythmic' ? 'Drum kit' : entry.track.synthMode ?? 'Additive' }} · {{ formatBeats(entry.totalBeats) }} beats</span>
+          </div>
         </div>
-        <div class="track-timeline-bar">
+        <div class="track-timeline-bar" :style="{ backgroundSize: `${rulerInterval / loopDurationBeats * 100}% 100%` }">
           <div class="track-timeline-segments">
             <span
               v-if="entry.delayBeats > 0"
               class="track-timeline-segment delay"
-              :style="{ flexGrow: entry.delayBeats }"
+              :style="segmentStyle(entry.delayBeats)"
               :title="`${formatBeats(entry.delayBeats)} beat delay`"
             ></span>
             <template v-for="section in entry.sections" :key="section.id">
-              <span class="track-timeline-segment repeat" :style="{flexGrow: section.beats}" :title="`${section.name}: ${formatBeats(section.beats)} beats`">{{ section.name }}</span>
+              <span class="track-timeline-segment repeat" :style="segmentStyle(section.beats)" :title="`${section.name}: ${formatBeats(section.beats)} beats · double-click to edit phrase`" @dblclick.stop="$emit('edit-pattern', entry.track.id, section.pattern)"><span class="clip-label">{{ section.name }}</span></span>
             </template>
             <template v-for="repeat in entry.repeatBlocks" :key="repeat">
               <span
                 v-if="entry.paddingBeforeBeats > 0"
                 class="track-timeline-segment sequence-padding"
-                :style="{ flexGrow: entry.paddingBeforeBeats }"
+                :style="segmentStyle(entry.paddingBeforeBeats)"
                 :title="`Repeat ${repeat}: ${formatBeats(entry.paddingBeforeBeats)} beats before padding`"
               ></span>
               <span
                 class="track-timeline-segment repeat"
-                :style="{ flexGrow: entry.patternBeats }"
+                :style="segmentStyle(entry.patternBeats)"
                 :title="`Repeat ${repeat}: ${formatBeats(entry.patternBeats)} sequence beats`"
-              ></span>
+              ><span class="clip-label">{{ entry.track.name }} <small>· {{ repeat }}</small></span></span>
               <span
                 v-if="entry.paddingAfterBeats > 0"
                 class="track-timeline-segment sequence-padding"
-                :style="{ flexGrow: entry.paddingAfterBeats }"
+                :style="segmentStyle(entry.paddingAfterBeats)"
                 :title="`Repeat ${repeat}: ${formatBeats(entry.paddingAfterBeats)} beats after padding`"
               ></span>
             </template>
             <span
               v-if="entry.padBeats > 0"
               class="track-timeline-segment pad"
-              :style="{ flexGrow: entry.padBeats }"
+              :style="segmentStyle(entry.padBeats)"
               aria-hidden="true"
             ></span>
           </div>
+          <svg class="track-note-preview" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"><path :d="entry.preview" /></svg>
           <div
             v-if="entry.chunkStates.length > 0"
             class="track-activation-overlay"
@@ -115,18 +127,21 @@
               :title="chunkTooltip(entry, chunkIndex, active)"
             ></span>
           </div>
+          <div class="timeline-playhead" :style="{ left: `${playhead * 100}%` }" aria-hidden="true" />
         </div>
-        <div class="track-timeline-controls">
+        <div class="track-timeline-controls" @dblclick.stop>
           <v-btn
             class="track-mix-btn"
             icon
             size="x-small"
             :variant="isTrackMuted(entry.track.id) ? 'tonal' : 'text'"
             :color="isTrackMuted(entry.track.id) ? 'warning' : undefined"
+            :aria-label="`Mute ${entry.track.name}`"
+            :aria-pressed="isTrackMuted(entry.track.id)"
             :title="isTrackMuted(entry.track.id) ? `Unmute ${entry.track.name}` : `Mute ${entry.track.name}`"
             @click.stop="$emit('toggle-muted', entry.track.id)"
           >
-            <v-icon size="18">mdi-volume-off</v-icon>
+            <span class="mix-letter">M</span>
           </v-btn>
           <v-btn
             class="track-mix-btn"
@@ -134,35 +149,33 @@
             size="x-small"
             :variant="isTrackSoloed(entry.track.id) ? 'tonal' : 'text'"
             :color="isTrackSoloed(entry.track.id) ? 'primary' : undefined"
+            :aria-label="`Solo ${entry.track.name}`"
+            :aria-pressed="isTrackSoloed(entry.track.id)"
             :title="isTrackSoloed(entry.track.id) ? `Unsolo ${entry.track.name}` : `Solo ${entry.track.name}`"
             @click.stop="$emit('toggle-soloed', entry.track.id)"
           >
-            <v-icon size="18">mdi-headphones</v-icon>
+            <span class="mix-letter">S</span>
           </v-btn>
-          <v-btn
-            class="track-duplicate-btn"
-            icon
-            size="x-small"
-            variant="text"
-            :title="`Duplicate ${entry.track.name}`"
-            @click.stop="$emit('duplicate-track', entry.track.id)"
-          >
-            <v-icon size="18">mdi-content-copy</v-icon>
-          </v-btn>
-          <v-btn
-            class="track-delete-btn"
-            icon
-            size="x-small"
-            variant="text"
-            color="error"
-            :disabled="tracks.length <= 1"
-            :title="tracks.length <= 1 ? 'Cannot delete the only track' : `Delete ${entry.track.name}`"
-            @click.stop="$emit('remove-track', entry.track.id)"
-          >
-            <v-icon size="18">mdi-trash-can-outline</v-icon>
-          </v-btn>
+          <v-menu location="bottom end">
+            <template #activator="{ props }">
+              <v-btn v-bind="props" icon="mdi-dots-vertical" size="x-small" variant="text"
+                :aria-label="`Actions for ${entry.track.name}`" :title="`Actions for ${entry.track.name}`" @click.stop />
+            </template>
+            <v-list density="compact">
+              <v-list-item title="Duplicate track" prepend-icon="mdi-content-copy" @click="$emit('duplicate-track', entry.track.id)" />
+              <v-list-item title="Move track up" prepend-icon="mdi-arrow-up" :disabled="entry.trackIndex === 0"
+                @click="$emit('reorder-tracks', entry.track.id, tracks[entry.trackIndex - 1].id)" />
+              <v-list-item title="Move track down" prepend-icon="mdi-arrow-down" :disabled="entry.trackIndex === tracks.length - 1"
+                @click="$emit('reorder-tracks', entry.track.id, tracks[entry.trackIndex + 1].id)" />
+              <v-list-item title="Delete track" prepend-icon="mdi-trash-can-outline" :disabled="tracks.length <= 1"
+                @click="$emit('remove-track', entry.track.id)" />
+            </v-list>
+          </v-menu>
         </div>
       </div>
+    </div>
+    <div class="timeline-empty-space"><div class="empty-track-heading">{{ tracks.length }} {{ tracks.length === 1 ? 'track' : 'tracks' }} in this project</div><span>Select a pattern to shape its sequence and sound</span></div>
+    </div>
     </div>
   </div>
 </template>
@@ -171,6 +184,9 @@
 import { defineComponent, type PropType } from 'vue';
 import type { PresetTrackData } from '../presets';
 import { trackDurationBeats } from '../domain/developmentSchedule';
+import type { ScheduledEvent } from '../domain/scheduling';
+import { trackNotePreview } from '../domain/trackPreview';
+import { parseRhythmSequenceInput } from '../domain/rhythmTrack';
 import {
   buildTrackChunkActivationStates,
   parseBitmaskSequenceInput,
@@ -182,6 +198,7 @@ export interface TrackMixState {
 }
 
 export interface TrackTimingEntry {
+  preview: string;
   track: PresetTrackData;
   trackIndex: number;
   sequenceLength: number;
@@ -198,12 +215,15 @@ export interface TrackTimingEntry {
   padBeats: number;
   repeatBlocks: number[];
   chunkStates: boolean[];
-  sections: { id: string; name: string; beats: number }[];
+  sections: { id: string; pattern: string; name: string; beats: number }[];
 }
 
 export default defineComponent({
   name: 'TrackStrip',
   props: {
+    zoom: { type: Number, default: 1 },
+    playhead: { type: Number, default: 0 },
+    scheduledEvents: { type: Object as PropType<Record<string, ScheduledEvent[]>>, required: true },
     tracks: {
       type: Array as PropType<PresetTrackData[]>,
       required: true,
@@ -231,6 +251,8 @@ export default defineComponent({
     },
   },
   emits: [
+    'edit-pattern',
+    'edit-track',
     'select-track',
     'track-name-input',
     'commit-track-name',
@@ -243,12 +265,20 @@ export default defineComponent({
   ],
   data() {
     return {
+      trackColors: ['#74bba9', '#d6a269', '#9e9bc9', '#7ca8cc', '#c68499', '#aab87c'],
       activationExpanded: false,
       draggedTrackId: null as string | null,
       dropTargetTrackId: null as string | null,
     };
   },
   computed: {
+    rulerInterval(): number {
+      return Math.max(0.25, Math.pow(2, Math.ceil(Math.log2(this.loopDurationBeats / (8 * this.zoom)))));
+    },
+    rulerBeats(): number[] {
+      const interval = this.rulerInterval;
+      return Array.from({ length: Math.ceil(this.loopDurationBeats / interval) }, (_, i) => i * interval);
+    },
     activationParse() {
       return parseBitmaskSequenceInput(this.bitmaskSequenceInput);
     },
@@ -279,16 +309,23 @@ export default defineComponent({
       const loopBeats = this.loopDurationBeats;
 
       return this.tracks.map((track, trackIndex) => {
-        const sequenceLength = this.parseSequence(track.sequenceInput).length;
+        const sequenceLength = track.trackKind === 'rhythmic'
+          ? parseRhythmSequenceInput(track.sequenceInput).masks.length : this.parseSequence(track.sequenceInput).length;
         const patternBeats = sequenceLength / Math.max(1, track.denominator);
         const delayBeats = track.delay * track.numerator;
         const paddingBeforeBeats = track.paddingBefore * track.numerator;
         const paddingAfterBeats = track.paddingAfter * track.numerator;
-        const sections = track.development?.enabled ? track.development.sections.map(s => ({id:s.id,name:s.name,beats:s.length*(s.unit==='bars'?track.numerator:1)})) : [];
+        const sections = track.development?.enabled ? track.development.sections.map(section => ({
+          id: section.id,
+          pattern: section.pattern,
+          name: section.name,
+          beats: section.length * (section.unit === 'bars' ? track.numerator : 1),
+        })) : [];
         const activeBeats = sections.length ? trackDurationBeats(track) - delayBeats : (paddingBeforeBeats + patternBeats + paddingAfterBeats) * track.repeats;
         const totalBeats = delayBeats + activeBeats;
         const totalBars = track.numerator > 0 ? totalBeats / track.numerator : 0;
         return {
+          preview: trackNotePreview(track, this.scheduledEvents[track.id] ?? [], this.loopDurationSeconds),
           track,
           sections,
           trackIndex,
@@ -311,6 +348,9 @@ export default defineComponent({
     },
   },
   methods: {
+    segmentStyle(beats: number): { width: string } {
+      return { width: `${beats / this.loopDurationBeats * 100}%` };
+    },
     parseSequence(sequenceInput: string): number[] {
       return sequenceInput
         .trim()
@@ -326,6 +366,9 @@ export default defineComponent({
     },
     isTrackSoloed(trackId: string): boolean {
       return this.getTrackMixState(trackId).soloed;
+    },
+    isTrackAudible(trackId: string): boolean {
+      return !this.isTrackMuted(trackId) && (!this.tracks.some(track => this.isTrackSoloed(track.id)) || this.isTrackSoloed(trackId));
     },
     formatBeats(value: number): string {
       return Number.isInteger(value) ? value.toString() : value.toFixed(2).replace(/\.?0+$/, '');
@@ -374,252 +417,4 @@ export default defineComponent({
 });
 </script>
 
-<style scoped>
-.track-activation {
-  border: 1px solid var(--panel-border-soft);
-  background: #1a1c16;
-}
-
-.track-activation-toggle {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border: 0;
-  background: transparent;
-  color: var(--instrument-text);
-  font: inherit;
-  font-size: 0.76rem;
-  font-weight: 700;
-  cursor: pointer;
-  text-align: left;
-}
-
-.track-activation-toggle:hover,
-.track-activation-toggle:focus-visible {
-  background: rgba(242, 184, 75, 0.08);
-  outline: none;
-}
-
-.track-activation-status {
-  margin-left: auto;
-  color: var(--instrument-muted);
-  font-weight: 600;
-  font-size: 0.72rem;
-  letter-spacing: 0.02em;
-  text-transform: lowercase;
-}
-
-.track-activation-body {
-  padding: 0 8px 8px;
-}
-
-.track-activation-help {
-  margin: 6px 0 0;
-  color: var(--instrument-muted);
-  font-size: 0.72rem;
-  line-height: 1.35;
-}
-
-.track-timeline {
-  margin-top: 6px;
-  display: grid;
-  gap: 3px;
-}
-
-.track-timeline-row {
-  width: 100%;
-  min-height: 30px;
-  display: grid;
-  grid-template-columns: minmax(132px, 0.34fr) minmax(160px, 1fr) auto;
-  gap: 6px;
-  align-items: center;
-  padding: 1px 6px;
-  border: 1px solid var(--panel-border-soft);
-  border-radius: 0;
-  color: var(--instrument-text);
-  background: linear-gradient(90deg, #25271f, #2c2e24);
-  cursor: pointer;
-  text-align: left;
-}
-
-.track-timeline-row.selected {
-  border-color: rgba(242, 184, 75, 0.82);
-  background:
-    linear-gradient(90deg, rgba(242, 184, 75, 0.24), rgba(93, 166, 154, 0.14)),
-    #292b21;
-  box-shadow: inset 4px 0 var(--indicator-amber), 0 0 14px rgba(242, 184, 75, 0.16);
-}
-
-.track-timeline-row.dragging {
-  opacity: 0.45;
-}
-
-.track-timeline-row.drop-target {
-  border-color: var(--indicator-amber);
-  box-shadow: inset 4px 0 var(--indicator-amber), 0 0 12px rgba(242, 184, 75, 0.2);
-}
-
-.track-timeline-row.selected .track-name-input {
-  color: #ffe0a0;
-}
-
-.track-timeline-controls {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.track-timeline-meta {
-  min-width: 0;
-  display: grid;
-  gap: 1px;
-}
-
-.track-timeline-meta span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--instrument-muted);
-  font-size: 0.76rem;
-}
-
-.track-name-input {
-  width: 100%;
-  min-width: 0;
-  color: var(--instrument-text);
-  font: inherit;
-  font-weight: 800;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 0;
-  padding: 1px 5px;
-  outline: none;
-}
-
-.track-name-input:hover,
-.track-name-input:focus {
-  border-color: rgba(242, 184, 75, 0.52);
-  background: rgba(242, 184, 75, 0.08);
-  box-shadow: 0 0 10px rgba(242, 184, 75, 0.1);
-}
-
-.track-timeline-bar {
-  position: relative;
-  min-width: 0;
-  height: 18px;
-  border: 1px solid rgba(180, 177, 133, 0.34);
-  border-radius: 0;
-  background: #0d0f0c;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.72);
-  overflow: hidden;
-}
-
-.track-timeline-segments {
-  position: absolute;
-  inset: 2px;
-  display: flex;
-  gap: 3px;
-  min-width: 0;
-}
-
-.track-timeline-segment {
-  min-width: 5px;
-  border-radius: 0;
-}
-
-.track-timeline-segment.delay {
-  background: repeating-linear-gradient(
-    135deg,
-    rgba(170, 167, 141, 0.58),
-    rgba(170, 167, 141, 0.58) 4px,
-    rgba(96, 96, 75, 0.42) 4px,
-    rgba(96, 96, 75, 0.42) 8px
-  );
-}
-
-.track-timeline-segment.repeat {
-  background: linear-gradient(90deg, #5da69a, #c2b760 54%, #e58b43);
-  box-shadow: 0 0 8px rgba(242, 184, 75, 0.28);
-}
-
-.track-timeline-segment.sequence-padding {
-  min-width: 2px;
-  border: 1px dashed rgba(180, 177, 133, 0.48);
-  background: rgba(180, 177, 133, 0.12);
-}
-
-.track-delete-btn {
-  opacity: 0.76;
-}
-
-.track-delete-btn:hover,
-.track-delete-btn:focus-visible {
-  opacity: 1;
-}
-
-.track-timeline-segment.pad {
-  min-width: 0;
-  background: rgba(180, 177, 133, 0.1);
-}
-
-.track-activation-overlay {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
-  pointer-events: none;
-  z-index: 1;
-}
-
-.track-activation-chunk {
-  min-width: 0;
-  border-right: 1px solid rgba(8, 14, 20, 0.55);
-  background: transparent;
-}
-
-.track-activation-chunk:last-child {
-  border-right: 0;
-}
-
-.track-activation-chunk.inactive {
-  background: rgba(0, 0, 0, 0.58);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
-}
-
-@media (max-width: 680px) {
-  .track-timeline-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-      "meta controls"
-      "bar bar";
-    gap: 2px;
-    min-height: 40px;
-    padding: 1px 6px;
-  }
-
-  .track-timeline-meta {
-    grid-area: meta;
-    gap: 2px;
-  }
-
-  .track-timeline-bar {
-    grid-area: bar;
-    height: 10px;
-  }
-
-  .track-timeline-segments {
-    inset: 1px;
-  }
-
-  .track-delete-btn {
-    grid-area: delete;
-  }
-
-  .track-timeline-controls {
-    grid-area: controls;
-  }
-}
-</style>
+<style scoped src="./TrackStrip.css"></style>

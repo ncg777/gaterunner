@@ -1,22 +1,23 @@
 :root {
-  font-family: "Space Grotesk", "Avenir Next", "Segoe UI", "Trebuchet MS", sans-serif;
+  font-family: "Segoe UI", "Avenir Next", sans-serif;
+  --font-mono: "Cascadia Code", "Consolas", monospace;
   line-height: 1.45;
   font-weight: 400;
   color-scheme: dark;
-  color: #e8dfc8;
-  background-color: #151612;
-  --panel-black: #151612;
-  --panel-deep: #1c1e19;
-  --panel-raised: #272920;
-  --panel-inset: #10120f;
-  --panel-border: #66664f;
-  --panel-border-soft: rgba(180, 177, 133, 0.28);
-  --instrument-text: #e8dfc8;
-  --instrument-muted: #aaa78d;
-  --indicator-amber: #f2b84b;
-  --indicator-orange: #d96f32;
-  --indicator-teal: #5da69a;
-  --indicator-green: #9eaa69;
+  color: #dce1e8;
+  background-color: #171a1f;
+  --panel-black: #171a1f;
+  --panel-deep: #22262d;
+  --panel-raised: #2b3038;
+  --panel-inset: #1b1f25;
+  --panel-border: #454e5a;
+  --panel-border-soft: #363d47;
+  --instrument-text: #dce1e8;
+  --instrument-muted: #939daa;
+  --indicator-amber: #d6bd82;
+  --indicator-orange: #d6a269;
+  --indicator-teal: #74bba9;
+  --indicator-green: #aab87c;
   --danger-red: #d85b4d;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -38,9 +39,7 @@ body,
 body {
   margin: 0;
   min-width: 320px;
-  background:
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.012) 0 1px, transparent 1px 4px),
-    var(--panel-black);
+  background: var(--panel-black);
 }
 
 a {

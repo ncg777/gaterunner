@@ -13,24 +13,29 @@ import { createVuetify } from 'vuetify'
 
 // https://vuetifyjs.com/en/introduction/why-vuetify/#feature-guides
 export default createVuetify({
+  defaults: {
+    VTextField: { density: 'compact', variant: 'outlined' },
+    VSelect: { density: 'compact', variant: 'outlined' },
+    VBtn: { rounded: 'sm' },
+  },
   theme: {
     defaultTheme: 'dark',
     themes: {
       dark: {
         dark: true,
         colors: {
-          background: '#151612',
-          surface: '#1c1e19',
-          'surface-bright': '#303229',
-          'surface-light': '#272920',
-          'surface-variant': '#3b3b2f',
-          'on-surface': '#e8dfc8',
-          primary: '#f2b84b',
-          'on-primary': '#231b0c',
-          secondary: '#5da69a',
+          background: '#171a1f',
+          surface: '#22262d',
+          'surface-bright': '#353c46',
+          'surface-light': '#2b3038',
+          'surface-variant': '#414954',
+          'on-surface': '#dce1e8',
+          primary: '#d6bd82',
+          'on-primary': '#25251f',
+          secondary: '#74bba9',
           'on-secondary': '#0b211e',
           info: '#72a9a0',
-          success: '#9eaa69',
+          success: '#74bba9',
           warning: '#e6a23c',
           error: '#d85b4d',
         },

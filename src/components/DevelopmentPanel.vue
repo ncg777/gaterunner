@@ -1,11 +1,9 @@
 <template>
-  <v-expansion-panels class="development-panel" variant="accordion">
+  <v-expansion-panels class="development-panel" :class="{ 'development-panel--embedded': embedded }" :model-value="embedded ? 0 : undefined" variant="accordion">
     <v-expansion-panel title="Phrases, motion & studio">
       <v-expansion-panel-text>
-        <p>Keep a recognizable groove while changing its phrasing and sound. These controls are optional.</p>
-        <v-switch v-model="development.enabled" label="Develop this track" hide-details @update:model-value="changed" />
-        <v-text-field v-model.number="development.seed" label="Saved variation seed" type="number" density="compact" @change="changed" />
-        <v-tabs v-model="tab"><v-tab value="phrases">Phrases</v-tab><v-tab value="steps">Articulation</v-tab><v-tab value="motion">Motion</v-tab><v-tab value="returns">Dub returns</v-tab><v-tab value="samples">Samples</v-tab><v-tab value="render">Render</v-tab></v-tabs>
+        <div v-if="!embedded || ['phrases','steps','motion'].includes(tab)" class="development-settings"><v-switch v-model="development.enabled" label="Develop this track" hide-details @update:model-value="changed" /><v-text-field v-model.number="development.seed" label="Saved variation seed" type="number" density="compact" hide-details @change="changed" /><span>Enable phrases, articulation and automation for this track.</span></div>
+        <v-tabs v-if="!embedded" v-model="tab"><v-tab value="phrases">Phrases</v-tab><v-tab value="steps">Articulation</v-tab><v-tab value="motion">Motion</v-tab><v-tab value="returns">Dub returns</v-tab><v-tab value="samples">Samples</v-tab><v-tab value="render">Render</v-tab></v-tabs>
         <v-window v-model="tab" :touch="false">
           <v-window-item value="phrases">
             <v-btn class="my-2" @click="capturePattern">Capture sequence</v-btn>
@@ -183,7 +181,7 @@ import { renderBrowserDevelopment } from '../audio/browserDevelopment';
 import { encodeWavInWorker } from '../audio/wavWorker';
 import { RENDERER_VERSION } from '../audio/renderCache';
 import type { RenderRange } from '../audio/developmentRender';
-const props = defineProps<{ project: PresetData; trackId: string | null }>();
+const props = defineProps<{ project: PresetData; trackId: string | null; embedded?: boolean; activeTab?: string }>();
 const emit = defineEmits<{ 'update:project': [project: PresetData] }>();
 const draft = ref(clonePresetData(props.project)), fallbackDevelopment = ref(normalizeDevelopment({})!), fallbackStudio = ref(normalizeStudio({})!);
 watch(() => props.project, value => { draft.value = clonePresetData(value); if(!value.studio)fallbackStudio.value=normalizeStudio({})!; }, { deep: true });
@@ -191,6 +189,7 @@ watch(()=>props.trackId,()=>{fallbackDevelopment.value=normalizeDevelopment({})!
 const track = computed(() => draft.value.tracks.find(t => t.id === props.trackId) ?? draft.value.tracks[0]);
 const development = computed(() => track.value.development ?? fallbackDevelopment.value), studio = computed(() => draft.value.studio ?? fallbackStudio.value);
 const tab = ref('phrases'), stepPattern = ref(''), lockTarget = ref(''), processorType = ref('delay'), snapshotTargets = ref(['filterFrequency','filterQ','gain']);
+watch(() => props.activeTab, value => { if (value) tab.value = value; }, { immediate: true });
 const excerpt = ref(false), rangeStart = ref(0), rangeEnd = ref(4), rangeUnit = ref<RenderRange['unit']>('bars'), bounceSource = ref('mix');
 const busy = ref(false), status = ref(''), error = ref(''), preview = ref(''), controller = ref<AbortController>();
 const includeLanes=ref(true),includePre=ref(true);

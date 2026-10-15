@@ -1,7 +1,7 @@
 <template>
-  <v-responsive class="editor-surface align-center mx-auto pa-2 pb-8" :class="{ 'editor-surface--source': sourceOnly }">
+  <div class="editor-surface" :class="{ 'editor-surface--source': sourceOnly }">
     <div class="control-tabs-layout" :class="{ 'control-tabs-layout--source': sourceOnly }">
-      <v-tabs v-if="!sourceOnly" v-model="activeControlTab" :direction="$vuetify.display.xs ? 'horizontal' : 'vertical'" class="control-tabs" color="primary">
+      <v-tabs v-if="!sourceOnly" v-model="activeControlTab" direction="horizontal" class="control-tabs" color="primary" show-arrows>
         <v-tab value="sequence" prepend-icon="mdi-format-list-numbered">Sequence</v-tab>
         <v-tab v-if="!midiOutput && draftTrack.trackKind === 'rhythmic'" value="drum-sounds" prepend-icon="mdi-album">Drum Sounds</v-tab>
         <v-tab value="playback" prepend-icon="mdi-play-circle-outline">Playback</v-tab>
@@ -20,24 +20,28 @@
 
       <v-window v-model="activeControlTab" :touch="false" class="control-tab-content">
         <v-window-item value="sequence" class="control-tab-panel">
+          <v-select v-if="draftTrack.development?.patterns.length" v-model="sequencePatternId" :items="sequencePatternItems" label="Editing pattern" density="compact" hide-details class="mb-3 pattern-selector" />
+          <v-textarea
+            class="integer-sequence-input mb-4"
+            :label="`Integer sequence (${sequenceTrack.sequenceInput.trim() ? sequenceTrack.sequenceInput.trim().split(/\s+/).length : 0} steps)`"
+            :model-value="sequenceTrack.sequenceInput"
+            placeholder="1 2 4 8 3 5 7 0"
+            :hint="draftTrack.trackKind === 'rhythmic' ? 'Separate decimal drum masks with spaces. 0 is a rest.' : 'Separate integer note/chord masks with spaces. 0 is a rest.'"
+            persistent-hint
+            auto-grow
+            :rows="2"
+            :max-rows="5"
+            density="compact"
+            variant="outlined"
+            @update:modelValue="handleSequenceChange(String($event ?? ''))"
+          />
+          <SequenceGrid :track="sequenceTrack" :scale="scale" @change="handleSequenceChange" />
           <RhythmTrackControls
             v-if="draftTrack.trackKind === 'rhythmic'"
-            :track="draftTrack"
-            @update:track="draftTrack = $event; handleTrackDraftChange()"
+            :track="sequenceTrack"
+            :show-sequence-input="false"
+            @update:track="handleSequenceTrackChange"
           />
-          <v-row v-else>
-            <v-col cols="12">
-              <v-text-field
-                :label="`Sequence (${selectedTrackSequenceLength})`"
-                v-model="draftTrack.sequenceInput"
-                placeholder="e.g. 0 1 2..."
-                hide-details="auto"
-                density="comfortable"
-                variant="outlined"
-                @update:modelValue="handleTrackDraftChange"
-              />
-            </v-col>
-          </v-row>
         </v-window-item>
 
         <v-window-item v-if="!midiOutput && draftTrack.trackKind === 'rhythmic'" value="drum-sounds" class="control-tab-panel">
@@ -830,10 +834,11 @@
         </v-window-item>
       </v-window>
     </div>
-  </v-responsive>
+  </div>
 </template>
 
 <script lang="ts">
+import SequenceGrid from './SequenceGrid.vue';
 import { defineComponent, type PropType } from 'vue';
 import EditableSlider from './EditableSlider.vue';
 import SynthEngineControls from './SynthEngineControls.vue';
@@ -889,6 +894,7 @@ const builtinTimeWarpCurvePaths = new Map(
 export default defineComponent({
   name: 'EditorSurface',
   components: {
+    SequenceGrid,
     EditableSlider,
     SynthEngineControls,
     TrackModulationControls,
@@ -899,6 +905,7 @@ export default defineComponent({
     WaveshaperControls,
   },
   props: {
+    scale: { type: Array as PropType<number[]>, default: () => [] },
     sourceOnly: { type: Boolean, default: false },
     assets: {
       type: Array as PropType<import('../domain/development').SampleAsset[]>,
@@ -1007,6 +1014,7 @@ export default defineComponent({
         value,
       })),
       activeControlTab: (this.sourceOnly ? 'generator' : 'sequence') as string,
+      sequencePatternId: '',
       engineSlot: 'a',
       combinationModes: [
         { title: 'Single engine', value: 'off' },
@@ -1017,6 +1025,13 @@ export default defineComponent({
     };
   },
   computed: {
+    sequencePatternItems(): Array<{title: string; value: string}> {
+      return [{title: 'Base sequence', value: ''}, ...(this.draftTrack.development?.patterns ?? []).map(pattern => ({title: pattern.name, value: pattern.id}))];
+    },
+    sequenceTrack(): PresetTrackData {
+      const pattern = this.draftTrack.development?.patterns.find(pattern => pattern.id === this.sequencePatternId);
+      return pattern ? { ...this.draftTrack, sequenceInput: pattern.sequence } : this.draftTrack;
+    },
     combination(): EngineCombinationSettings { return normalizeEngineCombination(this.draftTrack.engineCombination); },
     secondaryTrack(): PresetTrackData {
       return clonePresetTrackData({ ...this.draftTrack, ...this.combination.engineB, engineCombination: undefined });
@@ -1101,6 +1116,7 @@ export default defineComponent({
       immediate: true,
       handler(nextTrack: PresetTrackData | null) {
         if (nextTrack) {
+          if (nextTrack.id !== this.draftTrack.id || !nextTrack.development?.patterns.some(pattern => pattern.id === this.sequencePatternId)) this.sequencePatternId = '';
           const trackKindChanged = nextTrack.trackKind !== this.draftTrack.trackKind;
           this.draftTrack = clonePresetTrackData(nextTrack);
           this.selectedTonewheelConfigurationIndex = Math.min(
@@ -1122,6 +1138,28 @@ export default defineComponent({
     },
   },
   methods: {
+    setSequencePattern(id: string) {
+      this.sequencePatternId = this.draftTrack.development?.patterns.some(pattern => pattern.id === id) ? id : '';
+    },
+    handleSequenceChange(sequence: string) {
+      const pattern = this.draftTrack.development?.patterns.find(pattern => pattern.id === this.sequencePatternId);
+      if (pattern) pattern.sequence = sequence;
+      else this.draftTrack.sequenceInput = sequence;
+      this.handleTrackDraftChange();
+    },
+    handleSequenceTrackChange(track: PresetTrackData) {
+      const sequence = track.sequenceInput;
+      const baseSequence = this.draftTrack.sequenceInput;
+      this.draftTrack = track;
+      if (this.sequencePatternId) this.draftTrack.sequenceInput = baseSequence;
+      this.handleSequenceChange(sequence);
+    },
+    setControlTab(tab: string) {
+      if (this.midiOutput && !['sequence', 'playback', 'time-warp'].includes(tab)) tab = 'sequence';
+      if (this.draftTrack.trackKind === 'rhythmic' && ['generator', 'unison'].includes(tab)) tab = 'drum-sounds';
+      if (this.draftTrack.trackKind !== 'rhythmic' && tab === 'drum-sounds') tab = 'generator';
+      this.activeControlTab = tab;
+    },
     updateCombination(change: Partial<EngineCombinationSettings>) {
       this.draftTrack.engineCombination = normalizeEngineCombination({ ...this.combination, ...change });
       if (this.draftTrack.engineCombination.mode === 'off') this.engineSlot = 'a';

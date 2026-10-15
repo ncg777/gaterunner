@@ -1,0 +1,396 @@
+.track-arranger {
+  background: #1b2026;
+}
+
+.track-activation {
+  border-bottom: 1px solid #363d47;
+  background: #232930;
+}
+
+.track-activation-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #9aa8b5;
+  padding: 7px 12px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.track-activation-status {
+  margin-left: auto;
+  color: #718879;
+  font: 9px var(--font-mono);
+}
+
+.track-activation-body {
+  padding: 6px 12px 12px;
+}
+
+.track-activation-help {
+  font-size: 11px;
+  color: var(--instrument-muted);
+  margin: 8px 0 0;
+}
+
+.timeline-scroll {
+  overflow-x: auto;
+  max-height: 420px;
+  overflow-y: auto;
+  scrollbar-color: #4d5965 #1b2026;
+}
+
+.timeline-content {
+  min-width: 700px;
+}
+
+.timeline-ruler, .track-timeline-row {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr) 120px;
+}
+
+.timeline-ruler {
+  height: 31px;
+  background: #242b33;
+  border-bottom: 1px solid #434d59;
+  position: sticky;
+  top: 0;
+  z-index: 7;
+}
+
+.ruler-heading {
+  display: flex;
+  align-items: center;
+  padding-left: 14px;
+  color: #778895;
+  font-size: 8px;
+  letter-spacing: 1px;
+  border-right: 1px solid #434d59;
+  background: #242b33;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+
+.ruler-tools {
+  padding-left: 12px;
+  border-left: 1px solid #434d59;
+  border-right: 0;
+}
+
+.ruler-beats {
+  position: relative;
+  overflow: hidden;
+}
+
+.ruler-beats > span:not(.ruler-unit) {
+  position: absolute;
+  top: 8px;
+  bottom: 0;
+  padding-left: 5px;
+  border-left: 1px solid #56616c;
+  font: 10px var(--font-mono);
+  color: #a5b1bc;
+}
+
+.ruler-unit {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  font-size: 6px;
+  letter-spacing: .7px;
+  color: #788995;
+}
+
+.track-timeline-row {
+  min-height: 75px;
+  border-bottom: 1px solid #333b46;
+  cursor: pointer;
+  position: relative;
+}
+
+.track-timeline-row.selected {
+  background: #2d393d;
+}
+
+.track-timeline-row.dragging {
+  opacity: .4;
+}
+
+.track-timeline-row.drop-target {
+  box-shadow: inset 0 2px #d6bd82;
+}
+
+.track-timeline-row:focus-visible {
+  outline: 2px solid #d6bd82;
+  outline-offset: -2px;
+}
+
+.track-timeline-meta {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background: #252c34;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border-right: 1px solid #434d59;
+  border-left: 3px solid var(--track-color);
+  min-width: 0;
+}
+
+.selected .track-timeline-meta {
+  background: #354349;
+}
+
+.track-timeline-meta .track-number {
+  color: #748693;
+  font: 9px var(--font-mono);
+}
+
+.track-kind-icon {
+  color: var(--track-color);
+}
+
+.track-meta-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.track-name-input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  color: #d6dfe3;
+  font-size: 12px;
+  font-weight: 600;
+  outline: none;
+  padding: 0 3px;
+}
+
+.track-name-input:hover, .track-name-input:focus {
+  border-color: #819e91;
+  background: #1c282b;
+}
+
+.track-meta-description {
+  font-size: 9px;
+  color: #91a3ae;
+  text-transform: capitalize;
+  padding-left: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-timeline-bar {
+  position: relative;
+  min-width: 0;
+  background-image: linear-gradient(90deg, transparent calc(100% - 1px), #3d485333 0);
+}
+
+.track-timeline-segments {
+  display: flex;
+  position: absolute;
+  inset: 7px 0;
+  overflow: hidden;
+}
+
+.track-timeline-segment {
+  flex: none;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.track-timeline-segment.repeat {
+  border-radius: 3px;
+  border: 1px solid var(--track-color);
+  background: color-mix(in srgb, var(--track-color) 24%, #1b252c);
+  color: var(--track-color);
+}
+
+.track-timeline-segment.repeat + .repeat {
+  border-left-width: 2px;
+}
+
+.clip-label {
+  display: block;
+  height: 19px;
+  padding: 3px 7px;
+  font-size: 9px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--track-color) 16%, transparent);
+}
+
+.clip-label small {
+  opacity: .6;
+}
+
+.track-note-preview {
+  position: absolute;
+  top: 27px;
+  left: 0;
+  display: block;
+  width: 100%;
+  height: calc(100% - 37px);
+  color: var(--track-color);
+  fill: currentColor;
+  opacity: .85;
+  pointer-events: none;
+}
+
+.track-is-muted .repeat, .track-is-muted .track-note-preview {
+  opacity: .3;
+}
+
+.track-timeline-segment.delay, .track-timeline-segment.sequence-padding {
+  background: repeating-linear-gradient(135deg, #53606a15 0 3px, transparent 3px 6px);
+}
+
+.track-timeline-segment.sequence-padding {
+  border: 1px dashed #59656e60;
+}
+
+.track-timeline-controls {
+  background: #252c34;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 4px;
+  border-left: 1px solid #434d59;
+}
+
+.selected .track-timeline-controls {
+  background: #354349;
+}
+
+.track-timeline-controls .v-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 3px !important;
+}
+
+.mix-letter {
+  font: 10px var(--font-mono);
+}
+
+.track-activation-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  pointer-events: none;
+}
+
+.track-activation-chunk {
+  flex: 1;
+  border-right: 1px solid #71828a50;
+}
+
+.track-activation-chunk.inactive {
+  background: #0e141bbb;
+}
+
+.timeline-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #eee5c5;
+  z-index: 3;
+  pointer-events: none;
+  box-shadow: 0 0 3px #d6bd8240;
+}
+
+.timeline-empty-space {
+  min-height: 86px;
+  padding: 20px 15px 20px 225px;
+  background: repeating-linear-gradient(0deg, transparent 0 42px, #333d4620 42px 43px);
+  color: #617380;
+  font-size: 10px;
+}
+
+.empty-track-heading {
+  color: #7d8e9b;
+  font-size: 10px;
+  margin-bottom: 5px;
+}
+
+.track-activation-toggle:focus-visible {
+  outline: 2px solid var(--indicator-amber);
+  outline-offset: -2px;
+}
+
+@media (max-width: 900px) {
+  .track-timeline-row {
+    grid-template-columns: minmax(0, 1fr) 132px;
+  }
+
+  .timeline-ruler {
+    display: block;
+  }
+
+  .ruler-heading {
+    display: none;
+  }
+
+  .ruler-beats {
+    height: 100%;
+  }
+
+  .timeline-content {
+    min-width: 0;
+  }
+
+  .track-timeline-bar {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    height: 66px;
+  }
+
+  .track-timeline-controls {
+    grid-row: 1;
+    grid-column: 2;
+    padding: 0;
+  }
+
+  .track-timeline-controls .v-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .track-timeline-meta {
+    gap: 4px;
+    padding: 6px;
+    position: static;
+  }
+
+  .track-timeline-meta .track-number {
+    display: none;
+  }
+
+  .track-name-input {
+    font-size: 11px;
+  }
+
+  .track-meta-description {
+    font-size: 8px;
+  }
+
+  .timeline-empty-space {
+    padding: 14px;
+    min-height: 60px;
+  }
+
+  .track-activation-toggle {
+    min-height: 44px;
+  }
+}

@@ -1,117 +1,17 @@
 <template>
-  <v-app class="app-shell">
+  <v-app class="app-shell daw-shell">
     <v-main class="workspace-main">
-      <div ref="controlDeck" class="control-deck">
-        <div class="control-deck-header">
-          <v-btn
-            class="control-deck-toggle"
-            icon
-            variant="flat"
-            size="small"
-            color="surface"
-            :title="controlDeckCollapsed ? 'Show controls' : 'Hide controls'"
-            @click="toggleControlDeck"
-          >
-            <v-icon>{{ controlDeckCollapsed ? 'mdi-chevron-down' : 'mdi-chevron-up' }}</v-icon>
-          </v-btn>
-
-          <div class="brand-group">
-            <h1 class="app-title">GateRunner</h1>
-            <span class="version-pill">v{{ appVersion }}</span>
-          </div>
-
-          <div class="header-actions">
-            <v-btn
-              class="header-icon-btn play-toggle-btn"
-              icon
-              variant="flat"
-              size="small"
-              :color="isRunning ? 'error' : 'success'"
-              :title="isRunning ? 'Stop' : 'Play'"
-              :disabled="isStarting"
-              @click="toggleSequencer"
-            >
-              <v-icon>{{ isRunning ? 'mdi-stop' : 'mdi-play' }}</v-icon>
-            </v-btn>
-            <v-menu v-model="transportMenuOpen" location="bottom end" :close-on-content-click="false">
-              <template #activator="{ props }">
-                <v-btn
-                  v-bind="props"
-                  class="header-icon-btn"
-                  icon
-                  variant="tonal"
-                  color="primary"
-                  size="small"
-                  title="Global actions"
-                >
-                  <v-icon>mdi-dots-vertical</v-icon>
-                </v-btn>
-              </template>
-              <v-list density="compact" class="transport-action-menu">
-                <v-list-item v-if="!useMidiOutput" title="Live audio buffering" prepend-icon="mdi-tune" @click="showLiveAudio = true; transportMenuOpen = false" />
-                <v-list-item
-                  title="Download MIDI"
-                  prepend-icon="mdi-music-note"
-                  :disabled="isExporting"
-                  @click="downloadMIDI"
-                />
-                <v-list-item
-                  :title="isExporting && exportFormat === 'wav' ? 'Rendering WAV...' : 'Download WAV'"
-                  prepend-icon="mdi-waveform"
-                  :disabled="isExporting"
-                  @click="downloadWAV"
-                />
-                <v-divider class="my-1" />
-                <v-list-subheader>MIDI</v-list-subheader>
-                <v-list-item class="midi-menu-item" :ripple="false">
-                  <template #prepend>
-                    <v-icon>mdi-midi-port</v-icon>
-                  </template>
-                  <template #default>
-                    <v-switch
-                      v-model="useMidiOutput"
-                      label="MIDI Output"
-                      hide-details
-                      density="compact"
-                      inset
-                      class="midi-menu-switch"
-                      @update:modelValue="updateMidiMode"
-                    />
-                  </template>
-                </v-list-item>
-                <v-list-item v-if="useMidiOutput" class="midi-menu-item" :ripple="false">
-                  <template #prepend>
-                    <v-icon>mdi-usb-port</v-icon>
-                  </template>
-                  <template #default>
-                    <v-select
-                      v-model="selectedMidiDevice"
-                      :items="midiDevices"
-                      label="MIDI Device"
-                      hide-details
-                      density="compact"
-                      variant="outlined"
-                      class="midi-menu-device-select"
-                      @update:modelValue="updateMidiDevice"
-                    />
-                  </template>
-                </v-list-item>
-              </v-list>
-            </v-menu>
-
-            <v-btn
-              icon
-              variant="text"
-              size="small"
-              class="toolbar-icon-btn header-icon-btn"
-              title="Help"
-              @click="showHelp = true"
-            >
-              <v-icon>mdi-help-circle</v-icon>
-            </v-btn>
-          </div>
+      <header class="project-bar">
+        <div class="brand-group">
+          <span class="brand-mark">
+            <v-icon size="22">mdi-waveform</v-icon>
+          </span>
+          <h1>
+            GateRunner
+            <span>COMPOSITION STUDIO</span>
+          </h1>
+          <span class="version-pill">{{ appVersion }}</span>
         </div>
-
         <PresetManager
           ref="presetManager"
           :initial-library="initialPresetLibrary"
@@ -124,135 +24,414 @@
           :show-notice="showNotice"
           @dirty-change="handlePresetDirtyChange"
         />
-
-        <div v-show="!controlDeckCollapsed" class="toolbar-panel dependent-settings-panel">
-          <div class="dependent-settings-row" :class="{ 'midi-settings': useMidiOutput }">
-            <div class="forte-control-top">
-              <v-autocomplete
-                label="Forte number"
-                v-model="forte"
-                :items="allChords"
-                placeholder="Forte number..."
+        <v-btn
+          icon="mdi-help-circle-outline"
+          variant="text"
+          size="small"
+          title="Help & reference"
+          aria-label="Help and reference"
+          @click="showHelp = true"
+        />
+      </header>
+      <div class="transport-bar" aria-label="Transport">
+        <div class="transport-controls">
+          <v-btn
+            icon="mdi-skip-backward"
+            variant="text"
+            size="small"
+            title="Return to start"
+            aria-label="Return to start"
+            @click="restartPlayback"
+          />
+          <v-btn
+            class="play-toggle-btn"
+            :icon="isRunning ? 'mdi-stop' : 'mdi-play'"
+            :color="isRunning ? 'primary' : 'success'"
+            variant="flat"
+            size="small"
+            :loading="isStarting"
+            :title="isRunning ? 'Stop (Space)' : 'Play (Space)'"
+            :aria-label="isRunning ? 'Stop playback' : 'Play'"
+            @click="toggleSequencer"
+          />
+          <v-btn
+            icon="mdi-stop"
+            variant="text"
+            size="small"
+            title="Stop and return to start"
+            aria-label="Stop and return to start"
+            @click="stopSequencer"
+          />
+        </div>
+        <div class="position-display">
+          <span class="transport-label">{{ isStarting ? 'PREPARING' : isRunning ? 'PLAYING' : 'POSITION' }}</span>
+          <strong>{{ transportPosition }}</strong>
+        </div>
+        <label class="tempo-display">
+          <span class="transport-label">TEMPO</span>
+          <span>
+            <input
+              type="number"
+              min="1"
+              max="499"
+              step="1"
+              :value="bpm"
+              aria-label="Tempo in BPM"
+              @change="setTempo"
+            />
+            <small>BPM</small>
+          </span>
+        </label>
+        <div class="loop-display">
+          <v-icon size="17">mdi-repeat</v-icon>
+          <span>
+            Song loop
+            <strong>{{ loopDurationSeconds.toFixed(2) }} s</strong>
+          </span>
+        </div>
+        <div class="transport-spacer" />
+        <span class="audio-status">
+          <span :class="{ active: isRunning }" />
+          {{ useMidiOutput ? 'MIDI output' : 'Internal audio' }}
+        </span>
+        <v-menu v-model="transportMenuOpen" location="bottom end" :close-on-content-click="false">
+          <template #activator="{ props }">
+            <v-btn
+              v-bind="props"
+              variant="text"
+              size="small"
+              prepend-icon="mdi-tune-variant"
+              class="output-button"
+            >Audio / MIDI</v-btn>
+          </template>
+          <v-list density="compact" class="transport-action-menu">
+            <v-list-item
+              v-if="!useMidiOutput"
+              title="Live audio buffering"
+              prepend-icon="mdi-tune"
+              @click="showLiveAudio = true; transportMenuOpen = false"
+            />
+            <v-list-item :ripple="false">
+              <v-switch
+                v-model="useMidiOutput"
+                label="MIDI Output"
+                hide-details
+                density="compact"
+                inset
+                @update:modelValue="updateMidiMode"
+              />
+            </v-list-item>
+            <v-list-item v-if="useMidiOutput" :ripple="false">
+              <v-select
+                v-model="selectedMidiDevice"
+                :items="midiDevices"
+                label="MIDI Device"
                 hide-details
                 density="compact"
                 variant="outlined"
-                prepend-inner-icon="mdi-piano"
-                @update:modelValue="handleDraftChange"
+                @update:modelValue="updateMidiDevice"
               />
-            </div>
-            <div class="tempo-control">
-              <EditableSlider
-                :label="'Tempo (' + bpm + ' BPM)'"
-                :min="1"
-                :step="1"
-                :max="499"
-                v-model="bpm"
-                @update:modelValue="handleDraftChange"
-              />
-            </div>
-            <div v-if="!useMidiOutput" class="a4-control">
-              <EditableSlider
-                :label="'A4 (' + Number(a4).toFixed(1) + ' Hz)'"
-                :min="380"
-                :step="0.1"
-                :max="500"
-                v-model="a4"
-                @update:modelValue="handleDraftChange"
-              />
-            </div>
-            <div v-if="!useMidiOutput" class="a4-control">
-              <EditableSlider
-                :label="'Master (' + Number(masterGain).toFixed(1) + ' dB)'"
-                :min="-96"
-                :step="0.1"
-                :max="12"
-                v-model="masterGain"
-                @update:modelValue="handleDraftChange"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div v-show="!controlDeckCollapsed" class="track-rack">
-          <div class="track-rack-summary">
-            <button
-              type="button"
-              class="track-rack-toggle"
-              aria-controls="track-rack-panel"
-              :aria-expanded="trackStripExpanded ? 'true' : 'false'"
-              :title="trackStripExpanded ? 'Show track editor' : 'Show track overview'"
-              @click="trackStripExpanded = !trackStripExpanded"
-            >
-              <v-icon size="18">{{ trackStripExpanded ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon>
-              <v-icon size="17" class="track-rack-icon">mdi-timeline-clock-outline</v-icon>
-              <span class="track-rack-label">Tracks</span>
-              <span class="track-rack-count">{{ tracks.length }}</span>
-              <span class="track-rack-divider" aria-hidden="true"></span>
-              <span class="track-rack-current">{{ currentTrack?.name ?? 'No track selected' }}</span>
+            </v-list-item>
+          </v-list>
+        </v-menu>
+        <v-menu location="bottom end">
+          <template #activator="{ props }">
+            <v-btn
+              v-bind="props"
+              variant="tonal"
+              color="primary"
+              size="small"
+              prepend-icon="mdi-export-variant"
+              append-icon="mdi-chevron-down"
+            >Export</v-btn>
+          </template>
+          <v-list density="compact">
+            <v-list-item
+              title="Download MIDI"
+              prepend-icon="mdi-music-note"
+              :disabled="isExporting"
+              @click="downloadMIDI"
+            />
+            <v-list-item
+              :title="isExporting ? 'Rendering WAV…' : 'Download WAV'"
+              prepend-icon="mdi-waveform"
+              :disabled="isExporting"
+              @click="downloadWAV"
+            />
+            <v-list-item
+              title="Stems, excerpts & portable project"
+              prepend-icon="mdi-package-variant-closed"
+              @click="openDock('render')"
+            />
+          </v-list>
+        </v-menu>
+      </div>
+      <div class="workspace-layout" :class="{ 'inspector-hidden': !inspectorOpen }">
+        <aside v-show="inspectorOpen" class="inspector" aria-label="Project and track inspector">
+          <div class="panel-heading">
+            <span>INSPECTOR</span>
+            <button title="Hide inspector" aria-label="Hide inspector" @click="inspectorOpen = false">
+              <v-icon size="16">mdi-dock-left</v-icon>
             </button>
-
-            <v-menu location="bottom end">
-              <template #activator="{ props }">
-                <v-btn
-                  v-bind="props"
-                  class="track-rack-add"
-                  icon
-                  size="x-small"
-                  variant="text"
-                  color="secondary"
-                  title="Add track"
-                >
-                  <v-icon size="17">mdi-plus</v-icon>
-                </v-btn>
-              </template>
-              <v-list density="compact">
-                <v-list-item title="Add melodic track" prepend-icon="mdi-sine-wave" @click="addTrack('melodic')" />
-                <v-list-item title="Add rhythmic track" prepend-icon="mdi-metronome" @click="addTrack('rhythmic')" />
-              </v-list>
-            </v-menu>
           </div>
+          <div class="inspector-section">
+            <span class="eyebrow">PROJECT / HARMONY</span>
+            <v-autocomplete
+              label="Forte number"
+              v-model="forte"
+              :items="allChords"
+              hide-details
+              density="compact"
+              variant="outlined"
+              class="harmony-select"
+              @update:modelValue="handleDraftChange"
+            />
+            <div class="pitch-classes">
+              <span v-for="note in pitchClassNames" :key="note">{{ note }}</span>
+            </div>
+            <EditableSlider
+              v-if="!useMidiOutput"
+              :label="'A4 · ' + Number(a4).toFixed(1) + ' Hz'"
+              :min="380"
+              :max="500"
+              :step="0.1"
+              v-model="a4"
+              @update:modelValue="handleDraftChange"
+            />
+          </div>
+          <div v-if="currentTrack" class="inspector-section selected-track-inspector">
+            <span class="eyebrow">SELECTED TRACK</span>
+            <div class="inspector-track-name">
+              <v-icon size="18">{{ currentTrack.trackKind === 'rhythmic' ? 'mdi-album' : 'mdi-piano' }}</v-icon>
+              <strong>{{ currentTrack.name }}</strong>
+            </div>
+            <div class="track-facts">
+              <span>{{ currentTrack.trackKind === 'rhythmic' ? 'Drum kit' : currentTrack.synthMode ?? 'Additive' }}</span>
+              <span>{{ currentTrack.numerator }} beats / bar</span>
+              <span>MIDI channel {{ currentTrack.midiChannel }}</span>
+            </div>
+            <EditableSlider
+              v-if="!useMidiOutput"
+              :label="'Track gain · ' + currentTrack.gain.toFixed(1) + ' dB'"
+              :min="-96"
+              :max="24"
+              :step="0.1"
+              :model-value="currentTrack.gain"
+              @update:modelValue="setTrackGain(currentTrack.id, $event)"
+            />
+            <EditableSlider
+              :label="'Velocity · ' + currentTrack.velocityMultiplier.toFixed(2) + '×'"
+              :min="0"
+              :max="4"
+              :step="0.01"
+              :model-value="currentTrack.velocityMultiplier"
+              @update:modelValue="handleTrackDraftChange({ ...currentTrack, velocityMultiplier: $event })"
+            />
+          </div>
+          <div class="inspector-section inspector-links">
+            <span class="eyebrow">TRACK DEVICES</span>
+            <button @click="openEditor('sequence')">
+              <v-icon size="16">mdi-grid</v-icon>
+              Sequence
+              <span>↗</span>
+            </button>
+            <button
+              v-if="!useMidiOutput"
+              @click="openEditor(currentTrack?.trackKind === 'rhythmic' ? 'drum-sounds' : 'generator')"
+            >
+              <v-icon size="16">mdi-sine-wave</v-icon>
+              Instrument
+              <span>↗</span>
+            </button>
+            <button v-if="!useMidiOutput" @click="openEditor('filter')">
+              <v-icon size="16">mdi-filter-outline</v-icon>
+              Filter & effects
+              <span>↗</span>
+            </button>
+            <button @click="openDock('motion')">
+              <v-icon size="16">mdi-chart-timeline-variant</v-icon>
+              Automation
+              <span>↗</span>
+            </button>
+          </div>
+          <div v-if="!useMidiOutput" class="inspector-section master-inspector">
+            <span class="eyebrow">MASTER OUTPUT</span>
+            <EditableSlider
+              :label="Number(masterGain).toFixed(1) + ' dB'"
+              :min="-96"
+              :max="12"
+              :step="0.1"
+              v-model="masterGain"
+              @update:modelValue="handleDraftChange"
+            />
+            <button class="text-action" @click="openEditor('reverb')">
+              Global reverb
+              <v-icon size="14">mdi-arrow-top-right</v-icon>
+            </button>
+          </div>
+          <div class="inspector-footer">
+            <kbd>SPACE</kbd>
+            Play / stop
+            <span>Drag tracks to reorder</span>
+          </div>
+        </aside>
+        <div
+          class="studio-workspace"
+          :class="{ 'mixer-view': mainView === 'mixer', 'detail-collapsed': !detailOpen }"
+        >
+          <section class="arrangement-panel" aria-label="Arrangement workspace">
+            <div class="workspace-toolbar">
+              <div class="view-switcher" role="group" aria-label="Main view">
+                <button :class="{ active: mainView === 'arrangement' }" @click="mainView = 'arrangement'">
+                  <v-icon size="16">mdi-view-sequential-outline</v-icon>
+                  Arrangement
+                </button>
+                <button :class="{ active: mainView === 'mixer' }" @click="mainView = 'mixer'">
+                  <v-icon size="16">mdi-tune-vertical</v-icon>
+                  Mixer
+                </button>
+              </div>
+              <span class="workspace-summary">{{ tracks.length }}{{ tracks.length === 1 ? 'track' : 'tracks' }}</span>
+              <div class="toolbar-spacer" />
+              <button
+                v-if="!inspectorOpen"
+                class="toolbar-action"
+                title="Show inspector"
+                aria-label="Show inspector"
+                @click="inspectorOpen = true"
+              >
+                <v-icon size="18">mdi-dock-left</v-icon>
+              </button>
+              <label v-if="mainView === 'arrangement'" class="zoom-control">
+                <v-icon size="15">mdi-magnify</v-icon>
+                <input
+                  v-model.number="timelineZoom"
+                  type="range"
+                  min="1"
+                  max="4"
+                  step="0.25"
+                  aria-label="Timeline zoom"
+                />
+                <span>{{ Math.round(timelineZoom * 100) }}%</span>
+              </label>
+              <v-menu location="bottom end">
+                <template #activator="{ props }">
+                  <v-btn v-bind="props" prepend-icon="mdi-plus" variant="text" size="small">Add track</v-btn>
+                </template>
+                <v-list density="compact">
+                  <v-list-item
+                    title="Add melodic track"
+                    prepend-icon="mdi-piano"
+                    @click="addTrack('melodic')"
+                  />
+                  <v-list-item
+                    title="Add rhythmic track"
+                    prepend-icon="mdi-album"
+                    @click="addTrack('rhythmic')"
+                  />
+                </v-list>
+              </v-menu>
+            </div>
+            <TrackStrip
+              v-show="mainView === 'arrangement'"
+              :tracks="tracks"
+              :scheduled-events="timelineEvents"
+              :selected-track-id="selectedTrackId"
+              :track-mix-states="trackMixStates"
+              :bitmask-sequence-input="bitmaskSequenceInput"
+              :loop-duration-seconds="loopDurationSeconds"
+              :bpm="bpm"
+              :zoom="timelineZoom"
+              :playhead="playheadProgress"
+              @select-track="handleTrackSelection"
+              @edit-track="editTrackPattern($event, '')"
+              @edit-pattern="editTrackPattern"
+              @track-name-input="handleTrackNameInput"
+              @commit-track-name="commitTrackName"
+              @toggle-muted="toggleTrackMuted"
+              @toggle-soloed="toggleTrackSoloed"
+              @duplicate-track="duplicateTrack"
+              @remove-track="removeTrack"
+              @reorder-tracks="reorderTracks"
+              @bitmask-sequence-input="handleBitmaskSequenceInput"
+            />
+            <TrackMixer
+              v-show="mainView === 'mixer'"
+              :tracks="tracks"
+              :selected-track-id="selectedTrackId"
+              :track-mix-states="trackMixStates"
+              :master-gain="masterGain"
+              :midi-output="useMidiOutput"
+              @select="handleTrackSelection"
+              @gain="setTrackGain"
+              @mute="toggleTrackMuted"
+              @solo="toggleTrackSoloed"
+              @master="masterGain = $event; handleDraftChange()"
+              @edit="editMixerInstrument"
+            />
+            <div class="arrangement-footer">
+              <span>
+                <span class="status-dot" />
+                {{ isStarting ? 'Preparing audio…' : isRunning ? 'Playback running' : 'Ready' }}
+              </span>
+              <span>{{ mainView === 'arrangement' ? 'Double-click a pattern to edit' : 'Faders control track output gain' }}</span>
+              <span>Loop · {{ loopDurationSeconds.toFixed(2) }} s</span>
+            </div>
+          </section>
+          <section
+            class="detail-dock"
+            :class="{ collapsed: !detailOpen }"
+            aria-label="Selected track editor"
+          >
+            <div class="dock-heading">
+              <span class="dock-track">
+                <v-icon size="16">mdi-pencil-box-outline</v-icon>
+                {{ currentTrack?.name }}
+              </span>
+              <nav class="dock-tabs" aria-label="Editor views">
+                <button :class="{ active: dockView === 'editor' }" @click="openDock('editor')">Track editor</button>
+                <button :class="{ active: dockView === 'phrases' }" @click="openDock('phrases')">Phrases</button>
+                <button :class="{ active: dockView === 'steps' }" @click="openDock('steps')">Articulation</button>
+                <button :class="{ active: dockView === 'motion' }" @click="openDock('motion')">Automation</button>
+                <button :class="{ active: dockView === 'returns' }" @click="openDock('returns')">Routing</button>
+                <button :class="{ active: dockView === 'samples' }" @click="openDock('samples')">Samples</button>
+                <button :class="{ active: dockView === 'render' }" @click="openDock('render')">Render</button>
+              </nav>
+              <button
+                class="dock-toggle"
+                :title="detailOpen ? 'Collapse editor' : 'Expand editor'"
+                :aria-label="detailOpen ? 'Collapse editor' : 'Expand editor'"
+                :aria-expanded="detailOpen"
+                @click="detailOpen = !detailOpen"
+              >
+                <v-icon size="18">{{ detailOpen ? 'mdi-chevron-down' : 'mdi-chevron-up' }}</v-icon>
+              </button>
+            </div>
+            <div v-show="detailOpen" class="dock-body" role="region" aria-label="Editor controls" tabindex="0">
+              <EditorSurface
+                ref="trackEditor"
+                v-show="dockView === 'editor'"
+                :track="currentTrack"
+                :scale="selectedTrackScale"
+                :reverb="reverbSettings"
+                :assets="studio?.assets ?? []"
+                :bpm="bpm"
+                :midi-output="useMidiOutput"
+                @track-change="handleTrackDraftChange"
+                @reverb-change="handleReverbDraftChange"
+              />
+              <DevelopmentPanel
+                v-show="dockView !== 'editor'"
+                embedded
+                :active-tab="dockView === 'editor' ? 'phrases' : dockView"
+                :project="draftData"
+                :track-id="selectedTrackId"
+                @update:project="handleStudioProjectChange"
+              />
+            </div>
+          </section>
         </div>
       </div>
-
-      <div class="control-deck-spacer" :style="{ height: `${controlDeckHeight + 12}px` }"></div>
-
-      <section
-        v-show="trackStripExpanded"
-        id="track-rack-panel"
-        class="track-workspace"
-        aria-label="Track overview"
-      >
-        <TrackStrip
-          :tracks="tracks"
-          :selected-track-id="selectedTrackId"
-          :track-mix-states="trackMixStates"
-          :bitmask-sequence-input="bitmaskSequenceInput"
-          :loop-duration-seconds="loopDurationSeconds"
-          :bpm="bpm"
-          @select-track="handleTrackSelection"
-          @track-name-input="handleTrackNameInput"
-          @commit-track-name="commitTrackName"
-          @toggle-muted="toggleTrackMuted"
-          @toggle-soloed="toggleTrackSoloed"
-          @duplicate-track="duplicateTrack"
-          @remove-track="removeTrack"
-          @reorder-tracks="reorderTracks"
-          @bitmask-sequence-input="handleBitmaskSequenceInput"
-        />
-      </section>
-
-      <EditorSurface
-        v-show="!trackStripExpanded"
-        :track="currentTrack"
-        :reverb="reverbSettings"
-        :assets="studio?.assets ?? []"
-        :bpm="bpm"
-        :midi-output="useMidiOutput"
-        @track-change="handleTrackDraftChange"
-        @reverb-change="handleReverbDraftChange"
-      />
-      <DevelopmentPanel :project="draftData" :track-id="selectedTrackId" @update:project="handleStudioProjectChange" />
-
       <ExportProgressDialog
         :visible="isExporting"
         :format="exportFormat"
@@ -260,7 +439,6 @@
         :status="exportStatus"
         @cancel="cancelWavExport"
       />
-
       <v-dialog v-model="showConfirmDialog" max-width="460px" persistent>
         <v-card class="rename-dialog-card">
           <v-card-title class="text-h6">{{ confirmDialogTitle }}</v-card-title>
@@ -272,7 +450,6 @@
           </v-card-actions>
         </v-card>
       </v-dialog>
-
       <v-dialog v-model="showInputDialog" max-width="460px" persistent>
         <v-card class="rename-dialog-card">
           <v-card-title class="text-h6">{{ inputDialogTitle }}</v-card-title>
@@ -289,32 +466,32 @@
           <v-card-actions>
             <v-spacer></v-spacer>
             <v-btn variant="text" @click="resolveInputDialog(false)">Cancel</v-btn>
-            <v-btn color="primary" @click="resolveInputDialog(true)" :disabled="inputDialogValue.trim().length === 0">{{ inputDialogConfirmLabel }}</v-btn>
+            <v-btn
+              color="primary"
+              @click="resolveInputDialog(true)"
+              :disabled="inputDialogValue.trim().length === 0"
+            >{{ inputDialogConfirmLabel }}</v-btn>
           </v-card-actions>
         </v-card>
       </v-dialog>
-
       <HelpDialog v-model="showHelp" :app-version="appVersion" />
-      <LiveAudioDialog v-if="!useMidiOutput" v-model="showLiveAudio" :mode="liveBuffering" :busy="isStarting || isExporting" :running="isRunning" @apply="applyLiveBuffering" @export="downloadLiveDiagnostics" />
+      <LiveAudioDialog
+        v-if="!useMidiOutput"
+        v-model="showLiveAudio"
+        :mode="liveBuffering"
+        :busy="isStarting || isExporting"
+        :running="isRunning"
+        @apply="applyLiveBuffering"
+        @export="downloadLiveDiagnostics"
+      />
     </v-main>
-    <v-snackbar
-      v-model="showPlaybackError"
-      :timeout="5000"
-      color="error"
-      location="top"
-    >
+    <v-snackbar v-model="showPlaybackError" :timeout="5000" color="error" location="top">
       {{ playbackErrorMessage }}
       <template #actions>
         <v-btn variant="text" @click="showPlaybackError = false">Close</v-btn>
       </template>
     </v-snackbar>
-
-    <v-snackbar
-      v-model="showAppNotice"
-      :timeout="3000"
-      :color="appNoticeColor"
-      location="top"
-    >
+    <v-snackbar v-model="showAppNotice" :timeout="3000" :color="appNoticeColor" location="top">
       {{ appNoticeMessage }}
       <template #actions>
         <v-btn variant="text" @click="showAppNotice = false">Close</v-btn>
@@ -330,9 +507,9 @@ import { defineComponent, markRaw, type PropType } from 'vue';
 import EditableSlider from './components/EditableSlider.vue';
 import EditorSurface from './components/EditorSurface.vue';
 import DevelopmentPanel from './components/DevelopmentPanel.vue';
-import { buildLegacyTrackEvents } from './domain/scheduling';
+import { buildLegacyTrackEvents, type ScheduledEvent } from './domain/scheduling';
 import { usesDevelopment, normalizeStudio, type ProjectStudio } from './domain/development';
-import { resolveProjectEvents, trackDurationBeats, type ResolvedProject } from './domain/developmentSchedule';
+import { resolveProjectEvents, resolveProjectEventsWithScale, trackDurationBeats, type ResolvedProject } from './domain/developmentSchedule';
 import { renderBrowserDevelopment } from './audio/browserDevelopment';
 import ExportProgressDialog from './components/ExportProgressDialog.vue';
 import HelpDialog from './components/HelpDialog.vue';
@@ -340,6 +517,9 @@ import LiveAudioDialog from './components/LiveAudioDialog.vue';
 import { beginLiveScheduling, createLiveContext, exportLiveDiagnostics, readLiveBuffering, recordLiveGraphBuild, resetLiveScheduling, saveLiveBuffering, stopLiveDiagnostics, type LiveBuffering } from './audio/liveAudio';
 import PresetManager from './components/PresetManager.vue';
 import TrackStrip from './components/TrackStrip.vue';
+import TrackMixer from './components/TrackMixer.vue';
+import './style.css';
+import './workspace.css';
 import * as Tone from 'tone';
 import { Midi } from '@tonejs/midi';
 import { PCS12 } from 'ultra-mega-enumerator';
@@ -560,6 +740,7 @@ export default defineComponent({
     LiveAudioDialog,
     PresetManager,
     TrackStrip,
+    TrackMixer,
   },
   data() {
     const initialState = buildInitialState(this.initialLibrary);
@@ -626,14 +807,50 @@ export default defineComponent({
       exportStatus: '',
       wavExportController: null as AbortController | null,
       transportMenuOpen: false,
-      controlDeckHeight: 0,
-      controlDeckCollapsed: false,
-      trackStripExpanded: false,
-      controlDeckResizeObserver: null as ResizeObserver | null,
+      inspectorOpen: true,
+      detailOpen: true,
+      mainView: 'arrangement',
+      dockView: 'editor',
+      timelineZoom: 1,
+      playbackSeconds: 0,
+      playbackOrigin: 0,
+      playbackTimer: null as number | null,
+      playbackGeneration: 0,
       rebuildTrackLoopsTimer: null as number | null,
     };
   },
+  watch: {
+    isRunning(running: boolean) {
+      if (this.playbackTimer !== null) window.clearInterval(this.playbackTimer);
+      this.playbackTimer = null;
+      this.playbackSeconds = 0;
+      if (running) {
+        this.playbackOrigin = Tone.now();
+        this.playbackTimer = window.setInterval(() => {
+          this.playbackSeconds = this.developmentPlayer
+            ? Math.max(0, Tone.now() - this.playbackOrigin)
+            : Tone.getTransport().seconds % this.loopDurationSeconds;
+        }, 60);
+      }
+    },
+  },
   computed: {
+    transportPosition(): string {
+      const milliseconds = Math.max(0, Math.floor(this.playbackSeconds * 1000));
+      const minutes = String(Math.floor(milliseconds / 60000)).padStart(2, '0');
+      const seconds = String(Math.floor(milliseconds / 1000) % 60).padStart(2, '0');
+      return `${minutes}:${seconds}.${String(milliseconds % 1000).padStart(3, '0')}`;
+    },
+    playheadProgress(): number {
+      return Math.min(1, this.playbackSeconds / this.loopDurationSeconds);
+    },
+    pitchClassNames(): string[] {
+      return (PCS12.parseForte(this.forte)?.asSequence() ?? []).map(n => ['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'][n]);
+    },
+    selectedTrackScale(): number[] {
+      const count = PCS12.parseForte(this.forte)?.getK() ?? 0;
+      return this.scale.slice((this.currentTrack?.octave ?? 0) * count);
+    },
     currentTrack(): PresetTrackData | null {
       return this.tracks.find((track) => track.id === this.selectedTrackId) ?? this.tracks[0] ?? null;
     },
@@ -726,8 +943,64 @@ export default defineComponent({
     loopDurationSeconds(): number {
       return this.getLoopDurationSecondsFromTrackLengths();
     },
+    timelineEvents(): Record<string, ScheduledEvent[]> {
+      if (usesDevelopment({ tracks: this.tracks, studio: this.studio })) {
+        const resolved = resolveProjectEventsWithScale(this.draftData, this.scale, PCS12.parseForte(this.forte)?.getK() ?? 0);
+        return Object.fromEntries(resolved.tracks.map(({ track, events }) => [track.id, events]));
+      }
+      return Object.fromEntries(this.allTrackActualNotes.map(({ track, notes, noteVelocities, drumVoiceIds, trackIndex }) => [
+        track.id, buildLegacyTrackEvents({ track, quant: this.getTrackQuant(track), actualNotes: notes, noteVelocities, drumVoiceIds },
+          this.bpm, this.loopDurationSeconds, trackIndex, this.activationMasks),
+      ]));
+    },
   },
   methods: {
+    openDock(view: string) {
+      this.dockView = view;
+      this.detailOpen = true;
+    },
+    openEditor(tab: string) {
+      this.openDock('editor');
+      this.$nextTick(() => {
+        (this.$refs.trackEditor as InstanceType<typeof EditorSurface> | undefined)?.setControlTab(tab);
+      });
+    },
+    editTrackPattern(id: string, pattern: string) {
+      this.handleTrackSelection(id);
+      this.openEditor('sequence');
+      this.$nextTick(() => (this.$refs.trackEditor as InstanceType<typeof EditorSurface> | undefined)?.setSequencePattern(pattern));
+    },
+    editMixerInstrument(id: string) {
+      this.handleTrackSelection(id);
+      this.openEditor(this.useMidiOutput ? 'playback' : this.currentTrack?.trackKind === 'rhythmic' ? 'drum-sounds' : 'generator');
+    },
+    setTrackGain(id: string, gain: number) {
+      const track = this.tracks.find(track => track.id === id);
+      if (track) this.handleTrackDraftChange({ ...track, gain });
+    },
+    setTempo(event: Event) {
+      const input = event.target as HTMLInputElement;
+      const value = Number(input.value);
+      if (input.value && Number.isFinite(value)) {
+        this.bpm = Math.max(1, Math.min(499, Math.round(value)));
+        this.handleDraftChange();
+      }
+      input.value = String(this.bpm);
+    },
+    async restartPlayback() {
+      const playing = this.isRunning;
+      this.stopSequencer();
+      if (playing) await this.startSequencer();
+    },
+    handleWorkspaceKey(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (event.code !== 'Space' || event.repeat || event.altKey || event.ctrlKey || event.metaKey
+        || target?.closest('input, textarea, select, button, [role="button"], [role="combobox"], [role="slider"], [role="tab"], [contenteditable="true"], .v-overlay--active')
+        || this.showHelp || this.showLiveAudio || this.showConfirmDialog || this.showInputDialog || this.isExporting
+        || document.querySelector('.v-overlay--active')) return;
+      event.preventDefault();
+      void this.toggleSequencer();
+    },
     getTrackQuant(track: PresetTrackData): number {
       return 60.0 / (this.bpm * track.denominator);
     },
@@ -1047,10 +1320,11 @@ export default defineComponent({
     },
     handleTrackDraftChange(nextTrack: PresetTrackData) {
       this.invalidateDevelopmentPlayback();
-      const previousTrack = this.currentTrack ? clonePresetTrackData(this.currentTrack) : null;
+      const targetTrack = this.tracks.find(track => track.id === nextTrack.id);
+      const previousTrack = targetTrack ? clonePresetTrackData(targetTrack) : null;
       const normalizedTrack = normalizePresetTrackData(nextTrack);
       this.tracks = this.tracks.map((track) => track.id === normalizedTrack.id ? normalizedTrack : track);
-      const updatedTrack = this.currentTrack;
+      const updatedTrack = this.tracks.find(track => track.id === normalizedTrack.id);
       this.refreshDirtyState();
 
       if (!updatedTrack) {
@@ -1168,20 +1442,6 @@ export default defineComponent({
     cancelWavExport() {
       this.wavExportController?.abort();
       this.exportStatus = 'Cancelling WAV export...';
-    },
-    updateControlDeckHeight() {
-      const deck = this.$refs.controlDeck as HTMLElement | undefined;
-      if (!deck) {
-        return;
-      }
-
-      this.controlDeckHeight = Math.ceil(deck.getBoundingClientRect().height);
-    },
-    toggleControlDeck() {
-      this.controlDeckCollapsed = !this.controlDeckCollapsed;
-      this.$nextTick(() => {
-        this.updateControlDeckHeight();
-      });
     },
     getRenderDurationSeconds(): number {
       const echoTrail = Math.max(
@@ -1529,9 +1789,6 @@ export default defineComponent({
         this.midiAccess = access;
         
         this.midiDevices = Array.from(access.outputs.values()).map(output => output.name!);
-        this.$nextTick(() => {
-          this.updateControlDeckHeight();
-        });
       } catch (error) {
         console.error("Failed to initialize MIDI:", error);
       }
@@ -1548,9 +1805,6 @@ export default defineComponent({
         //this.midiOutput = null;
       }
 
-      this.$nextTick(() => {
-        this.updateControlDeckHeight();
-      });
     },
     async playNoteWithMidi(note: number, velocity: number, duration: Tone.Unit.Seconds, when: number, midiChannel: number) {
       if (this.midiOutput!!) {
@@ -2793,20 +3047,22 @@ export default defineComponent({
       return midi;
     },
     async toggleSequencer() {
-      if (this.isRunning) {
+      if (this.isRunning || this.isStarting) {
         this.stopSequencer();
       } else {
         this.startSequencer();
       }
     },
     stopTrackLoops() {
+      // These parts are disposed immediately. An explicit origin avoids Tone's
+      // current transport tick rounding slightly below zero just after Start.
       for (const loop of Object.values(this.trackLoops)) {
-        loop.stop();
+        loop.stop(0);
         loop.dispose();
       }
       this.trackLoops = markRaw({});
       for (const loop of Object.values(this.trackFadeLoops)) {
-        loop.stop();
+        loop.stop(0);
         loop.dispose();
       }
       this.trackFadeLoops = markRaw({});
@@ -2972,6 +3228,7 @@ export default defineComponent({
       }
 
       this.isStarting = true;
+      const generation = ++this.playbackGeneration;
       let developmentSignal: AbortSignal | undefined;
       try {
         await this.audioSleep?.cancel();
@@ -2990,6 +3247,7 @@ export default defineComponent({
           }
         }
 
+        if (generation !== this.playbackGeneration) return;
         if (Tone.getContext().state !== 'running') {
           throw lastError instanceof Error ? lastError : new Error('Audio context did not resume.');
         }
@@ -3025,6 +3283,7 @@ export default defineComponent({
         // them in first-note callbacks can consume more than the whole lookahead window.
         if (!this.useMidiOutput) await prepareProjectGenerators(Tone.getContext(),
           this.tracks.filter(track => track.trackKind === 'melodic' && this.audibleTrackIds.has(track.id)), this.studio?.assets ?? []);
+        if (generation !== this.playbackGeneration) return;
         resetLiveScheduling(Tone.getContext());
         this.applyRealtimeSettings({ rebuildLoops: false, createMissingChains: true });
         this.isRunning = true;
@@ -3047,6 +3306,7 @@ export default defineComponent({
       }
     },
     stopSequencer() {
+      this.playbackGeneration++;
       this.developmentController?.abort(); this.developmentController = null;
       this.developmentSchedule = null;
       this.developmentPlayer?.stop(); this.developmentPlayer?.dispose(); this.developmentPlayer = null;
@@ -3232,8 +3492,8 @@ export default defineComponent({
   },
   beforeUnmount() {
     this.wavExportController?.abort();
-    window.removeEventListener('resize', this.updateControlDeckHeight);
-    this.controlDeckResizeObserver?.disconnect();
+    window.removeEventListener('keydown', this.handleWorkspaceKey);
+    if (this.playbackTimer !== null) window.clearInterval(this.playbackTimer);
     if (this.audioContextResumeHandler) {
       document.removeEventListener('click', this.audioContextResumeHandler);
       document.removeEventListener('touchstart', this.audioContextResumeHandler);
@@ -3261,398 +3521,8 @@ export default defineComponent({
       await this.initializeMidi();
     }
 
-    this.$nextTick(() => {
-      this.updateControlDeckHeight();
-      const deck = this.$refs.controlDeck as HTMLElement | undefined;
-      if (deck) {
-        this.controlDeckResizeObserver = new ResizeObserver(this.updateControlDeckHeight);
-        this.controlDeckResizeObserver.observe(deck);
-      }
-    });
-    window.addEventListener('resize', this.updateControlDeckHeight);
+    window.addEventListener('keydown', this.handleWorkspaceKey);
     this.setupAudioContextResumeOnInteraction();
   }
 });
 </script>
-
-<style scoped>
-.shader-bg {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  width: 100vw;
-  height: 100vh;
-  display: none;
-  pointer-events: none;
-}
-
-:deep(.v-application) {
-  background: var(--panel-black) !important;
-}
-
-:deep(.v-main) {
-  background: transparent !important;
-}
-
-.app-shell {
-  color: var(--instrument-text);
-  background:
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.012) 0 1px, transparent 1px 4px),
-    var(--panel-black);
-}
-
-.workspace-main {
-  position: relative;
-  z-index: 1;
-  padding: 0 12px 16px;
-  background: transparent;
-}
-
-.donation-footer {
-  min-height: 28px;
-  padding: 4px 12px;
-  justify-content: center;
-  background: var(--panel-black);
-}
-
-.donation-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--instrument-muted);
-  text-decoration: none;
-  font-size: 0.72rem;
-  letter-spacing: 0.02em;
-}
-
-.donation-link:hover,
-.donation-link:focus-visible {
-  color: var(--indicator-amber);
-}
-
-.control-deck {
-  position: fixed;
-  top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(1120px, calc(100vw - 20px));
-  z-index: 20;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.control-deck-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 7px 10px;
-  border-radius: 0;
-  border: 1px solid rgba(242, 184, 75, 0.48);
-  background: linear-gradient(180deg, #2b2d24, var(--panel-deep));
-  box-shadow: inset 0 1px rgba(255, 245, 205, 0.08), 0 0 18px rgba(242, 184, 75, 0.1), 0 14px 30px rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(12px);
-}
-
-.control-deck-toggle {
-  border: 1px solid var(--panel-border-soft);
-  background: var(--panel-raised);
-}
-
-.toolbar-panel {
-  padding: 8px 10px;
-  border-radius: 0;
-  border: 1px solid var(--panel-border-soft);
-  background: var(--panel-deep);
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(12px);
-}
-
-.track-rack {
-  min-width: 0;
-  border: 1px solid rgba(242, 184, 75, 0.5);
-  background: #20221b;
-  box-shadow: inset 0 1px rgba(255, 240, 190, 0.06), 0 8px 18px rgba(0, 0, 0, 0.36);
-}
-
-.track-rack-summary {
-  min-height: 34px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 34px;
-  align-items: stretch;
-}
-
-.track-rack-toggle {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 4px 9px;
-  border: 0;
-  background: transparent;
-  color: var(--instrument-text);
-  font: inherit;
-  cursor: pointer;
-  text-align: left;
-}
-
-.track-rack-toggle:hover,
-.track-rack-toggle:focus-visible {
-  background: rgba(242, 184, 75, 0.08);
-  outline: none;
-}
-
-.track-rack-icon,
-.track-rack-label {
-  color: var(--indicator-amber);
-}
-
-.track-rack-label {
-  font-size: 0.78rem;
-  font-weight: 800;
-}
-
-.track-rack-count {
-  min-width: 20px;
-  padding: 1px 5px;
-  border: 1px solid rgba(217, 111, 50, 0.55);
-  color: #ffc37d;
-  font-size: 0.68rem;
-  font-weight: 800;
-  line-height: 1.35;
-  text-align: center;
-}
-
-.track-rack-divider {
-  width: 1px;
-  height: 16px;
-  background: var(--panel-border-soft);
-}
-
-.track-rack-current {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--instrument-muted);
-  font-size: 0.76rem;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.track-rack-add {
-  width: 34px;
-  height: 34px;
-  border-left: 1px solid var(--panel-border-soft);
-}
-
-.track-workspace {
-  width: min(1120px, 100%);
-  margin: 0 auto;
-  padding: 8px 10px 10px;
-  border: 1px solid rgba(242, 184, 75, 0.5);
-  background: #23251d;
-  box-shadow: inset 0 1px rgba(255, 240, 190, 0.06), 0 12px 24px rgba(0, 0, 0, 0.3);
-}
-
-.brand-group {
-  flex: 1 1 auto;
-  justify-content: center;
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
-}
-
-.app-title {
-  margin: 0;
-  color: var(--indicator-amber);
-  font-size: clamp(1.2rem, 2vw, 1.6rem);
-  letter-spacing: 0;
-  line-height: 1;
-  text-shadow: 0 0 10px rgba(242, 184, 75, 0.28);
-}
-
-.version-pill {
-  font-size: 0.76rem;
-  letter-spacing: 0.05em;
-  color: var(--instrument-muted);
-  padding: 2px 8px;
-  border-radius: 0;
-  border: 1px solid var(--panel-border-soft);
-  background: var(--panel-inset);
-}
-
-.toolbar-icon-btn {
-  color: var(--instrument-text);
-}
-
-.header-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
-.header-icon-btn {
-  width: 34px;
-  height: 34px;
-  border: 1px solid var(--panel-border-soft);
-  box-shadow: inset 0 1px rgba(255, 245, 205, 0.05);
-}
-
-.play-toggle-btn {
-  box-shadow: 0 0 14px rgba(158, 170, 105, 0.24);
-}
-
-.transport-actions {
-  margin-top: 8px;
-  display: grid;
-  grid-template-columns: auto auto;
-  justify-content: start;
-  gap: 8px;
-}
-
-.transport-play-btn {
-  min-width: 120px;
-  font-weight: 700;
-}
-
-.transport-actions-menu-btn {
-  min-width: 132px;
-}
-
-.transport-action-menu {
-  min-width: 220px;
-  border: 1px solid var(--panel-border-soft);
-  background: rgba(28, 30, 25, 0.98);
-}
-
-.midi-menu-item {
-  align-items: flex-start;
-}
-
-.midi-menu-switch {
-  margin-top: 0;
-}
-
-.midi-menu-device-select {
-  min-width: 220px;
-}
-
-.forte-control-top {
-  min-width: 0;
-}
-
-.dependent-settings-row {
-  margin-top: 8px;
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
-  gap: 10px;
-  align-items: center;
-}
-
-.dependent-settings-row.midi-settings {
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-}
-
-.tempo-control,
-.a4-control {
-  min-width: 0;
-}
-
-.control-deck-spacer {
-  width: 100%;
-  pointer-events: none;
-}
-
-:deep(.v-btn),
-:deep(.v-field),
-:deep(.v-card),
-:deep(.v-list),
-:deep(.v-menu > .v-overlay__content),
-:deep(.v-overlay__content),
-:deep(.v-progress-linear),
-:deep(.v-snackbar__wrapper) {
-  border-radius: 0 !important;
-}
-
-:deep(.v-label),
-:deep(.v-field__input),
-:deep(.v-select__selection-text),
-:deep(.v-autocomplete__selection-text),
-:deep(.v-list-item-title),
-:deep(.v-switch__label) {
-  color: var(--instrument-text) !important;
-}
-
-:deep(.v-field) {
-  border-radius: 0;
-  background: var(--panel-inset);
-}
-
-:deep(.v-field--variant-outlined .v-field__outline) {
-  color: rgba(180, 177, 133, 0.58) !important;
-}
-
-:deep(.v-btn__content) {
-  text-transform: none;
-  letter-spacing: 0.015em;
-}
-
-.rename-dialog-card {
-  border: 1px solid var(--panel-border-soft);
-  background: var(--panel-deep);
-}
-
-@media (max-width: 960px) {
-  .control-deck {
-    width: calc(100vw - 16px);
-    top: 8px;
-  }
-
-  .dependent-settings-row {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .dependent-settings-row.midi-settings {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-}
-
-@media (max-width: 680px) {
-  .workspace-main {
-    padding: 0 6px 10px;
-  }
-
-  .control-deck {
-    width: calc(100vw - 10px);
-    top: 6px;
-    gap: 6px;
-  }
-
-  .toolbar-panel {
-    padding: 8px 9px;
-    border-radius: 0;
-  }
-
-  .track-workspace {
-    padding: 6px;
-  }
-
-  .brand-group {
-    gap: 8px;
-  }
-
-  .version-pill {
-    font-size: 0.7rem;
-  }
-
-  .dependent-settings-row {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
-  }
-
-}
-</style>

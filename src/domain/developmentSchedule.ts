@@ -61,7 +61,12 @@ function applyStep(event: DevelopedEvent, control: StepControl, bpm: number, see
 }
 /** Arrangement and random choices are resolved in full song coordinates, before slicing. */
 export async function resolveProjectEvents(project: PresetData): Promise<ResolvedProject> {
-  const { scale, count } = await pitchScale(project.forte), bpm = project.bpm;
+  const { scale, count } = await pitchScale(project.forte);
+  return resolveProjectEventsWithScale(project, scale, count);
+}
+/** The editor already has an initialized pitch scale; share playback's exact resolver. */
+export function resolveProjectEventsWithScale(project: PresetData, scale: number[], count: number): ResolvedProject {
+  const bpm = project.bpm;
   const beats = Math.max(1e-9, ...project.tracks.map(trackDurationBeats)), duration = beats * 60 / bpm;
   const masks = parseBitmaskSequenceInput(project.bitmaskSequenceInput).masks;
   const tracks = project.tracks.map((track, trackIndex) => {

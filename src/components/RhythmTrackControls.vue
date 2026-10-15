@@ -15,9 +15,10 @@ import {
 } from '../domain/rhythmTrack';
 import { clonePresetTrackData, type PresetTrackData } from '../presets';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   track: PresetTrackData;
-}>();
+  showSequenceInput?: boolean;
+}>(), { showSequenceInput: true });
 
 const emit = defineEmits<{
   'update:track': [track: PresetTrackData];
@@ -107,7 +108,7 @@ function updateLaneXorGroup(index: number, value: DrumXorGroupId | null): void {
     </v-alert>
 
     <v-row class="compact-row">
-      <v-col cols="12" md="6">
+      <v-col cols="12" :md="showSequenceInput ? 6 : 12">
         <v-slider
           :model-value="track.drumVelocityBits"
           label="Velocity bits per lane"
@@ -119,7 +120,7 @@ function updateLaneXorGroup(index: number, value: DrumXorGroupId | null): void {
           @update:model-value="updateVelocityBits"
         />
       </v-col>
-      <v-col cols="12" md="6">
+      <v-col v-if="showSequenceInput" cols="12" md="6">
         <v-text-field
           :model-value="track.sequenceInput"
           :label="`Rhythm mask sequence (${sequenceLength})`"

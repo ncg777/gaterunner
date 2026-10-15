@@ -1,15 +1,17 @@
 // Disposable headless browser integration check; never opens the user's browser profile.
+// Pass an existing Vite URL to reuse it instead of starting another server.
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { tsImport } from 'tsx/esm/api';
 const output=resolve('dist/development-browser');mkdirSync(output,{recursive:true});
-const vite=spawn(process.execPath,['node_modules/vite/bin/vite.js','--host','127.0.0.1','--port','3199','--strictPort'],{windowsHide:true,stdio:'pipe'});
-let serverLog='';vite.stdout.on('data',data=>{serverLog+=data;});vite.stderr.on('data',data=>{serverLog+=data;});
+const url=process.argv[2]??'http://127.0.0.1:3199/gaterunner/';
+const vite=process.argv[2]?undefined:spawn(process.execPath,['node_modules/vite/bin/vite.js','--host','127.0.0.1','--port','3199','--strictPort'],{windowsHide:true,stdio:'pipe'});
+let serverLog='';vite?.stdout.on('data',data=>{serverLog+=data;});vite?.stderr.on('data',data=>{serverLog+=data;});
 let chrome,socket;
 try{
-  for(let i=0;;i++){try{if((await fetch('http://127.0.0.1:3199/gaterunner/')).ok)break;}catch{}if(i>240)throw new Error(`Vite startup failed: ${serverLog}`);await delay(250);}
+  for(let i=0;;i++){try{if((await fetch(url)).ok)break;}catch{}if(i>240)throw new Error(`Vite startup failed: ${serverLog}`);await delay(250);}
   chrome=spawn(process.env.CHROME_PATH??'C:/Program Files/Google/Chrome/Application/chrome.exe',['--headless=new','--remote-debugging-port=9398',`--user-data-dir=${output}/chrome-${process.pid}`,'--no-first-run','--disable-background-networking','--autoplay-policy=no-user-gesture-required','about:blank'],{windowsHide:true,stdio:'ignore'});
   let page;for(let i=0;;i++){try{page=await(await fetch('http://127.0.0.1:9398/json/new?about:blank',{method:'PUT'})).json();break;}catch{}if(i>80)throw new Error('Chrome startup failed');await delay(250);}
   socket=new WebSocket(page.webSocketDebuggerUrl);await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject;});
@@ -26,7 +28,7 @@ try{
     if(message.method==='Network.requestWillBeSent')pendingRequests.set(message.params.requestId,message.params.request.url);
     if(message.method==='Network.loadingFinished'||message.method==='Network.loadingFailed')pendingRequests.delete(message.params.requestId);
     previousHandler(event);};
-  await send('Page.navigate',{url:'http://127.0.0.1:3199/gaterunner/'});
+  await send('Page.navigate',{url});
   for(let i=0;i<240;i++){if(await evaluate(`Boolean(document.querySelector('.development-panel'))`))break;await delay(250);if(i===239){const pageState=await evaluate(`({url:location.href,body:document.body.innerText,html:document.head.innerHTML})`);throw new Error(`Studio panel failed to mount: ${JSON.stringify({pageState,browserErrors,pendingRequests:[...pendingRequests.values()],serverLog})}`);}}
   console.log('Studio mounted; checking rendering and playback.');
   const project=JSON.parse(readFileSync('cli/fixtures/development-demo.json','utf8')).preset.data;
@@ -39,7 +41,7 @@ try{
     const {default:App}=await import('/gaterunner/src/App.vue');
     const app=document.querySelector('#app').__vue_app__._instance.proxy;
     app.applyDraftData(${JSON.stringify(project)});
-    document.querySelector('.development-panel button').click();
+    app.openDock('phrases');
     const first=await renderBrowserDevelopment(${JSON.stringify(project)}), second=await renderBrowserDevelopment(${JSON.stringify(project)},{range:{start:0.1,end:0.25,unit:'seconds'}});
     await app.startSequencer();const playing=app.isRunning&&!!app.developmentPlayer;
     app.handleTrackDraftChange({...app.currentTrack,gain:app.currentTrack.gain-1});
@@ -60,8 +62,12 @@ try{
     app.applyDraftData(arranged);app.useMidiOutput=true;await app.startSequencer();
     const arrangedMidiPlays=Object.keys(app.trackLoops).length===arranged.tracks.length
       &&app.getLoopDurationSecondsFromTrackLengths()===app.developmentSchedule.duration;
+    // Reproduce Tone's tiny negative implicit tick immediately after Start.
+    // Stopping to apply an edit must still dispose every scheduled part.
+    const parts=[...Object.values(app.trackLoops),...Object.values(app.trackFadeLoops)];
+    for(const part of parts){const toTicks=part.toTicks.bind(part);part.toTicks=time=>time===undefined?-Number.EPSILON:toTicks(time);}
     app.handleBitmaskSequenceInput('1');
-    const midiEditStopped=!app.isRunning&&!app.developmentSchedule;
+    const midiEditStopped=!app.isRunning&&!app.developmentSchedule&&parts.every(part=>part.disposed);
     app.stopSequencer();app.useMidiOutput=false;app.applyDraftData(${JSON.stringify(project)});
     return {left:Array.from(first.channels[0]),right:Array.from(first.channels[1]),excerpt:Array.from(second.channels[0]),
       events:(await resolveProjectEvents(${JSON.stringify(project)})).tracks.map(t=>t.events),midi:Array.from(await generateDevelopedMidi(${JSON.stringify(project)})),
@@ -85,4 +91,4 @@ try{
     editStopped:browser.editStopped,preparationCancelled:browser.preparationCancelled,mutedPlaybackMatches:browser.mutedPlaybackMatches,
     arrangedMidiPlays:browser.arrangedMidiPlays,midiEditStopped:browser.midiEditStopped,studioMounted:browser.panel};
   writeFileSync(`${output}/report.json`,JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report,null,2));
-}finally{socket?.close();chrome?.kill();vite.kill();}
+}finally{socket?.close();chrome?.kill();vite?.kill();}

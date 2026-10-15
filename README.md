@@ -169,6 +169,41 @@ single notes.
 
 ## Feature Guide
 
+### Studio Workspace
+
+The interface keeps the transport, arrangement and selected-track editor together.
+Use **Arrangement** for the beat ruler and colored pattern previews, or **Mixer**
+for track/master gain faders and mute/solo controls. Drag a track row to reorder it;
+double-click a pattern to open its sequence in the editor. Timeline zoom changes
+the display without changing the music.
+
+Note previews use the playback schedule, so their positions and lengths reflect
+note length, rests, phase, time warp, activation and phrase articulation. Note
+tails can extend past a pattern boundary; the display ends at the song loop.
+On small screens, track controls sit above their timelines and the transport
+stays visible while scrolling. The track **⋮** menu offers duplicate, delete,
+and move-up/down actions, including touch reordering.
+
+Under **Track editor → Sequence**, enter space-separated integers in the
+**Integer sequence** box above the grid, for example `1 2 4 8 3 5 7 0`.
+The grid edits the same masks. Click cells to toggle notes or drum hits, add 16 empty steps, or
+double a pattern. Drum edits preserve other lanes and their velocity values; new
+hits use full velocity. Row and step navigation reach longer patterns. Negative
+melodic masks and values beyond safe integer precision remain available through
+the original text field.
+
+For developed tracks, the **Editing pattern** selector switches between the base
+sequence and saved phrases. Double-clicking a section selects its phrase directly.
+**Phrases**, **Articulation**, **Automation**, **Routing**, **Samples**, and **Render**
+open the existing studio tools in the same editor dock. Enable **Develop this
+track** to use its phrases, articulation, and automation.
+
+The inspector provides harmony, tuning, track gain/velocity and master controls.
+Collapse the inspector or editor for more room. Press **Space** to play/stop while
+focus is outside editable controls. **Audio / MIDI** contains device and buffering
+settings; **Export** offers MIDI, WAV and the advanced rendering tools. The project
+browser, save button and **Project** menu retain preset and library management.
+
 ### Presets
 
 GateRunner stores sequences as named presets in the browser.
