@@ -28,12 +28,8 @@ export const LFO_WAVEFORM_VALUES = new Set<string>(LFO_WAVEFORM_OPTIONS.map((opt
 export const LFO_FREE_RATE_MIN_HZ = 0.01;
 export const LFO_FREE_RATE_MAX_HZ = 20;
 
-/** Note-division cycle lengths for tempo-synced LFOs (matches modulation rates plus long sweeps). */
-export const LFO_SYNC_RATE_OPTIONS = [
-  '16/1',
-  '8/1',
-  '4/1',
-  '2/1',
+/** Shared note divisions for tempo-synced delays, modulation and Master Pulse. */
+export const TEMPO_DIVISION_OPTIONS = [
   '1/1',
   '1/1D',
   '1/1T',
@@ -52,6 +48,18 @@ export const LFO_SYNC_RATE_OPTIONS = [
   '1/32',
   '1/32D',
   '1/32T',
+  '1/64',
+  '1/64D',
+  '1/64T',
+] as const;
+
+/** LFO cycle lengths include the shared note divisions plus long sweeps. */
+export const LFO_SYNC_RATE_OPTIONS = [
+  '16/1',
+  '8/1',
+  '4/1',
+  '2/1',
+  ...TEMPO_DIVISION_OPTIONS,
 ] as const;
 
 export type LfoSyncRateValue = typeof LFO_SYNC_RATE_OPTIONS[number];

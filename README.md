@@ -215,6 +215,8 @@ Pulse mode adds **Pulse width** (audible portion of each cycle) and **Edge softn
 (rounded transitions; automatically shortened to fit narrow or fast pulses).
 
 Rate can run freely at **0.1–80 Hz** or follow dotted/triplet **Tempo sync** divisions.
+Master Pulse, filter and modulation LFOs, wavetable LFOs, chorus, flanger, phaser,
+and echo all support **1/64**, **1/64D** (dotted), and **1/64T** (triplet).
 Delta, Theta, Alpha, Beta and Gamma shortcuts select example frequencies only;
 they do not promise particular mental states. The envelope preview shows two cycles.
 The effect starts at a predictable phase on Play/Restart and stays continuous across

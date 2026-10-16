@@ -7,10 +7,14 @@ import { renderOfflineAudio } from '../audio/offlineRender';
 /** Native AudioWorklet parity, stereo linking, restart phase and sample-rate coverage. */
 export async function runMasterPulseChecks() {
   let cases = 0, maximumDifference = 0;
+  const rates = [
+    { rateMode: 'hz' as const, frequency: 7.83 },
+    ...(['1/16T', '1/64', '1/64D', '1/64T'] as const).map(division => ({ rateMode: 'sync' as const, division })),
+  ];
   for (const sampleRate of [44100, 48000]) for (const shape of ['sine', 'triangle', 'pulse'] as const) {
-    for (const rateMode of ['hz', 'sync'] as const) {
-      const settings = normalizeMasterPulse({ enabled: true, shape, rateMode, frequency: 7.83,
-        division: '1/16T', depth: 1, width: 0.37, edgeMs: 2 });
+    for (const rate of rates) {
+      const settings = normalizeMasterPulse({ enabled: true, shape, ...rate,
+        depth: 1, width: 0.37, edgeMs: 2 });
       let contextRef: Tone.BaseContext | undefined;
       let source: ConstantSourceNode | undefined;
       try {

@@ -37,7 +37,7 @@ import { normalizeTrackPartialGenerator, type PartialGenerator } from './audio/p
 import { DEFAULT_TONEWHEEL_DRAWBARS } from './audio/tonewheelSpectrum.js';
 export { DEFAULT_TONEWHEEL_DRAWBARS } from './audio/tonewheelSpectrum.js';
 import type { TonewheelWavetable } from './audio/tonewheelWavetable.js';
-import type { LfoPhaseMode } from './audio/lfo.js';
+import { LFO_SYNC_RATE_OPTIONS, TEMPO_DIVISION_OPTIONS, type LfoPhaseMode } from './audio/lfo.js';
 import { DEFAULT_MASTER_PULSE, normalizeMasterPulse, type MasterPulseSettings } from './audio/masterPulse.js';
 export type TrackKind = 'melodic' | 'rhythmic';
 
@@ -207,47 +207,10 @@ export const SKEW_LFO_WAVEFORM_OPTIONS = [
   { title: 'Sample & Hold', value: 'sample-hold' },
 ] as const;
 
-export const ECHO_DELAY_OPTIONS = [
-  '1/1',
-  '1/1D',
-  '1/1T',
-  '1/2',
-  '1/2D',
-  '1/2T',
-  '1/4',
-  '1/4D',
-  '1/4T',
-  '1/8',
-  '1/8D',
-  '1/8T',
-  '1/16',
-  '1/16D',
-  '1/16T',
-] as const;
+export const ECHO_DELAY_OPTIONS = TEMPO_DIVISION_OPTIONS;
 
-/** Note-division cycle lengths for tempo-synced LFOs, from very slow sweeps to fast warble. */
-export const MODULATION_RATE_OPTIONS = [
-  '16/1',
-  '8/1',
-  '4/1',
-  '2/1',
-  '1/1',
-  '1/1D',
-  '1/1T',
-  '1/2',
-  '1/2D',
-  '1/2T',
-  '1/4',
-  '1/4D',
-  '1/4T',
-  '1/8',
-  '1/8D',
-  '1/8T',
-  '1/16',
-  '1/16D',
-  '1/16T',
-  '1/32',
-] as const;
+/** Shared LFO cycle lengths, from very slow sweeps through 1/64 triplets. */
+export const MODULATION_RATE_OPTIONS = LFO_SYNC_RATE_OPTIONS;
 
 /** Classic phaser pedals use an even number of first-order allpass poles. */
 export const PHASER_STAGE_OPTIONS = [2, 4, 6, 8, 10, 12] as const;

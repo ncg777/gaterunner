@@ -176,7 +176,7 @@ program
   .option('--time-warp-note-lengths <boolean>', 'Legacy single-track warped note lengths (true/false)')
   .option('--b <string>', 'Optional song-level track activation masks (space-separated nonnegative decimals; blank disables)')
   .option('-p, --preset <file>', 'JSON preset file to load instead of individual generation parameters')
-  .option('--tracks <json>', 'JSON array of tracks with per-track sequence, instrument, filter, echoDelay notation (1/1..1/16T), and reverb send controls', parseTracksJson)
+  .option('--tracks <json>', 'JSON array of tracks with per-track sequence, instrument, filter, echoDelay notation (1/1..1/64T, including D/T variants), and reverb send controls', parseTracksJson)
   .option('--reverb <json>', 'JSON object with global reverb enabled, decay, preDelay, dry, wet, lowCut, highCut', parseReverbJson)
   .option('--master-pulse <json>', 'Master Pulse settings JSON: enabled, rateMode, frequency, division, depth, shape, width, edgeMs', parseMasterPulseJson)
   .option('--threads <number>', 'WAV render threads (default: available CPU cores)')

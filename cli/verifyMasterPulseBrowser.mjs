@@ -83,23 +83,37 @@ try {
     const shortcut = document.querySelector('[aria-label="Theta 6 Hz"]'); shortcut.click();
     await nextTick();
     if (app.masterPulse.frequency !== 6 || !app.getDraftData().masterPulse.enabled) throw new Error('Frequency shortcut did not persist');
+    app.handleMasterPulseChange({ ...app.masterPulse, rateMode: 'sync' });
+    await nextTick();
+    const divisionSelect = [...document.querySelectorAll('.master-pulse-controls .v-select')].map(element => {
+      let component = element.__vueParentComponent;
+      while (component && !(component.props.label === 'Tempo division' && Array.isArray(component.props.items))) component = component.parent;
+      return component;
+    }).find(Boolean);
+    if (!divisionSelect) throw new Error('Master Pulse tempo selector missing');
+    for (const division of ['1/64', '1/64D', '1/64T']) {
+      if (!divisionSelect.props.items.includes(division)) throw new Error('Missing tempo option: ' + division);
+      divisionSelect.emit('update:modelValue', division);
+      await nextTick();
+      if (app.masterPulse.division !== division || app.getDraftData().masterPulse.division !== division) throw new Error('Tempo division did not persist: ' + division);
+    }
     await app.startSequencer();
     if (!app.isRunning) throw new Error('Master Pulse playback did not start');
     const bus = getMasterBus(), control = bus.pulseControl;
-    app.handleMasterPulseChange({ ...app.masterPulse, frequency: 40, shape: 'sine', depth: 0.35 });
+    app.handleMasterPulseChange({ ...app.masterPulse, rateMode: 'hz', frequency: 40, shape: 'sine', depth: 0.35 });
     await setMasterPulse(bus, app.masterPulse, app.bpm);
     if (!app.isRunning || control !== bus.pulseControl) throw new Error('Live edit restarted playback or the pulse oscillator');
     app.stopSequencer();
     await app.startSequencer();
     if (!app.isRunning || control !== getMasterBus().pulseControl) throw new Error('Restart did not reuse the pulse oscillator');
     app.stopSequencer();
-    app.handleMasterPulseChange({ ...app.masterPulse, shape: 'pulse', frequency: 10, depth: 1 });
+    app.handleMasterPulseChange({ ...app.masterPulse, rateMode: 'sync', division: '1/64T', shape: 'pulse', depth: 1 });
     const wav = await app.renderMixWav();
     if (!wav || wav.byteLength < 100) throw new Error('Browser WAV export failed');
     await nextTick();
     document.querySelector('.master-pulse-controls').scrollIntoView({ block: 'center' });
     window.__masterPulseRestore = () => app.applyDraftData(saved);
-    return { shortcut: true, playback: true, liveEdits: true, restart: true, wavBytes: wav.byteLength };
+    return { tempoDivisions: ['1/64', '1/64D', '1/64T'], shortcut: true, playback: true, liveEdits: true, restart: true, wavBytes: wav.byteLength };
   })()`);
   await delay(200);
   const desktop = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });

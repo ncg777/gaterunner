@@ -79,7 +79,7 @@ import {
 } from './partialWavetable.js';
 import { preparePartialOscillator, preparePartialSpectrumOscillator, prepareModulatedSpectrumOscillator } from './native/partialOscillator.js';
 import { normalizeNativeEffectSettings, applyNativeTrackEffects, applyNativeEcho, type NativeEffectSettings } from './native/nativeTrackEffects.js';
-import { createSkewLfoState, getLfoFrequencyHz, sampleLfoAtTime } from './lfo.js';
+import { createSkewLfoState, getLfoFrequencyHz, sampleLfoAtTime, TEMPO_DIVISION_OPTIONS } from './lfo.js';
 import { createPinkNoiseImpulseChannels } from './reverbImpulse.js';
 import { convolveInto } from './native/convolution.js';
 import { planNativeVoices } from './native/nativeVoices.js';
@@ -219,27 +219,9 @@ export interface GenerateTrackOptions extends Partial<NativeEffectSettings> {
   reverbWet?: number;
 }
 
-type EchoDelayValue = typeof ECHO_DELAY_OPTIONS[number];
+type EchoDelayValue = typeof TEMPO_DIVISION_OPTIONS[number];
 
-const ECHO_DELAY_OPTIONS = [
-  '1/1',
-  '1/1D',
-  '1/1T',
-  '1/2',
-  '1/2D',
-  '1/2T',
-  '1/4',
-  '1/4D',
-  '1/4T',
-  '1/8',
-  '1/8D',
-  '1/8T',
-  '1/16',
-  '1/16D',
-  '1/16T',
-] as const;
-
-const ECHO_DELAY_VALUES = new Set<string>(ECHO_DELAY_OPTIONS);
+const ECHO_DELAY_VALUES = new Set<string>(TEMPO_DIVISION_OPTIONS);
 const MAX_POLYPHONY = 16;
 const DEFAULT_TONEWHEEL_DRAWBARS = [0, 0, 0, 8, 0, 0, 0, 0, 0];
 const TIME_WARP_QUANTIZE_VALUES = new Set<number>(TIME_WARP_QUANTIZE_OPTIONS);
