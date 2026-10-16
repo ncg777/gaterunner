@@ -268,6 +268,7 @@
               Global reverb
               <v-icon size="14">mdi-arrow-top-right</v-icon>
             </button>
+            <MasterPulseControls :model-value="masterPulse" :bpm="bpm" @update:model-value="handleMasterPulseChange" />
           </div>
           <div class="inspector-footer">
             <kbd>SPACE</kbd>
@@ -534,7 +535,9 @@ import { encodeWavInWorker } from './audio/wavWorker';
 import { renderOfflineAudio } from './audio/offlineRender';
 import { preparePeriodicWaveContext } from './audio/periodicWave';
 import { configureRealtimeScheduling } from './audio/realtimeScheduling';
-import { getMasterBus, disposeMasterBus, setMasterGainDb } from './audio/masterBus';
+import { getMasterBus, disposeMasterBus, setMasterGainDb, setMasterPulse, resetMasterPulse } from './audio/masterBus';
+import { normalizeMasterPulse, type MasterPulseSettings } from './audio/masterPulse';
+import MasterPulseControls from './components/MasterPulseControls.vue';
 import { sleepWhenSilent, type AudioSleep } from './audio/idleAudio';
 import { buildTrackFadeEnvelope } from './audio/trackFade';
 import { getStepDurations } from './audio/stepDurations';
@@ -732,6 +735,7 @@ export default defineComponent({
     initialLibrary: { type: Object as PropType<PresetLibrary>, required: true },
   },
   components: {
+    MasterPulseControls,
     EditableSlider,
     EditorSurface,
     DevelopmentPanel,
@@ -750,6 +754,7 @@ export default defineComponent({
       bpm: initialState.draft.bpm,
       a4: initialState.draft.a4,
       masterGain: initialState.draft.masterGain,
+      masterPulse: normalizeMasterPulse(initialState.draft.masterPulse),
       forte: initialState.draft.forte,
       bitmaskSequenceInput: initialState.draft.bitmaskSequenceInput,
       tracks: initialState.draft.tracks.map((track) => clonePresetTrackData(track)) as PresetTrackData[],
@@ -1547,6 +1552,7 @@ export default defineComponent({
             this.trackSynths = markRaw({});
             offlineContextRef = offlineContext;
             setMasterGainDb(getMasterBus(offlineContext), this.masterGain);
+            await setMasterPulse(getMasterBus(offlineContext), this.masterPulse, this.bpm);
             this.updateReverbChain();
             offlineReverbChain = this.reverbChain;
 
@@ -1675,6 +1681,7 @@ export default defineComponent({
         bpm: this.bpm,
         a4: this.a4,
         masterGain: this.masterGain,
+        masterPulse: this.masterPulse,
         forte: this.forte,
         bitmaskSequenceInput: this.bitmaskSequenceInput,
         tracks: this.tracks.map((track) => clonePresetTrackData(track)),
@@ -1698,6 +1705,7 @@ export default defineComponent({
       this.bpm = normalized.bpm;
       this.a4 = normalized.a4;
       this.masterGain = normalized.masterGain;
+      this.masterPulse = normalizeMasterPulse(normalized.masterPulse);
       this.forte = normalized.forte;
       this.bitmaskSequenceInput = normalized.bitmaskSequenceInput;
       this.reverbEnabled = normalized.reverb.enabled;
@@ -1729,6 +1737,9 @@ export default defineComponent({
       const createMissingChains = options.createMissingChains ?? this.isRunning;
       Tone.getTransport().bpm.value = this.bpm;
       setMasterGainDb(getMasterBus(), this.masterGain);
+      void setMasterPulse(getMasterBus(), this.masterPulse, this.bpm).catch(error => {
+        this.showPlaybackErrorMessage(`Master Pulse could not start: ${String(error)}`);
+      });
       const signatureTrack = this.currentTrack ?? this.tracks[0];
       if (signatureTrack) {
         Tone.getTransport().timeSignature = [signatureTrack.numerator, signatureTrack.denominator];
@@ -1749,6 +1760,13 @@ export default defineComponent({
     handleDraftChange() {
       this.invalidateDevelopmentPlayback();
       this.applyRealtimeSettings();
+      this.refreshDirtyState();
+    },
+    handleMasterPulseChange(settings: MasterPulseSettings) {
+      this.masterPulse = normalizeMasterPulse(settings);
+      void setMasterPulse(getMasterBus(), this.masterPulse, this.bpm).catch(error => {
+        this.showPlaybackErrorMessage(`Master Pulse could not start: ${String(error)}`);
+      });
       this.refreshDirtyState();
     },
     handleReverbDraftChange(nextReverb: PresetReverbData) {
@@ -3270,12 +3288,16 @@ export default defineComponent({
             const buffer = Tone.getContext().createBuffer(2, rendered.preMaster[0].length, rendered.sampleRate);
             buffer.copyToChannel(new Float32Array(rendered.preMaster[0]), 0); buffer.copyToChannel(new Float32Array(rendered.preMaster[1]), 1);
             setMasterGainDb(getMasterBus(), this.masterGain);
+            await setMasterPulse(getMasterBus(), this.masterPulse, this.bpm);
+            controller.signal.throwIfAborted();
             const player = markRaw(new Tone.Player({ url: buffer, onstop: () => {
               this.isRunning = false; this.developmentController=null; this.scheduleAudioSleep();
               window.setTimeout(()=>{if(this.developmentPlayer===player&&!this.isRunning){player.dispose();this.developmentPlayer=null;}},0);
             } }));
             player.connect(getMasterBus().input); this.developmentPlayer = player;
-            this.isRunning = true; player.start(); return;
+            const start = Tone.now();
+            resetMasterPulse(getMasterBus(), start);
+            this.isRunning = true; player.start(start); return;
           }
         }
 
@@ -3286,6 +3308,8 @@ export default defineComponent({
         if (generation !== this.playbackGeneration) return;
         resetLiveScheduling(Tone.getContext());
         this.applyRealtimeSettings({ rebuildLoops: false, createMissingChains: true });
+        await setMasterPulse(getMasterBus(), this.masterPulse, this.bpm);
+        if (generation !== this.playbackGeneration) return;
         this.isRunning = true;
         this.rebuildTrackLoops();
         Tone.getTransport().seconds = 0;

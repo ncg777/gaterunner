@@ -205,6 +205,34 @@ focus is outside editable controls. **Audio / MIDI** contains device and bufferi
 settings; **Export** offers MIDI, WAV and the advanced rendering tools. The project
 browser, save button and **Project** menu retain preset and library management.
 
+### Master Pulse
+
+Open **Master Output → Master Pulse** in the inspector to apply one linked stereo
+volume envelope to the whole mix, including reverb and shared returns. Choose
+**Sine** or **Triangle** for tremolo, or **Pulse · isochronic style** for regularly
+spaced pulses. Set **Depth** from subtle movement to full silence between pulses.
+Pulse mode adds **Pulse width** (audible portion of each cycle) and **Edge softness**
+(rounded transitions; automatically shortened to fit narrow or fast pulses).
+
+Rate can run freely at **0.1–80 Hz** or follow dotted/triplet **Tempo sync** divisions.
+Delta, Theta, Alpha, Beta and Gamma shortcuts select example frequencies only;
+they do not promise particular mental states. The envelope preview shows two cycles.
+The effect starts at a predictable phase on Play/Restart and stays continuous across
+loops and live edits. Bypass and parameter changes use a short smoothing ramp.
+
+Master Pulse follows master gain and soft clipping, so it attenuates the output
+without raising its ceiling. Browser playback, browser WAV and CLI WAV exports
+use the same envelope; excerpts keep their position in the full-song pulse cycle.
+Settings travel in presets and shared project URLs as `masterPulse`, defaulting to
+disabled for older projects. MIDI is unchanged. Stems remain before the master
+stage; their manifest includes the pulse settings and song-time offset.
+
+CLI example:
+
+```sh
+yarn cli --format wav --output pulse.wav --master-pulse '{"enabled":true,"shape":"pulse","frequency":10,"depth":1,"width":0.5,"edgeMs":5}'
+```
+
 ### Presets
 
 GateRunner stores sequences as named presets in the browser.

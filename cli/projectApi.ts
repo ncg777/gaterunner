@@ -56,8 +56,8 @@ export async function exportStems(project: PresetData, directory: string, option
       measurements: measureChannels(stem.channels, rendered.sampleRate) });
   }
   const manifest = { renderer: RENDERER_VERSION, range: rendered.range, sampleRate: rendered.sampleRate, format: 'float32',
-    masterGain: project.masterGain, stemStage:options.stemStage ?? 'all',
-    instructions: options.stemStage==='pre'?'Dry editing sources; they do not recombine into the wet pre-master mix.':'Sum recombine=true stems for the pre-master mix. Apply master gain and GateRunner soft clip once. Lane/pre-insert files are alternative editing sources.', files };
+    masterGain: project.masterGain, masterPulse: project.masterPulse, bpm: project.bpm, stemStage:options.stemStage ?? 'all',
+    instructions: options.stemStage==='pre'?'Dry editing sources; they do not recombine into the wet pre-master mix.':'Sum recombine=true stems for the pre-master mix. Apply master gain, GateRunner soft clip, then Master Pulse once, using range.start as the song-time offset. Lane/pre-insert files are alternative editing sources.', files };
   const manifestFile = join(destination, 'stems.json'); await writeFile(manifestFile, JSON.stringify(manifest, null, 2) + '\n');
   return { manifestFile, ...manifest, performance: rendered.performance, stats: rendered.stats };
 }

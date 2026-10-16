@@ -1,4 +1,5 @@
 import * as Tone from 'tone';
+export { runMasterPulseChecks } from './masterPulse.browser';
 export { runPartialBankChecks, runPartialBankRealtimeChecks } from './partialBank.browser';
 export { runWarpedNoteChecks } from './pooledNote.browser';
 export { runOfflineSchedulingChecks } from './offlineScheduling.browser';

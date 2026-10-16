@@ -48,7 +48,8 @@ export class DiskRenderCache implements RenderCache {
     };
     add('left', result.left); add('right', result.right); add('reverbLeft', result.reverbLeft); add('reverbRight', result.reverbRight);
     for (const [id, pair] of Object.entries(result.auxSends ?? {})) { add(`aux.${id}.left`, pair[0]); add(`aux.${id}.right`, pair[1]); }
-    const payload = Buffer.concat(chunks), settings = { sampleRate: result.sampleRate, a4: result.a4, masterGain: result.masterGain, reverb: result.reverb };
+    const payload = Buffer.concat(chunks), settings = { sampleRate: result.sampleRate, a4: result.a4, masterGain: result.masterGain,
+      ...(result.masterPulse ? { masterPulse: result.masterPulse, bpm: result.bpm } : {}), reverb: result.reverb };
     const identity={version:RENDERER_VERSION,key,arrays,settings,auxIds:Object.keys(result.auxSends ?? {})};
     const header = Buffer.from(JSON.stringify({...identity,hash:createHash('sha256').update(payload).update(canonicalJSON(identity)).digest('hex')}));
     const prefix = Buffer.alloc(4); prefix.writeUInt32LE(header.length);

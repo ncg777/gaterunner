@@ -38,6 +38,7 @@ import { DEFAULT_TONEWHEEL_DRAWBARS } from './audio/tonewheelSpectrum.js';
 export { DEFAULT_TONEWHEEL_DRAWBARS } from './audio/tonewheelSpectrum.js';
 import type { TonewheelWavetable } from './audio/tonewheelWavetable.js';
 import type { LfoPhaseMode } from './audio/lfo.js';
+import { DEFAULT_MASTER_PULSE, normalizeMasterPulse, type MasterPulseSettings } from './audio/masterPulse.js';
 export type TrackKind = 'melodic' | 'rhythmic';
 
 /** Upper bound for per-track polyphony; 1 switches the track to the monophonic glide engine. */
@@ -280,6 +281,8 @@ export interface PresetData {
   a4: number;
   /** Output trim in dB applied to the whole mix before the master soft clipper. */
   masterGain: number;
+  /** Shared stereo amplitude envelope applied after the master soft clipper. */
+  masterPulse?: MasterPulseSettings;
   forte: string;
   /**
    * Optional song-level track activation sequence B: whitespace-separated
@@ -497,6 +500,7 @@ export const DEFAULT_PRESET_DATA: PresetData = {
   bpm: 90,
   a4: 440,
   masterGain: 0,
+  masterPulse: { ...DEFAULT_MASTER_PULSE },
   forte: '5-35.05',
   bitmaskSequenceInput: '',
   tracks: [DEFAULT_PRESET_TRACK_DATA],
@@ -1039,6 +1043,7 @@ export function clonePresetData(data: PresetData): PresetData {
     bpm: data.bpm,
     a4: data.a4,
     masterGain: data.masterGain,
+    masterPulse: normalizeMasterPulse(data.masterPulse),
     forte: data.forte,
     bitmaskSequenceInput: data.bitmaskSequenceInput,
     tracks: data.tracks.map((track) => clonePresetTrackData(track)),
@@ -1119,6 +1124,7 @@ export function normalizePresetData(value: unknown): PresetData {
     bpm: clamp(parseInteger(raw.bpm?.toString(), DEFAULT_PRESET_DATA.bpm), 1, 499),
     a4: clamp(parseNumber(raw.a4, DEFAULT_PRESET_DATA.a4), 380, 500),
     masterGain: clamp(parseNumber(raw.masterGain, DEFAULT_PRESET_DATA.masterGain), -96, 12),
+    masterPulse: normalizeMasterPulse(raw.masterPulse),
     forte: typeof raw.forte === 'string' && raw.forte.trim().length > 0 ? raw.forte : DEFAULT_PRESET_DATA.forte,
     bitmaskSequenceInput: normalizeBitmaskSequenceInput(
       raw.bitmaskSequenceInput ?? (raw as { b?: unknown }).b,
@@ -1129,6 +1135,7 @@ export function normalizePresetData(value: unknown): PresetData {
 }
 
 export function arePresetDataEqual(left: PresetData, right: PresetData): boolean {
+  if (JSON.stringify(normalizeMasterPulse(left.masterPulse)) !== JSON.stringify(normalizeMasterPulse(right.masterPulse))) return false;
   if (JSON.stringify(left.studio) !== JSON.stringify(right.studio)
     || left.tracks.some((track, index) => JSON.stringify(track.development) !== JSON.stringify(right.tracks[index]?.development))) return false;
   if (left.bpm !== right.bpm
@@ -1683,6 +1690,7 @@ export function buildDraftFromUrl(search: string, baseData: PresetData): PresetD
     bpm: params.get('bpm') ?? baseData.bpm,
     a4: params.get('a4') ?? baseData.a4,
     masterGain: baseData.masterGain,
+    masterPulse: normalizeMasterPulse(baseData.masterPulse),
     forte: params.get('forte') ?? baseData.forte,
     bitmaskSequenceInput: params.get('b') ?? baseData.bitmaskSequenceInput,
     tracks: [

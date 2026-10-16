@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parsePresetImportPayload, type PresetData } from '../src/presets.js';
+import { normalizeMasterPulse, type MasterPulseSettings } from '../src/audio/masterPulse.js';
 import { normalizeWaveshaperSettings, type WaveshaperSettings } from '../src/audio/waveshaper.js';
 import { generateMidi, generateWav, type GenerateReverbOptions, type GenerateTrackOptions } from './generate.js';
 import { registerProjectCommands } from './projectCommands.js';
@@ -16,6 +17,7 @@ export function presetDataToGeneratorInput(data: PresetData) {
     bpm: data.bpm,
     a4: data.a4,
     masterGain: data.masterGain,
+    masterPulse: normalizeMasterPulse(data.masterPulse),
     forte: data.forte,
     bitmaskSequenceInput: data.bitmaskSequenceInput,
     tracks: data.tracks.map(({ id: _id, sequenceInput, ...track }) => ({
@@ -36,6 +38,7 @@ export function presetDataToGeneratorInput(data: PresetData) {
     bpm: number;
     a4: number;
     masterGain: number;
+    masterPulse: MasterPulseSettings;
     forte: string;
     bitmaskSequenceInput: string;
     tracks: GenerateTrackOptions[];
@@ -47,6 +50,7 @@ function parsePresetFile(value: string): {
   bpm: number;
   a4: number;
   masterGain: number;
+  masterPulse: MasterPulseSettings;
   forte: string;
   bitmaskSequenceInput: string;
   tracks: GenerateTrackOptions[];
@@ -111,6 +115,18 @@ function parseReverbJson(value: string): GenerateReverbOptions {
   }
 }
 
+function parseMasterPulseJson(value: string): MasterPulseSettings {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error('master pulse must be a JSON object');
+    }
+    return normalizeMasterPulse(parsed);
+  } catch (error) {
+    throw new Error(`Invalid --master-pulse JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 function parseWaveshaperJson(value: string): WaveshaperSettings {
   try {
     const parsed: unknown = JSON.parse(value);
@@ -162,6 +178,7 @@ program
   .option('-p, --preset <file>', 'JSON preset file to load instead of individual generation parameters')
   .option('--tracks <json>', 'JSON array of tracks with per-track sequence, instrument, filter, echoDelay notation (1/1..1/16T), and reverb send controls', parseTracksJson)
   .option('--reverb <json>', 'JSON object with global reverb enabled, decay, preDelay, dry, wet, lowCut, highCut', parseReverbJson)
+  .option('--master-pulse <json>', 'Master Pulse settings JSON: enabled, rateMode, frequency, division, depth, shape, width, edgeMs', parseMasterPulseJson)
   .option('--threads <number>', 'WAV render threads (default: available CPU cores)')
   .option('--verbose', 'Print WAV render and encoding timings')
   .action(async (options) => {
@@ -173,6 +190,7 @@ program
             bpm: parseInt(options.bpm),
             a4: parseFloat(options.a4),
             masterGain: parseFloat(options.masterGain),
+            masterPulse: options.masterPulse,
             numerator: parseInt(options.numerator),
             denominator: parseInt(options.denominator),
             forte: options.forte,

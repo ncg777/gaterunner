@@ -6,6 +6,7 @@ import { createScheduledRenderSession, applyReverbSend, generateMidi, type Gener
 import { usesDevelopment } from '../domain/development.js';
 import { createReturnProcessor } from './auxiliaryReturns.js';
 import { applyMasterClip } from './masterClip.js';
+import { applyMasterPulse } from './masterPulse.js';
 import { limitPolyphony } from './glide.js';
 import { renderKey, resultBytes, type RenderCache } from './renderCache.js';
 import { sampleContentHash } from './sampleAssets.js';
@@ -182,6 +183,7 @@ export async function renderDevelopment(input: PresetData, options: DevelopmentR
     if(!Number.isFinite(sample))throw new Error('Non-finite pre-master mix');
     return applyMasterClip(sample * masterGain);
   })) as StereoChannels;
+  applyMasterPulse(channels, project.masterPulse, project.bpm, sampleRate, startFrame);
   options.onProgress?.({ completed: total, total, stage: 'Complete' });
   return { channels, preMaster: trimmed, stems: stems.map(s => ({ ...s, channels: sliced(s.channels) })), sampleRate,
     songDuration: resolved.duration, range: { start: startFrame / sampleRate, end: endFrame / sampleRate },

@@ -24,6 +24,7 @@ import {
 import { getTrackFadeGain } from './trackFade.js';
 import { createWaveshaperProcessor, lookupTransferCurve, TANH_CURVE } from './trackDistortion.js';
 import { applyMasterClip } from './masterClip.js';
+import { applyMasterPulse, normalizeMasterPulse, type MasterPulseSettings } from './masterPulse.js';
 import { normalizeWaveshaperSettings, type WaveshaperSettings } from './waveshaper.js';
 import { getStepDurations } from './stepDurations.js';
 import { applyTrackPhase } from './trackPhase.js';
@@ -284,6 +285,7 @@ export interface GenerateOptions extends Partial<NativeEffectSettings> {
   a4?: number;
   /** Output trim in dB (-96 to 12) applied to the whole mix before the master soft clipper. Default: 0 */
   masterGain?: number;
+  masterPulse?: Partial<MasterPulseSettings>;
   /** Legacy single-track numerator (1-16). Used when tracks is omitted. */
   numerator?: number;
   /** Legacy single-track denominator (1-16). Used when tracks is omitted. */
@@ -352,6 +354,8 @@ type NormalizedTrack = Required<Omit<GenerateTrackOptions, 'generatorType' | 'fm
 export type NormalizedReverb = Required<GenerateReverbOptions>;
 
 export interface WavChannelRenderResult {
+  masterPulse?: MasterPulseSettings;
+  bpm?: number;
   auxSends?: Record<string, [Float32Array, Float32Array]>;
   left: Float32Array | Float64Array;
   right: Float32Array | Float64Array;
@@ -390,6 +394,7 @@ interface TrackScheduledEvent {
 }
 
 interface PreparedRenderData {
+  masterPulse: MasterPulseSettings;
   resolvedDuration?: number;
   studio?: ProjectStudio;
   bpm: number;
@@ -730,6 +735,7 @@ async function prepareRenderData(options: GenerateOptions): Promise<PreparedRend
     bpm,
     a4,
     masterGain: clamp(options.masterGain ?? 0, -96, 12),
+    masterPulse: normalizeMasterPulse(options.masterPulse),
     activationMasks: parseBitmaskSequenceInput(options.bitmaskSequenceInput).masks,
     tracks: trackData,
     reverb: normalizeReverb(options),
@@ -1008,7 +1014,8 @@ export async function renderWavChannels(
       .reduce((mix, stem) => { for (let i = 0; i < mix[0].length; i++) { mix[0][i] += stem.channels[0][i]; mix[1][i] += stem.channels[1][i]; } return mix; },
         [new Float32Array(rendered.preMaster[0].length), new Float32Array(rendered.preMaster[0].length)]);
     return { left: channels[0], right: channels[1], reverbLeft: null, reverbRight: null, sampleRate: rendered.sampleRate,
-      a4: options.a4 ?? 440, masterGain: options.masterGain ?? 0, reverb: { ...normalizeReverb(options), dry: 0, enabled: false } };
+      a4: options.a4 ?? 440, masterGain: options.masterGain ?? 0, masterPulse: normalizeMasterPulse(options.masterPulse), bpm: options.bpm ?? 90,
+      reverb: { ...normalizeReverb(options), dry: 0, enabled: false } };
   }
   const prepared = await prepareRenderData(options);
   for (const entry of prepared.tracks) {
@@ -1065,6 +1072,8 @@ function renderPreparedWavChannels(
       sampleRate: WAV_EXPORT_SAMPLE_RATE,
       a4: prepared.a4,
       masterGain: prepared.masterGain,
+      masterPulse: prepared.masterPulse,
+      bpm: prepared.bpm,
       reverb: prepared.reverb,
     };
   }
@@ -1666,7 +1675,8 @@ function renderPreparedWavChannels(
     }
   });
 
-  return { left, right, reverbLeft, reverbRight, sampleRate, a4: prepared.a4, masterGain: prepared.masterGain, reverb: prepared.reverb,
+  return { left, right, reverbLeft, reverbRight, sampleRate, a4: prepared.a4, masterGain: prepared.masterGain,
+    masterPulse: prepared.masterPulse, bpm: prepared.bpm, reverb: prepared.reverb,
     ...(Object.keys(auxSends).length ? { auxSends } : {}) };
 }
 
@@ -1721,6 +1731,7 @@ export async function combineWavChannelRenders(
     left[frame] = applyMasterClip(left[frame] * masterGain);
     right[frame] = applyMasterClip(right[frame] * masterGain);
   }
+  applyMasterPulse([left, right], mix.masterPulse, mix.bpm ?? 90, mix.sampleRate);
   return { channels: [left, right], sampleRate: mix.sampleRate };
 }
 

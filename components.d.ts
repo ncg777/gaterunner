@@ -15,6 +15,7 @@ declare module 'vue' {
     GeneratorControls: typeof import('./src/components/GeneratorControls.vue')['default']
     HelpDialog: typeof import('./src/components/HelpDialog.vue')['default']
     LiveAudioDialog: typeof import('./src/components/LiveAudioDialog.vue')['default']
+    MasterPulseControls: typeof import('./src/components/MasterPulseControls.vue')['default']
     ModulationControls: typeof import('./src/components/ModulationControls.vue')['default']
     PartialBankControls: typeof import('./src/components/PartialBankControls.vue')['default']
     PresetManager: typeof import('./src/components/PresetManager.vue')['default']
