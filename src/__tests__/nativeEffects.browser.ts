@@ -64,9 +64,20 @@ export async function runReverbImpulseLifecycleChecks() {
       const actual = buffer.getChannelData(channel);
       if (actual.length !== expected[channel].length || actual.some((sample, frame) => sample !== expected[channel][frame])) throw new Error('Updated impulse differs from native impulse');
     }
+    const beforeCurve = chain.convolver;
+    updateReverbAudioChain(chain, { ...settings, decay: 0.2, decayCurve: 2 });
+    if (chain.convolver === beforeCurve || chain.outputConnected || chain.convolver.normalize) throw new Error('Curvature update must rebuild the impulse and preserve bypass/calibration');
+    const curved = createPinkNoiseImpulseChannels(0.2, 0.02, context.sampleRate, 2);
+    for (let channel = 0; channel < 2; channel++) {
+      const actual = chain.convolver.buffer!.getChannelData(channel);
+      if (actual.length !== curved[channel].length || actual.some((sample, frame) => sample !== curved[channel][frame])) throw new Error('Curved browser impulse differs from native impulse');
+    }
+    const afterCurve = chain.convolver;
+    updateReverbAudioChain(chain, { ...settings, decay: 0.2, decayCurve: 2, lowCutFrequency: 200 });
+    if (chain.convolver !== afterCurve) throw new Error('Filter-only changes must retain the impulse');
     setReverbOutputEnabled(chain, true);
     if (!chain.outputConnected) throw new Error('Updated reverb must reconnect when enabled');
-    return { initialCalibration: true, updatedCalibration: true, bypassPreserved: true, sharedImpulse: true };
+    return { initialCalibration: true, updatedCalibration: true, bypassPreserved: true, sharedImpulse: true, curvatureUpdate: true };
   } finally {
     if (chain) disposeReverbAudioChain(chain);
     disposeMasterBus(context);

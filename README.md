@@ -513,6 +513,11 @@ event, and retriggering when the song is played (the default), matching the vect
 voices have independent filters before track distortion; drum filters follow the
 track effects, and per-drum drive, filters and sends are applied at the lane output.
 Both engines use the same deterministic, calibrated pink-noise reverb impulse.
+Global Reverb's **Decay Curvature** (`reverb.decayCurve`, 0.1–10) shapes its fade:
+1 preserves the original exponential decay, lower values fade earlier, and higher
+values hold longer before falling away. Decay duration and pre-delay stay fixed.
+The control is saved in presets and applies to playback and WAV export, including
+CLI rendering with `--reverb '{"decay":3,"decayCurve":2}'`. Older presets default to 1.
 Native amplitude and pitch envelopes follow the browser's curves and smoothing;
 unison uses the same oscillator gain and coherent starting phases on a mono bus.
 Each voice then diverges at its own detuned frequency. New tracks default to

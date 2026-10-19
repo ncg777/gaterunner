@@ -186,6 +186,7 @@ test('URL draft and import/export preserve custom reverb settings', () => {
   const customReverb = {
     enabled: false,
     decay: 12.5,
+    decayCurve: 2.5,
     preDelay: 0.18,
     dry: -3,
     wet: -9,
@@ -200,6 +201,8 @@ test('URL draft and import/export preserve custom reverb settings', () => {
   const draft = buildDraftFromUrl('?bpm=120', saved);
   assert.deepEqual(draft.reverb, customReverb);
   assert.equal(arePresetDataEqual(draft, { ...saved, bpm: 120 }), true);
+  assert.equal(arePresetDataEqual(draft, { ...draft, reverb: { ...customReverb, decayCurve: 1 } }), false);
+  assert.deepEqual(clonePresetData(draft).reverb, customReverb);
 
   const preset = createNamedPreset('Reverb Room', saved);
   const exported = buildSinglePresetExport(preset);
@@ -207,5 +210,16 @@ test('URL draft and import/export preserve custom reverb settings', () => {
   assert.equal(payload.kind, 'single-preset');
   if (payload.kind === 'single-preset') {
     assert.deepEqual(payload.preset.data.reverb, customReverb);
+  }
+});
+
+test('reverb curvature defaults for older presets and normalizes invalid input', () => {
+  for (const [decayCurve, expected] of [
+    [undefined, 1], [null, 1], [Number.NaN, 1], [Infinity, 1], ['', 1],
+    ['2.5', 2.5], [0, 0.1], [-2, 0.1], [20, 10],
+  ]) {
+    const project = normalizePresetData({ reverb: { decay: 2, decayCurve } });
+    assert.equal(project.reverb.decayCurve, expected);
+    assert.equal(project.reverb.decay, 2);
   }
 });

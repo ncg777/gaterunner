@@ -28,6 +28,7 @@ export function presetDataToGeneratorInput(data: PresetData) {
     reverb: {
       enabled: data.reverb.enabled,
       decay: data.reverb.decay,
+      decayCurve: data.reverb.decayCurve,
       preDelay: data.reverb.preDelay,
       dry: data.reverb.dry,
       wet: data.reverb.wet,
@@ -177,7 +178,7 @@ program
   .option('--b <string>', 'Optional song-level track activation masks (space-separated nonnegative decimals; blank disables)')
   .option('-p, --preset <file>', 'JSON preset file to load instead of individual generation parameters')
   .option('--tracks <json>', 'JSON array of tracks with per-track sequence, instrument, filter, echoDelay notation (1/1..1/64T, including D/T variants), and reverb send controls', parseTracksJson)
-  .option('--reverb <json>', 'JSON object with global reverb enabled, decay, preDelay, dry, wet, lowCut, highCut', parseReverbJson)
+  .option('--reverb <json>', 'JSON object with global reverb enabled, decay, decayCurve (0.1..10, default 1), preDelay, dry, wet, lowCut, highCut', parseReverbJson)
   .option('--master-pulse <json>', 'Master Pulse settings JSON: enabled, rateMode, frequency, division, depth, shape, width, edgeMs', parseMasterPulseJson)
   .option('--threads <number>', 'WAV render threads (default: available CPU cores)')
   .option('--verbose', 'Print WAV render and encoding timings')

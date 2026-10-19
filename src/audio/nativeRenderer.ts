@@ -80,7 +80,7 @@ import {
 import { preparePartialOscillator, preparePartialSpectrumOscillator, prepareModulatedSpectrumOscillator } from './native/partialOscillator.js';
 import { normalizeNativeEffectSettings, applyNativeTrackEffects, applyNativeEcho, type NativeEffectSettings } from './native/nativeTrackEffects.js';
 import { createSkewLfoState, getLfoFrequencyHz, sampleLfoAtTime, TEMPO_DIVISION_OPTIONS } from './lfo.js';
-import { createPinkNoiseImpulseChannels } from './reverbImpulse.js';
+import { createPinkNoiseImpulseChannels, normalizeReverbDecayCurve } from './reverbImpulse.js';
 import { convolveInto } from './native/convolution.js';
 import { planNativeVoices } from './native/nativeVoices.js';
 import { sampleAmplitudeEnvelope, createNativePitchEnvelope, nativeUnisonGain } from './native/nativeEnvelope.js';
@@ -241,6 +241,8 @@ function normalizeTimeWarpQuantize(value: number | undefined, fallback: number):
 export interface GenerateReverbOptions {
   enabled?: boolean;
   decay?: number;
+  /** Decay curvature (0.1 to 10): 1 is exponential; lower fades earlier, higher holds longer. */
+  decayCurve?: number;
   preDelay?: number;
   /** Dry (unprocessed) level in dB (-96 to 12). */
   dry?: number;
@@ -642,6 +644,7 @@ function normalizeReverb(options: GenerateOptions): NormalizedReverb {
   return {
     enabled: Boolean(reverb.enabled ?? true),
     decay: clamp(reverb.decay ?? 3, 0.1, 30),
+    decayCurve: normalizeReverbDecayCurve(reverb.decayCurve),
     preDelay: clamp(reverb.preDelay ?? 0.02, 0, 1),
     dry: clamp(reverb.dry ?? 0, -96, 12),
     wet: clamp(reverb.wet ?? -7, -96, 0),
@@ -921,7 +924,7 @@ export function applyReverbSend(left: Float32Array, right: Float32Array, sendLef
     sendRight[frame] = highCut[1](lowCut[1](sendRight[frame]));
   }
 
-  const impulses = createPinkNoiseImpulseChannels(reverb.decay, reverb.preDelay, sampleRate);
+  const impulses = createPinkNoiseImpulseChannels(reverb.decay, reverb.preDelay, sampleRate, reverb.decayCurve);
   const wetGain = dbToGain(reverb.wet);
   convolveInto(sendLeft, impulses[0], left, wetGain);
   convolveInto(sendRight, impulses[1], right, wetGain);

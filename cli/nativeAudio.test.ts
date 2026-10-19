@@ -250,6 +250,40 @@ test('shared reverb impulses retain pre-delay, stereo seeds and browser RMS cali
   }
 });
 
+test('reverb curvature moves energy earlier or later without changing timing or calibration', () => {
+  const sampleRate = 48000, preDelayFrames = 960;
+  const original = createPinkNoiseImpulseChannels(0.5, 0.02, sampleRate);
+  assert.deepEqual(original, createPinkNoiseImpulseChannels(0.5, 0.02, sampleRate, 1));
+  const centroids = [0.1, 0.5, 1, 2, 10].map(curve => {
+    const channels = createPinkNoiseImpulseChannels(0.5, 0.02, sampleRate, curve);
+    assert.equal(channels[0].length, original[0].length);
+    assert.ok(channels[0].subarray(0, preDelayFrames).every(sample => sample === 0));
+    assert.notDeepEqual(channels[0], channels[1]);
+    let power = 0, weightedPower = 0;
+    for (const channel of channels) for (let frame = 0; frame < channel.length; frame++) {
+      assert.ok(Number.isFinite(channel[frame]));
+      power += channel[frame] ** 2;
+      weightedPower += channel[frame] ** 2 * (frame - preDelayFrames);
+    }
+    assert.ok(Math.abs(Math.sqrt(power / (2 * channels[0].length)) - 0.00125) < 1e-10);
+    return weightedPower / power;
+  });
+  for (let i = 1; i < centroids.length; i++) assert.ok(centroids[i] > centroids[i - 1]);
+});
+
+test('native WAV rendering and preset conversion honor custom reverb curvature', async () => {
+  const project = normalizePresetData({ bpm: 240, tracks: [{ ...source, sequenceInput: '1', reverbWet: 0 }],
+    reverb: { enabled: true, decay: 0.1, preDelay: 0.02, decayCurve: 2, dry: -96, wet: 0 } });
+  const options = presetDataToGeneratorInput(project);
+  assert.equal(options.reverb.decayCurve, 2);
+  const curved = await generateWav(options);
+  const original = await generateWav({ ...options, reverb: { ...options.reverb, decayCurve: 1 } });
+  const legacy = await generateWav({ ...options, reverb: { ...options.reverb, decayCurve: undefined } });
+  assert.deepEqual(legacy, original);
+  assert.equal(curved.length, original.length);
+  assert.notDeepEqual(curved, original);
+});
+
 test('overlapping polyphonic notes steal the oldest held voice and mono legato keeps its envelope', () => {
   const events = [
     { time: 0, duration: 3, velocity: 0.7, notes: [60, 64], order: 0 },

@@ -824,6 +824,7 @@
           <ReverbControls
             v-model:enabled="draftReverb.enabled"
             v-model:decay="draftReverb.decay"
+            v-model:decay-curve="draftReverb.decayCurve"
             v-model:pre-delay="draftReverb.preDelay"
             v-model:dry="draftReverb.dry"
             v-model:wet="draftReverb.wet"

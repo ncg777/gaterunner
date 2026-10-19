@@ -1,7 +1,7 @@
 import { markRaw } from 'vue';
 import * as Tone from 'tone';
 import { getMasterBus } from './masterBus.js';
-import { createPinkNoiseImpulseChannels } from './reverbImpulse.js';
+import { createPinkNoiseImpulseChannels, DEFAULT_REVERB_DECAY_CURVE, normalizeReverbDecayCurve } from './reverbImpulse.js';
 
 export interface ReverbAudioChain {
   lowCut: Tone.Filter;
@@ -14,21 +14,22 @@ export interface ReverbAudioChain {
 
 export interface ReverbSettings {
   decay: number;
+  decayCurve?: number;
   preDelay: number;
   lowCutFrequency: number;
   highCutFrequency: number;
 }
 
-export function createPinkNoiseImpulse(decay: number, preDelay: number): AudioBuffer {
+export function createPinkNoiseImpulse(decay: number, preDelay: number, decayCurve = DEFAULT_REVERB_DECAY_CURVE): AudioBuffer {
   const context = Tone.getContext();
-  const channels = createPinkNoiseImpulseChannels(decay, preDelay, context.sampleRate);
+  const channels = createPinkNoiseImpulseChannels(decay, preDelay, context.sampleRate, decayCurve);
   const impulse = context.createBuffer(2, channels[0].length, context.sampleRate);
   channels.forEach((samples, channel) => impulse.getChannelData(channel).set(samples));
   return impulse;
 }
 
 function getImpulseKey(settings: ReverbSettings): string {
-  return `${settings.decay}:${settings.preDelay}:${Tone.getContext().sampleRate}`;
+  return `${settings.decay}:${settings.preDelay}:${normalizeReverbDecayCurve(settings.decayCurve)}:${Tone.getContext().sampleRate}`;
 }
 
 export function createReverbAudioChain(settings: ReverbSettings): ReverbAudioChain {
@@ -92,6 +93,6 @@ export function disposeReverbAudioChain(chain: ReverbAudioChain) {
 function createConvolver(settings: ReverbSettings): Tone.Convolver {
   // Tone loads constructor buffers before applying normalize. Set the flag first.
   const convolver = markRaw(new Tone.Convolver({ normalize: false })) as Tone.Convolver;
-  convolver.buffer = new Tone.ToneAudioBuffer(createPinkNoiseImpulse(settings.decay, settings.preDelay));
+  convolver.buffer = new Tone.ToneAudioBuffer(createPinkNoiseImpulse(settings.decay, settings.preDelay, settings.decayCurve));
   return convolver;
 }

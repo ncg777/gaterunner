@@ -1,3 +1,15 @@
+export const DEFAULT_REVERB_DECAY_CURVE = 1;
+export const REVERB_DECAY_CURVE_MIN = 0.1;
+export const REVERB_DECAY_CURVE_MAX = 10;
+
+export function normalizeReverbDecayCurve(value: unknown): number {
+  const numeric = typeof value === 'number' ? value
+    : typeof value === 'string' && value.trim() !== '' ? Number(value) : Number.NaN;
+  return Number.isFinite(numeric)
+    ? Math.min(REVERB_DECAY_CURVE_MAX, Math.max(REVERB_DECAY_CURVE_MIN, numeric))
+    : DEFAULT_REVERB_DECAY_CURVE;
+}
+
 function createSeededRandom(seed: number): () => number {
   let state = seed >>> 0;
   return () => {
@@ -6,7 +18,7 @@ function createSeededRandom(seed: number): () => number {
   };
 }
 
-function fillPinkNoise(channel: Float32Array, startFrame: number, decayFrames: number, seed: number) {
+function fillPinkNoise(channel: Float32Array, startFrame: number, decayFrames: number, seed: number, decayCurve: number) {
   const random = createSeededRandom(seed);
   let b0 = 0;
   let b1 = 0;
@@ -28,7 +40,10 @@ function fillPinkNoise(channel: Float32Array, startFrame: number, decayFrames: n
     b6 = white * 0.115926;
 
     const progress = frame / Math.max(1, decayFrames - 1);
-    const envelope = Math.exp(-6 * progress);
+    // Bend progress while retaining both endpoints and the original fade at 1.
+    const curvedProgress = decayCurve === 1 ? progress
+      : progress / (progress + decayCurve * (1 - progress));
+    const envelope = Math.exp(-6 * curvedProgress);
     channel[startFrame + frame] = pink * 0.11 * envelope;
   }
 }
@@ -57,14 +72,16 @@ function normalizeImpulse(channels: Float32Array[]) {
   }
 }
 
-export function createPinkNoiseImpulseChannels(decay: number, preDelay: number, sampleRate: number): [Float32Array, Float32Array] {
+/** Curve < 1 fades earlier; curve > 1 holds longer. Duration and pre-delay stay fixed. */
+export function createPinkNoiseImpulseChannels(decay: number, preDelay: number, sampleRate: number, decayCurve = DEFAULT_REVERB_DECAY_CURVE): [Float32Array, Float32Array] {
   const preDelayFrames = Math.round(Math.max(0, preDelay) * sampleRate);
   const decayFrames = Math.max(1, Math.round(Math.max(0.1, decay) * sampleRate));
   const channels: [Float32Array, Float32Array] = [
     new Float32Array(preDelayFrames + decayFrames), new Float32Array(preDelayFrames + decayFrames),
   ];
-  fillPinkNoise(channels[0], preDelayFrames, decayFrames, 0x7f4a7c15);
-  fillPinkNoise(channels[1], preDelayFrames, decayFrames, 0x3c6ef372);
+  const curve = normalizeReverbDecayCurve(decayCurve);
+  fillPinkNoise(channels[0], preDelayFrames, decayFrames, 0x7f4a7c15, curve);
+  fillPinkNoise(channels[1], preDelayFrames, decayFrames, 0x3c6ef372, curve);
   normalizeImpulse(channels);
   return channels;
 }

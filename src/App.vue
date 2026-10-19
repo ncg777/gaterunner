@@ -766,6 +766,7 @@ export default defineComponent({
       selectedTrackId: initialState.selectedTrackId as string | null,
       reverbEnabled: initialState.draft.reverb.enabled,
       reverbDecay: initialState.draft.reverb.decay,
+      reverbDecayCurve: initialState.draft.reverb.decayCurve,
       reverbPreDelay: initialState.draft.reverb.preDelay,
       reverbDry: initialState.draft.reverb.dry,
       reverbWet: initialState.draft.reverb.wet,
@@ -863,6 +864,7 @@ export default defineComponent({
       return {
         enabled: this.reverbEnabled,
         decay: this.reverbDecay,
+        decayCurve: this.reverbDecayCurve,
         preDelay: this.reverbPreDelay,
         dry: this.reverbDry,
         wet: this.reverbWet,
@@ -1688,6 +1690,7 @@ export default defineComponent({
         reverb: {
           enabled: this.reverbEnabled,
           decay: this.reverbDecay,
+          decayCurve: this.reverbDecayCurve,
           preDelay: this.reverbPreDelay,
           dry: this.reverbDry,
           wet: this.reverbWet,
@@ -1710,6 +1713,7 @@ export default defineComponent({
       this.bitmaskSequenceInput = normalized.bitmaskSequenceInput;
       this.reverbEnabled = normalized.reverb.enabled;
       this.reverbDecay = normalized.reverb.decay;
+      this.reverbDecayCurve = normalized.reverb.decayCurve;
       this.reverbPreDelay = normalized.reverb.preDelay;
       this.reverbDry = normalized.reverb.dry;
       this.reverbWet = normalized.reverb.wet;
@@ -1773,6 +1777,7 @@ export default defineComponent({
       this.invalidateDevelopmentPlayback();
       this.reverbEnabled = nextReverb.enabled;
       this.reverbDecay = nextReverb.decay;
+      this.reverbDecayCurve = nextReverb.decayCurve;
       this.reverbPreDelay = nextReverb.preDelay;
       this.reverbDry = nextReverb.dry;
       this.reverbWet = nextReverb.wet;
@@ -1848,6 +1853,7 @@ export default defineComponent({
 
       this.reverbChain = createReverbAudioChain({
         decay: this.reverbDecay,
+        decayCurve: this.reverbDecayCurve,
         preDelay: this.reverbPreDelay,
         lowCutFrequency: this.midiToFrequency(this.reverbLowCut),
         highCutFrequency: this.midiToFrequency(this.reverbHighCut),
@@ -2553,6 +2559,7 @@ export default defineComponent({
       const chain = this.getOrCreateReverbChain();
       updateReverbAudioChain(chain, {
         decay: this.reverbDecay,
+        decayCurve: this.reverbDecayCurve,
         preDelay: this.reverbPreDelay,
         lowCutFrequency: this.midiToFrequency(this.reverbLowCut),
         highCutFrequency: this.midiToFrequency(this.reverbHighCut),

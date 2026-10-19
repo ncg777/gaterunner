@@ -1,4 +1,5 @@
 import { normalizeTonewheelDrawbars, normalizeTonewheelWavetable } from './audio/sourceSettings.js';
+import { DEFAULT_REVERB_DECAY_CURVE, normalizeReverbDecayCurve } from './audio/reverbImpulse.js';
 import type { ModulationSettings } from './audio/modulation.js';
 import { readPresetLibraryStorage, writePresetLibraryStorage } from './presetStorage.js';
 import { normalizeDevelopment, normalizeStudio, type TrackDevelopment, type ProjectStudio } from './domain/development.js';
@@ -230,6 +231,7 @@ export const TONEWHEEL_DRAWBAR_LABELS = ["16'", "5 1/3'", "8'", "4'", "2 2/3'", 
 export interface PresetReverbData {
   enabled: boolean;
   decay: number;
+  decayCurve: number;
   preDelay: number;
   dry: number;
   wet: number;
@@ -470,6 +472,7 @@ export const DEFAULT_PRESET_DATA: PresetData = {
   reverb: {
   enabled: true,
   decay: 8,
+  decayCurve: DEFAULT_REVERB_DECAY_CURVE,
   preDelay: 0.04,
   dry: 0,
   wet: -2,
@@ -673,6 +676,7 @@ export function clonePresetReverbData(reverb: PresetReverbData): PresetReverbDat
   return {
     enabled: reverb.enabled,
     decay: reverb.decay,
+    decayCurve: normalizeReverbDecayCurve(reverb.decayCurve),
     preDelay: reverb.preDelay,
     dry: reverb.dry,
     wet: reverb.wet,
@@ -696,6 +700,7 @@ export function normalizePresetReverbData(value: unknown): PresetReverbData {
   return {
     enabled: raw.enabled ?? DEFAULT_PRESET_DATA.reverb.enabled,
     decay: clamp(parseNumber(raw.decay, DEFAULT_PRESET_DATA.reverb.decay), 0.1, 30),
+    decayCurve: normalizeReverbDecayCurve(raw.decayCurve),
     preDelay: clamp(parseNumber(raw.preDelay, DEFAULT_PRESET_DATA.reverb.preDelay), 0, 1),
     dry: clamp(parseNumber(raw.dry, DEFAULT_PRESET_DATA.reverb.dry), -96, 12),
     wet: clamp(parseNumber(raw.wet, DEFAULT_PRESET_DATA.reverb.wet), -96, 12),
@@ -1109,6 +1114,7 @@ export function arePresetDataEqual(left: PresetData, right: PresetData): boolean
     || left.tracks.length !== right.tracks.length
     || left.reverb.enabled !== right.reverb.enabled
     || left.reverb.decay !== right.reverb.decay
+    || left.reverb.decayCurve !== right.reverb.decayCurve
     || left.reverb.preDelay !== right.reverb.preDelay
     || left.reverb.dry !== right.reverb.dry
     || left.reverb.wet !== right.reverb.wet
