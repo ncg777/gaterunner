@@ -77,3 +77,8 @@ export const GENERATOR_MODULATION = {
   grainSize: { title: 'Grain size', unit: 'seconds offset', min: -0.495, max: 0.495, step: 0.005 },
 } as const;
 export type GeneratorModulation = Partial<Record<keyof typeof GENERATOR_MODULATION, number>>;
+/** Each DSP reads only its own controls; leave the other AudioParams at their defaults. */
+export const GENERATOR_MODE_MODULATION: Record<GeneratorMode, readonly (keyof GeneratorModulation)[]> = {
+  modal: ['modalDamping'], pulse: ['pulseWidth'], fm: ['fmIndex'], pluck: ['pluckBrightness'],
+  granular: ['grainPosition', 'grainSize'],
+};

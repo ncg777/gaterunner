@@ -1,5 +1,6 @@
 import * as Tone from 'tone';
-import { GENERATOR_MODULATION, isGeneratorMode, type GeneratorMode } from './generatorSettings.js';
+import { GeneratorInputGate } from './generatorInputGate';
+import { GENERATOR_MODE_MODULATION, isGeneratorMode, type GeneratorMode, type GeneratorModulation } from './generatorSettings.js';
 import type { GeneratorSample } from './generatorDSP.js';
 import { normalizeSynthEngine, resolveGeneratorEngine, resolveSynthMode, type SynthEngineSettings } from './synthEngine.js';
 import { sampleContentHash } from './sampleAssets.js';
@@ -64,14 +65,18 @@ export async function prepareProjectGenerators(context: Tone.BaseContext, tracks
 export class GeneratorSource {
   readonly output: Tone.Gain;
   private node?: AudioWorkletNode;
+  private inputsConnected = false;
+  private inputGate: GeneratorInputGate;
   private disposed = false;
   private initializing = false;
   private pending: unknown[] = [];
   private settings: SynthEngineSettings;
-  private readonly keys = Object.keys(GENERATOR_MODULATION) as (keyof typeof GENERATOR_MODULATION)[];
+  private keys: readonly (keyof GeneratorModulation)[];
   constructor(private context: Tone.BaseContext, private frequency: Tone.Signal<'frequency'>,
     private detune: Tone.Signal<'cents'>, settings: SynthEngineSettings) {
     this.settings = settings;
+    this.inputGate = new GeneratorInputGate(context, () => this.connectInputs(), () => this.disconnectInputs());
+    this.keys = GENERATOR_MODE_MODULATION[settings.synthMode as GeneratorMode];
     this.output = new Tone.Gain({ context, gain: 1 });
     if (this.isPrepared()) this.connectNode();
     else void this.initialize();
@@ -84,10 +89,20 @@ export class GeneratorSource {
       processorOptions: { mode: this.settings.synthMode as GeneratorMode, settings: this.settings.generatorEngines },
     });
     this.node = node;
-    Tone.connect(this.frequency, node, 0, 0); Tone.connect(this.detune, node, 0, 1);
+    if (this.inputGate.awake) this.connectInputs();
     Tone.connect(node, this.output);
     for (const event of this.pending) node.port.postMessage(event);
     this.pending = [];
+  }
+  private connectInputs() {
+    if (!this.node || this.inputsConnected) return;
+    Tone.connect(this.frequency, this.node, 0, 0); Tone.connect(this.detune, this.node, 0, 1);
+    this.inputsConnected = true;
+  }
+  private disconnectInputs() {
+    if (!this.node || !this.inputsConnected) return;
+    Tone.disconnect(this.frequency, this.node, 0, 0); Tone.disconnect(this.detune, this.node, 0, 1);
+    this.inputsConnected = false;
   }
   private async initialize() {
     if (this.initializing || this.disposed || (this.settings.synthMode === 'granular' && !this.settings.generatorSample)) return;
@@ -104,6 +119,8 @@ export class GeneratorSource {
   set(settings: SynthEngineSettings) {
     const sampleChanged = settings.generatorSample?.hash !== this.settings.generatorSample?.hash;
     this.settings = settings;
+
+    this.keys = GENERATOR_MODE_MODULATION[settings.synthMode as GeneratorMode];
     const apply = () => {
       if (this.disposed || this.settings !== settings) return;
       if (settings.synthMode === 'granular' && !settings.generatorSample) {
@@ -120,11 +137,12 @@ export class GeneratorSource {
   note(_frequency: number, _time: number, _fromFrequency?: number, _glideSeconds = 0) { /* Audio input buses carry scheduled pitch and glide. */ }
   attack(time: number, mono = false, stopTime?: number) {
     if (this.settings.synthMode === 'granular' && !this.settings.generatorSample) return;
+    this.inputGate.attack(time, mono, stopTime);
     this.send({ type: 'attack', frame: this.frame(time), mono, stop: stopTime === undefined ? undefined : this.frame(stopTime) });
   }
-  release(time: number, ampRelease?: number) { this.send({ type: 'release', frame: this.frame(time), stop: ampRelease === undefined ? undefined : this.frame(time + ampRelease) }); }
-  cancel(time: number) { this.send({ type: 'cancel', frame: this.frame(time) }); }
-  reset(time: number) { this.send({ type: 'reset', frame: this.frame(time) }); }
+  release(time: number, ampRelease?: number) { this.inputGate.release(time, ampRelease); this.send({ type: 'release', frame: this.frame(time), stop: ampRelease === undefined ? undefined : this.frame(time + ampRelease) }); }
+  cancel(time: number) { this.inputGate.cancel(time); this.send({ type: 'cancel', frame: this.frame(time) }); }
+  reset(time: number) { this.inputGate.reset(time); this.send({ type: 'reset', frame: this.frame(time) }); }
   refresh(time: number) { this.keys.forEach(key => this.node?.parameters.get(key)?.cancelAndHoldAtTime(time)); }
   write(values: ModulationValues, timing: ModulationTime, ramp: boolean) {
     for (const key of this.keys) {
@@ -137,9 +155,9 @@ export class GeneratorSource {
   }
   dispose() {
     if (this.disposed) return;
-    this.disposed = true; this.pending = [];
+    this.disposed = true; this.pending = []; this.inputGate.dispose();
     if (this.node) {
-      Tone.disconnect(this.frequency, this.node, 0, 0); Tone.disconnect(this.detune, this.node, 0, 1);
+      this.disconnectInputs();
       this.node.port.postMessage({ type: 'dispose' }); this.node.disconnect(); this.node.port.close();
     }
     this.output.dispose();

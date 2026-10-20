@@ -17,6 +17,7 @@ export class VoiceModulation {
   private songStarts: number[];
   private baseQ = 1;
   private baseGain = 0;
+  private targets = new Set<keyof ModulationValues>();
   private readonly tick = () => this.schedule();
   private readonly songStart = (time: number) => {
     this.songStarts.push(time);
@@ -41,6 +42,9 @@ export class VoiceModulation {
 
   set(settings: ModulationSettings, q: number, gain: number): void {
     this.matrix = compileModulation(settings);
+    const sources = new Set(settings.sources.filter(source => source.enabled).map(source => source.id));
+    this.targets = new Set(settings.routes.filter(route => route.enabled && route.amount !== 0 && sources.has(route.source))
+      .map(route => route.target));
     this.baseQ = q;
     this.baseGain = gain;
     this.refresh(this.context.now());
@@ -74,9 +78,22 @@ export class VoiceModulation {
     if (noteStart === undefined) Object.assign(v, emptyModulationValues());
     else this.matrix.sample(timing, v);
     this.spectral?.write(v, timing, ramp);
-    const values = [v.pitch * 100, v.cutoff * 100, Math.SQRT2 * 10 ** (v.level / 20), v.pan,
-      Math.max(0.0001, Math.min(30, this.baseQ + v.resonance)), Math.max(-48, Math.min(48, this.baseGain + v.filterGain))];
-    this.parameters().forEach((p, i) => ramp ? p.linearRampToValueAtTime(values[i], time) : p.setValueAtTime(values[i], time));
+    // Static parameters are initialized on refresh. Only connected routes need
+    // 200 Hz ramps; scheduling constants on every pooled voice bloats the graph's
+    // automation queues and spends time in native AudioParam calls.
+    if (!ramp) {
+      this.pitch.setValueAtTime(v.pitch * 100, time); this.cutoff.setValueAtTime(v.cutoff * 100, time);
+      this.gain.gain.setValueAtTime(Math.SQRT2 * 10 ** (v.level / 20), time); this.pan.pan.setValueAtTime(v.pan, time);
+      this.filter.Q.setValueAtTime(Math.max(0.0001, Math.min(30, this.baseQ + v.resonance)), time);
+      this.filter.gain.setValueAtTime(Math.max(-48, Math.min(48, this.baseGain + v.filterGain)), time);
+    } else {
+      if (this.targets.has('pitch')) this.pitch.linearRampToValueAtTime(v.pitch * 100, time);
+      if (this.targets.has('cutoff')) this.cutoff.linearRampToValueAtTime(v.cutoff * 100, time);
+      if (this.targets.has('level')) this.gain.gain.linearRampToValueAtTime(Math.SQRT2 * 10 ** (v.level / 20), time);
+      if (this.targets.has('pan')) this.pan.pan.linearRampToValueAtTime(v.pan, time);
+      if (this.targets.has('resonance')) this.filter.Q.linearRampToValueAtTime(Math.max(0.0001, Math.min(30, this.baseQ + v.resonance)), time);
+      if (this.targets.has('filterGain')) this.filter.gain.linearRampToValueAtTime(Math.max(-48, Math.min(48, this.baseGain + v.filterGain)), time);
+    }
   }
   private refresh(time: number): void {
     time = Math.max(this.context.currentTime, Math.min(time, this.context.now()));

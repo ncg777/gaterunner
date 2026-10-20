@@ -1,5 +1,5 @@
 import { GeneratorDSP, type GeneratorSample } from './generatorDSP.js';
-import { GENERATOR_MODULATION, type GeneratorEngines, type GeneratorMode, type GeneratorModulation } from './generatorSettings.js';
+import { GENERATOR_MODULATION, GENERATOR_MODE_MODULATION, type GeneratorEngines, type GeneratorMode, type GeneratorModulation } from './generatorSettings.js';
 
 // AudioWorklet globals are absent from TypeScript's DOM library.
 declare const sampleRate: number;
@@ -13,7 +13,6 @@ type Event = { type: 'attack' | 'release' | 'reset' | 'settings' | 'cancel'; fra
   mono?: boolean; settings?: GeneratorEngines };
 // All voices in a context share one copy of each imported PCM asset.
 const assets = new Map<string, GeneratorSample>();
-const modulationKeys = Object.keys(GENERATOR_MODULATION) as (keyof GeneratorModulation)[];
 class GeneratorProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
     return Object.entries(GENERATOR_MODULATION).map(([name, bounds]) => ({ name, defaultValue: 0,
@@ -29,10 +28,12 @@ class GeneratorProcessor extends AudioWorkletProcessor {
   private releaseFrame = Infinity;
   private end = Infinity;
   private values: GeneratorModulation = {};
+  private modulationKeys: readonly (keyof GeneratorModulation)[] = [];
   constructor(options?: AudioWorkletNodeOptions) {
     super(options);
     const initial = options?.processorOptions as { mode?: GeneratorMode; settings?: GeneratorEngines } | undefined;
     this.mode = initial?.mode;
+    if (this.mode) this.modulationKeys = GENERATOR_MODE_MODULATION[this.mode];
     if (this.mode && initial?.settings) this.dsp = this.create(initial.settings);
     this.port.onmessage = ({ data }) => {
       if (data.type === 'asset') {
@@ -56,9 +57,18 @@ class GeneratorProcessor extends AudioWorkletProcessor {
     if (!this.mode || !this.dsp) return true;
     const output = outputs[0]?.[0];
     if (!output) return true;
+    if (currentFrame >= this.end) this.active = false;
+    // Retained voice pools have many silent sources. Keep their scheduled state,
+    // but avoid pitch calculation and per-sample work for entirely silent quanta.
+    if (!this.active && !this.continuous && (!this.events.length || this.events[0].frame >= currentFrame + output.length)) {
+      output.fill(0); return true;
+    }
     const frequencies = inputs[0]?.[0], detunes = inputs[1]?.[0];
     for (let i = 0; i < output.length; i++) {
       const frame = currentFrame + i;
+      if (!this.active && !this.continuous && (!this.events.length || this.events[0].frame > frame)) {
+        output[i] = 0; continue;
+      }
       const frequency = (frequencies?.[i] ?? 0) * 2 * 2 ** ((detunes?.[i] ?? 0) / 1200);
       while (this.events.length && this.events[0].frame <= frame) {
         const event = this.events.shift()!;
@@ -85,7 +95,7 @@ class GeneratorProcessor extends AudioWorkletProcessor {
       }
       if (frame >= this.end) this.active = false;
       if (!this.active && !this.continuous) { output[i] = 0; continue; }
-      for (const key of modulationKeys) {
+      for (const key of this.modulationKeys) {
         const p = parameters[key]; this.values[key] = p.length === 1 ? p[0] : p[i];
       }
       // Mono oscillators keep phase/string state across gaps. Granular stops launching

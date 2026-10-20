@@ -54,3 +54,18 @@ test('live send automation schedules a bounded window in song time and releases 
   assert.ok(calls.at(-1)!.value > calls[0].value);
   dispose(); assert.equal(handlers.size, 0); assert.equal(cancelled, true);
 });
+
+test('constant developed sends schedule once instead of adding a permanent control clock', () => {
+  const input = project(), d = input.tracks[0].development!;
+  d.automation = [{ id: 'send', target: 'reverbWet', clock: 'song', interpolation: 'smooth',
+    points: [{ beat: 0, value: -12 }, { beat: 352, value: -12 }] }];
+  const handlers = new Map<string, (...args: number[]) => void>(), values: number[] = [];
+  const context = { now: () => 10, on: (event: string, cb: () => void) => handlers.set(event, cb), off: () => {},
+    transport: { on: (event: string, cb: () => void) => handlers.set(event, cb), off: () => {} } };
+  const send = { gain: { setValueAtTime: (value: number) => values.push(value), cancelAndHoldAtTime() {} } };
+  const dispose = scheduleLiveDevelopmentSends(context as never, input, new Map([[input.tracks[0].id, send as never]]));
+  handlers.get('start')!(10);
+  assert.equal(handlers.has('tick'), false);
+  assert.deepEqual(values, [10 ** ((-12 + input.reverb.wet) / 20)]);
+  dispose();
+});

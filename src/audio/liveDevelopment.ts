@@ -28,23 +28,32 @@ export function scheduleLiveDevelopmentSends(context: Tone.BaseContext, project:
   const controls = project.tracks.flatMap(track => {
     const send = sends.get(track.id), d = track.development;
     if (!send || !d?.enabled || !d.automation.some(curve => curve.target === 'reverbWet')) return [];
-    return [{ send, at: compileControl(d, 'reverbWet', track.reverbWet) }];
+    const curve = d.automation.filter(curve => curve.target === 'reverbWet').at(-1)!;
+    const first = curve.points[0];
+    const constant = first?.beat === 0 && curve.points.every(point => point.value === first.value)
+      ? Number(first.value) : undefined;
+    return [{ send, at: compileControl(d, 'reverbWet', track.reverbWet), constant }];
   });
   if (!controls.length) return () => {};
   const interval = 1 / 200;
+  const animated = controls.filter(control => control.constant === undefined);
+  const level = (value: number) => project.reverb.enabled ? 10 ** ((value + project.reverb.wet) / 20) : 0;
   let next = 0, origin = 0, started = false;
   const tick = () => {
     if (!started) return;
     const end = context.now() + interval * 2;
     for (; next <= end; next += interval) {
       const beat = Math.max(0, next - origin) * project.bpm / 60;
-      for (const { send, at } of controls) send.gain.linearRampToValueAtTime(
-        project.reverb.enabled ? 10 ** ((Number(at(beat)) + project.reverb.wet) / 20) : 0, next);
+      for (const { send, at } of animated) send.gain.linearRampToValueAtTime(level(Number(at(beat))), next);
     }
   };
-  const start = (time: number) => { origin = next = time; started = true; tick(); };
+  const start = (time: number) => {
+    origin = next = time; started = true;
+    for (const { send, constant } of controls) if (constant !== undefined) send.gain.setValueAtTime(level(constant), time);
+    if (animated.length) tick();
+  };
   context.transport.on('start', start);
-  context.on('tick', tick);
+  if (animated.length) context.on('tick', tick);
   return () => {
     context.transport.off('start', start); context.off('tick', tick);
     for (const { send } of controls) send.gain.cancelAndHoldAtTime(context.now());

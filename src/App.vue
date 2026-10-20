@@ -565,6 +565,7 @@ import { isMonophonic, limitPolyphony, type GlideCurve, type GlideMode } from '.
 import {
   claimVoices,
   getSynthVoiceCount,
+  getScheduledVoiceCount,
   MAX_POOLED_VOICES,
   MAX_REALTIME_POOLED_VOICES,
   prewarmVoicePool,
@@ -1944,6 +1945,9 @@ export default defineComponent({
       });
     },
     getTrackSynthVoiceCount(track: PresetTrackData, context: Tone.BaseContext): number {
+      const developed = this.developmentSchedule?.tracks.find(entry => entry.track.id === track.id);
+      if (developed && !context.isOffline) return getScheduledVoiceCount(developed.events, track.polyphony,
+        track.release, context.lookAhead);
       const notesPerEvent = this.computeActualNotes(track).reduce((count, notes) => Math.max(count, notes.length), 1);
       return getSynthVoiceCount(
         track.polyphony,

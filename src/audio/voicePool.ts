@@ -42,6 +42,28 @@ export function getSynthVoiceCount(
   return Math.min(ceiling, musicalVoices + eventVoices * reservationIntervals);
 }
 
+/** Size a finite score from sounding notes and their tails, rather than silent grid steps. */
+export function getScheduledVoiceCount(
+  events: readonly { time: number; duration: number; notes: readonly number[];
+    locks?: Record<string, unknown>; settings?: Record<string, unknown> }[],
+  polyphony: number, releaseSeconds: number, lookAheadSeconds: number,
+  maximumVoices = MAX_REALTIME_POOLED_VOICES,
+): number {
+  const minimum = Math.max(1, Math.min(MAX_POOLED_VOICES, Math.round(polyphony)));
+  const changes: { time: number; voices: number }[] = [];
+  for (const event of events) {
+    const count = Math.min(minimum, event.notes.length);
+    if (!count) continue;
+    const release = Math.max(0, Number(event.locks?.release ?? event.settings?.release ?? releaseSeconds));
+    changes.push({ time: event.time, voices: count },
+      { time: event.time + event.duration + release + 2 * lookAheadSeconds + 0.05, voices: -count });
+  }
+  changes.sort((a, b) => a.time - b.time || a.voices - b.voices);
+  let current = 0, peak = minimum;
+  for (const change of changes) { current += change.voices; peak = Math.max(peak, current); }
+  return Math.min(Math.max(minimum, Math.min(MAX_POOLED_VOICES, maximumVoices)), peak);
+}
+
 export interface SoundingNote {
   frequency: number;
   endTime: number;
