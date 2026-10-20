@@ -20,6 +20,10 @@ export async function renderBrowserDevelopment(project: PresetData, options: Dev
     active.addEventListener('message', message); active.addEventListener('error', failed);
     options.signal?.addEventListener('abort', cancel, { once: true });
     const { signal: _signal, onProgress: _progress, cache: _cache, ...serializable } = options;
-    active.postMessage({ id, project: JSON.parse(JSON.stringify(project)), options: serializable });
+    try {
+      active.postMessage({ id, project: JSON.parse(JSON.stringify(project)), options: serializable });
+    } catch (error) {
+      active.terminate(); worker = undefined; cleanup(); reject(error);
+    }
   });
 }

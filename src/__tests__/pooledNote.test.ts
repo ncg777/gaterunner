@@ -3,6 +3,22 @@ import test from 'node:test';
 import type * as Tone from 'tone';
 import { triggerPooledNote } from '../audio/pooledNote';
 
+test('private envelopes are applied only to the newly allocated voice before its attack', () => {
+  const order: string[] = [];
+  const existing = { set() { throw new Error('Existing held voice must not change'); } };
+  const incoming = { set() { order.push('settings'); }, triggerRelease() {} };
+  const pool = {
+    disposed: false, now: () => 0, context: { setTimeout() { return 1; } },
+    _activeVoices: [{ voice: existing, released: false }],
+    _getNextAvailableVoice() { return incoming; },
+    _triggerAttack() { const voice = this._getNextAvailableVoice(); order.push('attack'); this._activeVoices.push({ voice, released: false }); },
+  };
+  const original = pool._getNextAvailableVoice;
+  triggerPooledNote(pool as unknown as Tone.PolySynth, [440], 1, 0, 1, voice => voice.set({ envelope: { attack: 0.012 } }));
+  assert.deepEqual(order, ['settings', 'attack']);
+  assert.equal(pool._getNextAvailableVoice, original);
+});
+
 function fixture() {
   let now = 0;
   let drop = false;

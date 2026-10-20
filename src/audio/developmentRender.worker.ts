@@ -7,7 +7,7 @@ const scope = self as unknown as DedicatedWorkerGlobalScope;
 scope.onmessage = async (message: MessageEvent<{ id: number; project: PresetData; options: DevelopmentRenderOptions }>) => {
   const { id, project, options } = message.data;
   try {
-    const rendered = await renderDevelopment(project, { ...options, cache,
+    const rendered = await renderDevelopment(project, { ...options, cache: options.retainStems === false ? undefined : cache,
       onProgress: progress => scope.postMessage({ id, progress }) });
     const buffers=new Set<ArrayBuffer>();
     [...rendered.channels,...rendered.preMaster,...rendered.stems.flatMap(s=>s.channels)].forEach(c=>buffers.add(c.buffer as ArrayBuffer));

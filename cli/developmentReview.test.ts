@@ -17,6 +17,24 @@ const project = () => normalizePresetData({ bpm: 300, reverb: { enabled: false }
     development: normalizeDevelopment({ enabled: true }) },
 ] });
 
+test('playback discards stems while preserving the complete mix and automation', async () => {
+  const input = project();
+  input.reverb.enabled = true;
+  input.reverb.wet = -12;
+  input.tracks[0].reverbWet = -12;
+  input.tracks[0].development!.automation = [{ id: 'gain', target: 'gain', clock: 'song', interpolation: 'linear',
+    points: [{ beat: 0, value: -24 }, { beat: 1, value: -6 }] }];
+  input.studio = { version: 1, seed: 0, assets: [], returns: [{ id: 'send', name: 'Send', level: -6, chain: [], automation: [] }] };
+  input.tracks[0].development!.sends.send = -12;
+  const exported = await renderDevelopment(input);
+  const playback = await renderDevelopment(input, { retainStems: false });
+  assert.ok(exported.stems.length >= 3);
+  assert.equal(playback.stems.length, 0);
+  assert.deepEqual(playback.preMaster, exported.preMaster);
+  assert.deepEqual(playback.channels, exported.channels);
+  assert.deepEqual(playback.measurements, exported.measurements);
+});
+
 test('later accents retain an inherited tie unless explicitly cleared', async () => {
   const input = project(), d = input.tracks[0].development!;
   d.steps = [{ step: 0, tie: true }, { step: 0, velocity: 0.8 }];

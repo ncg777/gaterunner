@@ -94,6 +94,7 @@ export function compileModulation(settings: ModulationSettings) {
     state: createSkewLfoState(Array.from(source.id).reduce((h, c) => Math.imul(h, 31) + c.charCodeAt(0), 2166136261)),
     routes: settings.routes.filter(r => r.enabled && r.amount !== 0 && r.source === source.id),
   })).filter(s => s.routes.length);
+  const activeTargets = [...new Set(connected.flatMap(source => source.routes.map(route => route.target)))];
   return {
     active: connected.length > 0,
     sample(t: ModulationTime, out = emptyModulationValues()): ModulationValues {
@@ -114,7 +115,7 @@ export function compileModulation(settings: ModulationSettings) {
         }
         for (const route of routes) out[route.target] += value * route.amount;
       }
-      for (const key of TARGET_KEYS) {
+      for (const key of activeTargets) {
         const bounds = MODULATION_TARGETS[key];
         out[key] = Math.max(bounds.min, Math.min(bounds.max, out[key]));
       }

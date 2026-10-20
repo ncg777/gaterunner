@@ -17,6 +17,8 @@ export interface RenderMeasurements { duration: number; sampleRate: number; peak
 export interface RenderStem { id: string; name: string; kind: 'track' | 'lane' | 'return'; trackIndex?: number;
   channels: StereoChannels; recombine: boolean; stage: 'pre-insert' | 'post-insert' | 'wet' }
 export interface DevelopmentRenderOptions { range?: RenderRange; cache?: RenderCache; signal?: AbortSignal;
+  /** Playback needs only the mix; exports retain individual stems by default. */
+  retainStems?: boolean;
   /** Silence selected sources without changing song timing or random identities. */
   mutedTrackIds?: readonly string[];
   laneStems?: boolean; preInsertStems?: boolean; blockFrames?: number;
@@ -97,11 +99,12 @@ export async function renderDevelopment(input: PresetData, options: DevelopmentR
   for (let index = 0; index < project.tracks.length; index++) {
     signal?.throwIfAborted();
     const track = project.tracks[index];
+    options.onProgress?.({ completed: index, total, stage: track.name });
     const key = await renderKey({ track, events: resolved.tracks[index].events, index, duration: session.duration,
       bpm: project.bpm, a4: project.a4, reverb: project.reverb, studio: { ...project.studio, assets: project.studio?.assets.map(a => a.hash) } });
     if (mutedTrackIds.has(track.id)) {
       trackKeys.push(await renderKey({ mutedTrack: key }));
-      stems.push({ id: track.id, name: track.name, kind: 'track', trackIndex: index,
+      if (options.retainStems !== false) stems.push({ id: track.id, name: track.name, kind: 'track', trackIndex: index,
         channels: empty(), recombine: true, stage: 'post-insert' });
       if (options.preInsertStems) stems.push({ id: `${track.id}-pre`, name: `${track.name} · before inserts`,
         kind: 'track', trackIndex: index, channels: empty(), recombine: false, stage: 'pre-insert' });
@@ -128,7 +131,7 @@ export async function renderDevelopment(input: PresetData, options: DevelopmentR
     reverbSettings = raw.reverb;
     workingBufferBytes = Math.max(workingBufferBytes, resultBytes(raw) + frames * 16 * (2 + auxInputs.size + stems.length));
     const channels: StereoChannels = [Float32Array.from(raw.left.subarray(0,frames), v => v * dryGain), Float32Array.from(raw.right.subarray(0,frames), v => v * dryGain)];
-    stems.push({ id: track.id, name: track.name, kind: 'track', trackIndex: index, channels, recombine: true, stage: 'post-insert' });
+    if (options.retainStems !== false) stems.push({ id: track.id, name: track.name, kind: 'track', trackIndex: index, channels, recombine: true, stage: 'post-insert' });
     // Legacy summation rounds once after adding each original double-precision
     // track, and applies the dry trim after summation. Preserve that arithmetic.
     add(preMaster, legacy ? [raw.left,raw.right] : channels);
@@ -153,7 +156,7 @@ export async function renderDevelopment(input: PresetData, options: DevelopmentR
   if (project.reverb.enabled && project.reverb.wet > -96) {
     if(legacy&&reverbSettings)applyReverbSend(preMaster[0],preMaster[1],reverbSend[0],reverbSend[1],reverbSettings,sampleRate,project.a4);
     else add(preMaster, wet);
-    stems.push({ id: 'global-reverb', name: 'Global reverb', kind: 'return', channels: wet, recombine: true, stage: 'wet' }); }
+    if (options.retainStems !== false) stems.push({ id: 'global-reverb', name: 'Global reverb', kind: 'return', channels: wet, recombine: true, stage: 'wet' }); }
   const blockFrames = options.blockFrames ?? 16384;
   if (!Number.isInteger(blockFrames) || blockFrames < 1 || blockFrames > 1_048_576) throw new Error('blockFrames must be 1…1048576');
   for (const [index, aux] of (project.studio?.returns ?? []).entries()) {
@@ -172,7 +175,7 @@ export async function renderDevelopment(input: PresetData, options: DevelopmentR
     }
     signal?.throwIfAborted();
     if(!cached&&reverbSettings)await options.cache?.put(prefixKey,{left:channels[0],right:channels[1],reverbLeft:null,reverbRight:null,sampleRate,a4:project.a4,masterGain:project.masterGain,reverb:reverbSettings});
-    add(preMaster, channels); stems.push({ id: aux.id, name: aux.name, kind: 'return', channels, recombine: true, stage: 'wet' });
+    add(preMaster, channels); if (options.retainStems !== false) stems.push({ id: aux.id, name: aux.name, kind: 'return', channels, recombine: true, stage: 'wet' });
     options.onProgress?.({ completed: project.tracks.length + index + 1, total, stage: aux.name });
   }
   signal?.throwIfAborted();

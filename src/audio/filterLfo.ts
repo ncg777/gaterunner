@@ -1,5 +1,6 @@
 import type * as Tone from 'tone';
 import { createSkewLfoState, sampleLfoAtTime, type LfoWaveform, type LfoPhaseMode } from './lfo.js';
+import { compileControl, type TrackDevelopment } from '../domain/development.js';
 
 export interface FilterLfoOptions {
   enabled: boolean;
@@ -9,6 +10,7 @@ export interface FilterLfoOptions {
   initPhase: number;
   retrigger?: LfoPhaseMode;
   a4?: number;
+  development?: { controls: TrackDevelopment; baseMidi: number; bpm: number };
 }
 
 const CONTROL_INTERVAL = 1 / 200;
@@ -19,11 +21,12 @@ export class FilterLfo {
   private options: FilterLfoOptions | null = null;
   private nextTime = 0;
   private listening = false;
+  private developedCutoff?: (beat: number) => number | string | boolean;
   private noteStarts: number[] = [0];
   private songStarts: number[];
   private readonly tick = () => this.schedule();
   private readonly songStart = (time: number) => {
-    if (this.addStart(this.songStarts, time) && this.options?.retrigger === 'song') {
+    if (this.addStart(this.songStarts, time) && (this.options?.retrigger === 'song' || this.developedCutoff)) {
       this.refresh(Math.max(time, this.filter.context.now()));
     }
   };
@@ -72,8 +75,10 @@ export class FilterLfo {
       return;
     }
     this.options = { ...options };
+    this.developedCutoff = options.development
+      ? compileControl(options.development.controls, 'filterFrequency', options.development.baseMidi) : undefined;
     const time = this.filter.context.now();
-    if (!options.enabled || options.amount === 0) {
+    if (!options.enabled || (options.amount === 0 && !this.developedCutoff)) {
       this.filter.detune.cancelAndHoldAtTime(time);
       this.filter.context.off('tick', this.tick);
       this.listening = false;
@@ -86,7 +91,7 @@ export class FilterLfo {
 
   /** Resume without resetting free/song/note phase. Future reserved notes count as active. */
   wake(time = this.filter.context.now()): void {
-    if (this.listening || !this.options?.enabled || this.options.amount === 0) return;
+    if (this.listening || !this.options?.enabled || (this.options.amount === 0 && !this.developedCutoff)) return;
     // Keep offline scheduling unchanged: native graphs are assembled before rendering.
     if (!this.filter.context.isOffline
       && (this.filter.context.state === 'suspended' || !this.isActive())) return;
@@ -117,8 +122,12 @@ export class FilterLfo {
 
   private detuneAtTime(time: number): number {
     const options = this.options!;
-    const offset = sampleLfoAtTime(this.state, this.localTime(time), options.frequencyHz,
+    let offset = sampleLfoAtTime(this.state, this.localTime(time), options.frequencyHz,
       options.waveform, options.initPhase) * options.amount;
+    if (this.developedCutoff && options.development) {
+      const start = this.songStarts.filter(start => start <= time + 1e-9).at(-1) ?? 0;
+      offset += Number(this.developedCutoff(Math.max(0, time - start) * options.development.bpm / 60)) - options.development.baseMidi;
+    }
     const baseMidi = 69 + 12 * Math.log2(Number(this.filter.frequency.getValueAtTime(time)) / (options.a4 ?? 440));
     return (Math.max(0, Math.min(127, baseMidi + offset)) - baseMidi) * 100;
   }

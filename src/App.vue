@@ -50,8 +50,8 @@
             variant="flat"
             size="small"
             :loading="isStarting"
-            :title="isRunning ? 'Stop (Space)' : 'Play (Space)'"
-            :aria-label="isRunning ? 'Stop playback' : 'Play'"
+            :title="isStarting ? 'Preparing audio; use Stop to cancel' : isRunning ? 'Stop (Space)' : 'Play (Space)'"
+            :aria-label="isStarting ? 'Preparing audio' : isRunning ? 'Stop playback' : 'Play'"
             @click="toggleSequencer"
           />
           <v-btn
@@ -64,7 +64,7 @@
           />
         </div>
         <div class="position-display">
-          <span class="transport-label">{{ isStarting ? 'PREPARING' : isRunning ? 'PLAYING' : 'POSITION' }}</span>
+          <span class="transport-label" role="status">{{ isStarting ? playbackPreparation : isRunning ? 'PLAYING' : 'POSITION' }}</span>
           <strong>{{ transportPosition }}</strong>
         </div>
         <label class="tempo-display">
@@ -512,6 +512,7 @@ import { buildLegacyTrackEvents, type ScheduledEvent } from './domain/scheduling
 import { usesDevelopment, normalizeStudio, type ProjectStudio } from './domain/development';
 import { resolveProjectEvents, resolveProjectEventsWithScale, trackDurationBeats, type ResolvedProject } from './domain/developmentSchedule';
 import { renderBrowserDevelopment } from './audio/browserDevelopment';
+import { canPlayDevelopmentLive, scheduleLiveDevelopmentSends } from './audio/liveDevelopment';
 import ExportProgressDialog from './components/ExportProgressDialog.vue';
 import HelpDialog from './components/HelpDialog.vue';
 import LiveAudioDialog from './components/LiveAudioDialog.vue';
@@ -762,6 +763,8 @@ export default defineComponent({
       developmentSchedule: null as ResolvedProject | null,
       developmentPlayer: null as Tone.Player | null,
       developmentController: null as AbortController | null,
+      developmentSendCleanup: null as (() => void) | null,
+      developmentEndEvent: null as number | null,
       trackMixStates: {} as Record<string, TrackMixState>,
       selectedTrackId: initialState.selectedTrackId as string | null,
       reverbEnabled: initialState.draft.reverb.enabled,
@@ -775,6 +778,7 @@ export default defineComponent({
       allChords: [] as string[],
       isRunning: false,
       isStarting: false,
+      playbackPreparation: 'PREPARING',
       playbackErrorMessage: '',
       showPlaybackError: false,
       audioContextResumeHandler: null as (() => void) | null,
@@ -835,7 +839,8 @@ export default defineComponent({
         this.playbackTimer = window.setInterval(() => {
           this.playbackSeconds = this.developmentPlayer
             ? Math.max(0, Tone.now() - this.playbackOrigin)
-            : Tone.getTransport().seconds % this.loopDurationSeconds;
+            : this.developmentSchedule ? Tone.getTransport().seconds
+              : Tone.getTransport().seconds % this.loopDurationSeconds;
         }, 60);
       }
     },
@@ -1942,7 +1947,8 @@ export default defineComponent({
       const notesPerEvent = this.computeActualNotes(track).reduce((count, notes) => Math.max(count, notes.length), 1);
       return getSynthVoiceCount(
         track.polyphony,
-        track.release,
+        Math.max(track.release, ...(this.developmentSchedule?.tracks.find(entry => entry.track.id === track.id)?.events
+          .map(event => Number(event.locks?.release ?? event.settings?.release ?? track.release)) ?? [])),
         this.getTrackQuant(track),
         context.lookAhead,
         notesPerEvent,
@@ -2382,6 +2388,7 @@ export default defineComponent({
       when: Tone.Unit.Time,
       velocity: number,
       modulationTimeSeconds?: number,
+      eventEnvelope?: { attack: number; decay: number; sustain: number; release: number },
     ) {
       const frequencies = this.getTrackPlaybackFrequencies(track, notes);
       const synth = this.ensureTrackSynth(chain, track);
@@ -2417,7 +2424,8 @@ export default defineComponent({
       if (stolen.length > 0) {
         synth.triggerRelease(stolen, startTime);
       }
-      triggerPooledNote(synth, voiced, synth.toSeconds(duration), startTime, velocity);
+      triggerPooledNote(synth, voiced, synth.toSeconds(duration), startTime, velocity,
+        eventEnvelope ? voice => voice.set({ envelope: eventEnvelope }) : undefined);
     },
     getTrackPlaybackFrequencies(track: PresetTrackData, notes: number[]): number[] {
       return notes.map((note) => this.midiToFrequency(note - 12));
@@ -2755,6 +2763,12 @@ export default defineComponent({
                 lfoWaveform: track.filterLfoWaveform as LfoWaveform,
                 lfoInitPhase: track.filterLfoInitPhase,
                 lfoRetrigger: track.filterLfoRetrigger,
+                development: this.developmentSchedule && !this.useMidiOutput && track.development?.enabled
+                  && track.development.automation.some(curve => curve.target === 'filterFrequency')
+                  ? { controls: { ...track.development,
+                    automation: track.development.automation.filter(curve => curve.target === 'filterFrequency'),
+                    steps: [], patterns: [], sections: [], snapshots: [], snapshotCues: [], samples: [], sends: {},
+                  }, baseMidi: track.filterFrequency, bpm: this.bpm } : undefined,
             },
           } as Parameters<PitchEnvelopeSynth['set']>[0];
           // PolySynth.set typings only expose base SynthOptions; PitchEnvelopeSynth accepts the extras.
@@ -2930,6 +2944,7 @@ export default defineComponent({
         track.filterLfoWaveform,
         track.filterLfoInitPhase,
         track.filterLfoRetrigger,
+        this.developmentSchedule ? JSON.stringify(track.development?.automation) : '',
         this.bpm,
         track.polyphony,
         track.glideTime,
@@ -3079,6 +3094,10 @@ export default defineComponent({
       }
     },
     stopTrackLoops() {
+      this.developmentSendCleanup?.(); this.developmentSendCleanup = null;
+      if (this.developmentEndEvent !== null) {
+        Tone.getTransport().clear(this.developmentEndEvent); this.developmentEndEvent = null;
+      }
       // These parts are disposed immediately. An explicit origin avoids Tone's
       // current transport tick rounding slightly below zero just after Start.
       for (const loop of Object.values(this.trackLoops)) {
@@ -3110,7 +3129,9 @@ export default defineComponent({
       startTime: number,
       additionalGain?: TrackAudioChain['fadeGain']['gain'],
     ) {
-      const activeDuration = track.repeats * this.getTrackRepeatDuration(track, trackNotes);
+      const activeDuration = this.developmentSchedule
+        ? trackDurationBeats(track) * 60 / this.bpm - this.getTrackDelaySeconds(track)
+        : track.repeats * this.getTrackRepeatDuration(track, trackNotes);
       const barSeconds = this.getTrackBarSeconds(track);
       const points = buildTrackFadeEnvelope(
         activeDuration,
@@ -3155,7 +3176,7 @@ export default defineComponent({
 
       this.stopTrackLoops();
 
-      const totalLoopDuration = this.getLoopDurationSecondsFromTrackLengths();
+      const totalLoopDuration = this.developmentSchedule?.duration ?? this.getLoopDurationSecondsFromTrackLengths();
 
       for (const entry of this.allTrackActualNotes) {
         if (!this.isTrackAudible(entry.track.id)) {
@@ -3171,7 +3192,7 @@ export default defineComponent({
         const part = markRaw(new Tone.Part<TrackScheduledEvent>((when, event) => {
           this.playTrackStep(this.trackById.get(trackId) ?? entry.track, event, when);
         }, events));
-        part.loop = true;
+        part.loop = !this.developmentSchedule;
         part.loopStart = 0;
         part.loopEnd = totalLoopDuration;
         part.start(0);
@@ -3190,12 +3211,27 @@ export default defineComponent({
               chain.drumReverbFadeGain.gain,
             );
           }, [{ time: this.getTrackDelaySeconds(entry.track) }]));
-          fadePart.loop = true;
+          fadePart.loop = !this.developmentSchedule;
           fadePart.loopStart = 0;
           fadePart.loopEnd = totalLoopDuration;
           fadePart.start(0);
           this.trackFadeLoops[entry.track.id] = fadePart;
         }
+      }
+      if (this.developmentSchedule && !this.useMidiOutput) {
+        this.developmentSendCleanup = scheduleLiveDevelopmentSends(Tone.getContext(), this.getDraftData(),
+          new Map(Object.entries(this.trackSynths).map(([id, chain]) => [id, chain.reverbSend])));
+      }
+      if (this.developmentSchedule) {
+        const generation = this.playbackGeneration;
+        const tail = Math.max(2, ...this.tracks.map(track => Math.max(track.release, track.filterEnvelopeRelease)),
+          ...this.developmentSchedule.tracks.flatMap(({ track, events }) => events.map(event =>
+            Number(event.locks?.release ?? event.settings?.release ?? track.release))),
+          this.reverbEnabled ? this.reverbPreDelay + this.reverbDecay : 0,
+          ...this.tracks.map(track => track.echoEnabled ? this.getEchoDelaySeconds(track.echoDelay) * (1 + track.echoFeedback * 8) : 0));
+        this.developmentEndEvent = Tone.getTransport().scheduleOnce(when => {
+          Tone.getDraw().schedule(() => { if (generation === this.playbackGeneration) this.stopSequencer(); }, when);
+        }, totalLoopDuration + tail);
       }
     },
     showPlaybackErrorMessage(message: string) {
@@ -3253,6 +3289,7 @@ export default defineComponent({
       }
 
       this.isStarting = true;
+      this.playbackPreparation = 'PREPARING';
       const generation = ++this.playbackGeneration;
       let developmentSignal: AbortSignal | undefined;
       try {
@@ -3282,13 +3319,16 @@ export default defineComponent({
           const controller = markRaw(new AbortController());
           this.developmentController = controller;
           developmentSignal = controller.signal;
-          if (this.useMidiOutput) {
+          if (this.useMidiOutput || canPlayDevelopmentLive(project)) {
             const resolved = await resolveProjectEvents(project);
             controller.signal.throwIfAborted();
             this.developmentSchedule = markRaw(resolved);
             this.developmentController = null;
           } else {
-            const rendered = await renderBrowserDevelopment(project, { signal: controller.signal,
+            const rendered = await renderBrowserDevelopment(project, { signal: controller.signal, retainStems: false,
+              onProgress: ({ completed, total, stage }) => {
+                if (!controller.signal.aborted) this.playbackPreparation = `PREPARING ${Math.round(completed / total * 100)}% · ${stage}`;
+              },
               mutedTrackIds: project.tracks.filter(track => !this.audibleTrackIds.has(track.id)).map(track => track.id) });
             controller.signal.throwIfAborted();
             this.developmentPlayer?.dispose(); this.developmentPlayer = null;
@@ -3405,7 +3445,7 @@ export default defineComponent({
 
       const chain = this.getOrCreateTrackChain(track);
       this.lastScheduledAudioEnd = Math.max(this.lastScheduledAudioEnd,
-        when + noteDuration + Math.max(track.release, track.filterEnvelopeRelease));
+        when + noteDuration + Math.max(Number(event.locks?.release ?? event.settings?.release ?? track.release), track.filterEnvelopeRelease));
       this.scheduleFilterEnvelope(track, arr, when, noteDuration, chain);
       if (track.trackKind === 'rhythmic') {
         for (let index = 0; index < arr.length; index += 1) {
@@ -3415,7 +3455,10 @@ export default defineComponent({
           instrument?.trigger(when, noteVelocities?.[index] ?? vel, noteDuration);
         }
       } else {
-        this.triggerTrackVoice(track, chain, arr, `${noteDuration}s`, when, vel);
+        const envelope = this.developmentSchedule ? Object.fromEntries(
+          (['attack', 'decay', 'sustain', 'release'] as const).map(key => [key,
+            Number(event.locks?.[key] ?? event.settings?.[key] ?? track[key])])) as { attack: number; decay: number; sustain: number; release: number } : undefined;
+        this.triggerTrackVoice(track, chain, arr, `${noteDuration}s`, when, vel, event.time, envelope);
       }
       } finally {
         finishDiagnostic();

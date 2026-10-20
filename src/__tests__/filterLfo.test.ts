@@ -4,6 +4,23 @@ import type * as Tone from 'tone';
 import { FilterLfo } from '../audio/filterLfo.js';
 import { createSkewLfoState, sampleLfoAtTime, LFO_WAVEFORM_OPTIONS } from '../audio/lfo.js';
 import { normalizePresetTrackData, clonePresetTrackData, arePresetDataEqual, normalizePresetData } from '../presets.js';
+import { normalizeDevelopment } from '../domain/development.js';
+
+test('developed cutoff runs without an LFO and follows the song clock across note retriggers', () => {
+  const f = fixture();
+  const lfo = new FilterLfo(f.filter);
+  const controls = normalizeDevelopment({ enabled: true, automation: [{ id: 'cutoff', target: 'filterFrequency',
+    interpolation: 'linear', clock: 'song', points: [{ beat: 0, value: 69 }, { beat: 1, value: 81 }] }] })!;
+  lfo.set({ enabled: true, amount: 0, frequencyHz: 1, waveform: 'sine', initPhase: 0, retrigger: 'note',
+    development: { controls, baseMidi: 69, bpm: 60 } });
+  f.start(0.1); f.advance(0.6);
+  assert.ok(Math.abs(f.filter.detune.getValueAtTime(0.6) - 600) < 1e-6);
+  lfo.triggerNote(0.6); f.advance(0.8);
+  assert.ok(Math.abs(f.filter.detune.getValueAtTime(0.8) - 840) < 1e-6, 'song automation does not restart on each note');
+  lfo.set({ enabled: false, amount: 0, frequencyHz: 1, waveform: 'sine', initPhase: 0 });
+  assert.equal(f.ticks.size, 0);
+  lfo.dispose(); assert.equal(f.starts.size, 0);
+});
 
 function fixture(lookAhead = 0, isOffline = false) {
   let now = 0;

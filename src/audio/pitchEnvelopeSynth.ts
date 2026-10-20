@@ -39,6 +39,7 @@ export interface VoiceFilterOptions {
   lfoWaveform: LfoWaveform;
   lfoInitPhase: number;
   lfoRetrigger: LfoPhaseMode;
+  development?: import('./filterLfo').FilterLfoOptions['development'];
 }
 
 export interface PitchEnvelopeSynthOptions extends SynthOptions {
@@ -550,7 +551,7 @@ export class PitchEnvelopeSynth extends Tone.Synth {
 
   private syncFilterLfo(): void {
     const options = this.voiceFilterOptions;
-    if (options.enabled && options.lfoEnabled && options.lfoAmount !== 0) {
+    if (options.enabled && ((options.lfoEnabled && options.lfoAmount !== 0) || options.development)) {
       this.filterLfo ??= new FilterLfo(this.filter, () => {
         // Allow resonant filter history to decay after the source ends. This is
         // deliberately conservative at low cutoff/high Q, rather than clipping tails.
@@ -559,12 +560,13 @@ export class PitchEnvelopeSynth extends Tone.Synth {
       });
     }
     this.filterLfo?.set({
-      enabled: options.enabled && options.lfoEnabled,
+      enabled: options.enabled && (options.lfoEnabled || !!options.development),
       frequencyHz: options.lfoFrequencyHz,
-      amount: options.lfoAmount,
+      amount: options.lfoEnabled ? options.lfoAmount : 0,
       waveform: options.lfoWaveform,
       initPhase: options.lfoInitPhase,
       retrigger: options.lfoRetrigger,
+      development: options.development,
     });
     if (this.filterLfoNoteStartSeconds >= 0) this.filterLfo?.triggerNote(this.filterLfoNoteStartSeconds);
   }

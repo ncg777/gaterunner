@@ -25,7 +25,9 @@ export function createNativeModulator(settings: EngineLayerSettings, sampleRate:
   let pendingAttack = true, preservePhase = false;
   let nextTiming: Omit<ModulationTime, 'time'> | undefined, retriggerNext = true;
   const sampleFrame = (frequency: number, time: number) => {
-    matrix.sample({ ...timing, time }, values);
+    // An unmodulated layer keeps its initial zero offsets. Avoid walking every
+    // modulation target for every audio sample (including mono silence gaps).
+    if (matrix.active) matrix.sample({ ...timing, time }, values);
     let sum = 0;
     for (const voice of voices) {
       const hz = frequency * voice.ratio * 2 ** (values.pitch / 12);

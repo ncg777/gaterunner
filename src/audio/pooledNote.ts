@@ -11,6 +11,7 @@ interface PooledSynth {
   context: { setTimeout(callback: () => void, delay: number): number };
   _activeVoices: ActiveVoice[];
   _triggerAttack(notes: number[], time: number, velocity: number): void;
+  _getNextAvailableVoice?(): Tone.Synth | undefined;
 }
 
 /** Release the voices allocated to this event, even when equal pitches overlap. */
@@ -20,6 +21,7 @@ export function triggerPooledNote(
   duration: number,
   time: number,
   velocity: number,
+  prepareVoice?: (voice: Tone.Synth) => void,
 ): void {
   const pool = synth as unknown as PooledSynth;
   // Tone 15 adapter: retain the public path if its voice bookkeeping changes.
@@ -36,7 +38,14 @@ export function triggerPooledNote(
   };
   schedule(time, () => {
     const first = pool._activeVoices.length;
-    pool._triggerAttack(notes, time, velocity);
+    const getVoice = pool._getNextAvailableVoice;
+    if (prepareVoice && getVoice) pool._getNextAvailableVoice = () => {
+      const voice = getVoice.call(pool);
+      if (voice) prepareVoice(voice);
+      return voice;
+    };
+    try { pool._triggerAttack(notes, time, velocity); }
+    finally { if (prepareVoice && getVoice) pool._getNextAvailableVoice = getVoice; }
     voices = pool._activeVoices.slice(first);
   });
   schedule(time + duration, () => {
