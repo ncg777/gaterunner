@@ -268,9 +268,12 @@ the previous library and draft. Export JSON libraries for portable backups.
 
 - The selected preset loads into the working draft.
 - Editing controls updates the working draft immediately for playback, MIDI export, and URL sharing.
-- Use **Save** to update the selected preset.
+- Use **Save** to update the selected preset, or enter a name to save an unnamed draft.
 - Use **Save As** to create a new preset from the current draft.
-- Use **New** to create a fresh default preset.
+- Use **New** to start an unnamed draft with the default pattern, or **Clear** for
+  default settings and one empty melodic track. Neither action creates a library
+  entry or changes saved presets. The toolbar shows **Untitled draft** and **Draft**
+  until you save; save or export it before closing or reloading the page.
 - Existing single-preset local storage data is migrated automatically the first time the new preset system loads.
 
 ### Multidimensional Tonewheel Wavetables
