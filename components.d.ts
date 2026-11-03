@@ -7,6 +7,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AutomationCurveEditor: typeof import('./src/components/AutomationCurveEditor.vue')['default']
     CompactModulationFields: typeof import('./src/components/CompactModulationFields.vue')['default']
     DevelopmentPanel: typeof import('./src/components/DevelopmentPanel.vue')['default']
     EditableSlider: typeof import('./src/components/EditableSlider.vue')['default']

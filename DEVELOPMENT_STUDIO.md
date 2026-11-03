@@ -1,5 +1,17 @@
 # Development studio — 2026.10.7
 
+Graphical automation was added in **2026.11.02**. In the **Automation** dock or
+**Routing → Return motion**, each curve has a beat/value graph. Click empty space
+to add a point, drag handles to move them, and use the selected-point inputs or
+expand **All points** for precise numeric editing. Snap defaults to **¼ beat**;
+numeric entry does not snap. **From**, **To**, and **Fit points** change the view
+without changing the saved curve. Focus a handle and use arrow keys (Shift for a
+larger change), or Delete to remove it. Escape cancels a drag. A completed edit
+stops playback; dragging previews locally until release. Note-clock curves show
+beats since each attack; song-clock curves show beats from song start. Discrete
+controls appear as labeled bands and use step interpolation. Snapshot cues retain
+their existing controls, and opening older projects does not rewrite automation.
+
 The optional **Phrases, motion & studio** panel develops a recognizable groove by
 changing phrases, articulation, space and sound. Integer-mask sequences remain the
 primary authoring format. Adding variation does not require adding attacks: ties,

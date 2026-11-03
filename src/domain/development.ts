@@ -84,6 +84,21 @@ export function validControl(value: unknown, definition: ParameterDefinition): v
   return definition.options ? definition.options.includes(value as ControlValue)
     : typeof value === 'number' && Number.isFinite(value) && value >= (definition.min ?? -Infinity) && value <= (definition.max ?? Infinity);
 }
+/** Return editor metadata uses the same bounds as project validation. */
+export function returnParameterDefinitions(aux: AuxiliaryReturn): Record<string, ParameterDefinition> {
+  const definitions: Record<string, ParameterDefinition> = { level: { ...RETURN_PARAMETERS.level, unit: 'dB' } };
+  for (const [index, processor] of aux.chain.entries()) {
+    const keys = processor.type === 'delay' ? ['beats', 'feedback', 'cutoff', 'drive', 'mode']
+      : processor.type === 'filter' ? ['frequency', 'mode'] : processor.type === 'gain' ? ['gain'] : ['drive'];
+    for (const key of keys) {
+      const definition = RETURN_PARAMETERS[key];
+      definitions[`${processor.id}.${key}`] = { ...definition, label: `${index + 1} · ${processor.type} · ${definition.label}`,
+        ...(key === 'mode' ? { options: processor.type === 'delay' ? ['mono', 'stereo', 'ping-pong'] : ['lowpass', 'highpass'] } : {}),
+        ...(key === 'beats' ? { unit: 'beats' } : ['cutoff','frequency'].includes(key) ? { unit: 'Hz' } : ['gain','drive'].includes(key) ? { unit: 'dB' } : {}) };
+    }
+  }
+  return definitions;
+}
 export function seededChoice(seed: number, ...identity: (string | number)[]): number {
   let hash = (seed >>> 0) ^ 2166136261;
   for (const part of identity) for (const c of `${String(part).length}:${part}|`) hash = Math.imul(hash ^ c.charCodeAt(0), 16777619);

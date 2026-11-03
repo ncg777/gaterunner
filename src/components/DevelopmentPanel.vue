@@ -85,17 +85,12 @@
             <v-btn @click="addCurve">Add motion curve</v-btn>
             <p>Base sound → snapshot → timeline → step locks → LFO/envelope modulation. Voice envelopes and discrete settings are captured at each attack.</p>
             <v-card v-for="(curve, i) in development.automation" :key="curve.id" variant="outlined" class="my-2 pa-3">
-              <div class="studio-row"><v-select v-model="curve.target" :items="targetItems" label="Control" @update:model-value="curveTargetChanged(curve)" />
-                <v-select v-model="curve.interpolation" :items="['linear','smooth','step']" label="Curve" @update:model-value="changed" />
+              <div class="studio-row"><v-select :model-value="curve.target" :items="targetItems" label="Control" @update:model-value="curveTargetChanged(curve, $event)" />
+                <v-select v-model="curve.interpolation" :items="definitions[curve.target]?.options ? ['step'] : ['linear','smooth','step']" label="Curve" @update:model-value="changed" />
                 <v-select v-model="curve.clock" :items="definitions[curve.target]?.scope==='bus'?['song']:['song','note']" label="Clock" @update:model-value="changed" />
                 <v-select v-if="track.trackKind==='rhythmic' && definitions[curve.target]?.scope==='voice'" :model-value="curve.lane" :items="laneItems" clearable label="Lane (optional)" @update:model-value="curve.lane=optionalNumber($event); changed()" />
-                <v-btn icon="mdi-plus" @click="curve.points.push({beat:(curve.points.at(-1)?.beat ?? 0)+4,value:curve.points.at(-1)?.value ?? 0}); changed()" />
-                <v-btn icon="mdi-delete" @click="development.automation.splice(i,1); changed()" /></div>
-              <div v-for="(point,j) in curve.points" :key="j" class="studio-row">
-                <v-text-field v-model.number="point.beat" label="Beat" type="number" @change="changed" />
-                <v-select v-if="definitions[curve.target]?.options" v-model="point.value" :items="definitions[curve.target].options!.map(v=>({title:String(v),value:v}))" label="Value" @update:model-value="changed" />
-                <v-text-field v-else v-model.number="point.value" label="Value" type="number" @change="changed" />
-                <v-btn icon="mdi-delete" @click="curve.points.splice(j,1); changed()" /></div>
+                <v-btn icon="mdi-delete" aria-label="Delete motion curve" @click="development.automation.splice(i,1); changed()" /></div>
+              <AutomationCurveEditor :key="`${track.id}:${curve.id}`" :curve="curve" :definition="definitions[curve.target]" :base-value="baseValue(curve.target)" :context="`${track.id}:${tab}`" @change="development.automation[i]=$event; changed()" />
             </v-card>
             <v-select v-model="snapshotTargets" :items="targetItems" label="Settings to capture" multiple chips />
             <v-btn @click="captureSnapshot">Capture sound snapshot</v-btn>
@@ -132,11 +127,10 @@
               <div class="studio-row"><v-select v-model="processorType" :items="['delay','filter','saturation','gain']" label="Processing" /><v-btn @click="addProcessor(aux)">Add processor</v-btn></div>
               <v-expansion-panels><v-expansion-panel title="Return motion"><v-expansion-panel-text>
                 <v-btn @click="aux.automation.push({id:uid('curve'),target:'level',interpolation:'smooth',points:[{beat:0,value:aux.level},{beat:16,value:aux.level}]}); studioChanged()">Add curve</v-btn>
-                <div v-for="(curve,i) in aux.automation" :key="curve.id">
-                  <div class="studio-row"><v-select v-model="curve.target" :items="returnTargets(aux)" label="Return control" @update:model-value="studioChanged" /><v-select v-model="curve.interpolation" :items="['linear','smooth','step']" label="Curve" @update:model-value="studioChanged" /><v-btn icon="mdi-delete" @click="aux.automation.splice(i,1); studioChanged()" /></div>
-                  <v-btn @click="curve.points.push({beat:(curve.points.at(-1)?.beat ?? 0)+4,value:curve.points.at(-1)?.value ?? aux.level}); studioChanged()">Add point</v-btn>
-                  <div v-for="(point,j) in curve.points" :key="j" class="studio-row"><v-text-field v-model.number="point.beat" label="Beat" type="number" @change="studioChanged" /><v-select v-if="curve.target.endsWith('.mode')" :model-value="typeof point.value==='string'?point.value:undefined" :items="returnModes(aux,curve.target)" label="Mode" @update:model-value="point.value=$event; studioChanged()" /><v-text-field v-else v-model.number="point.value" label="Value" type="number" @change="studioChanged" /><v-btn icon="mdi-delete" @click="curve.points.splice(j,1); studioChanged()" /></div>
-                </div>
+                <v-card v-for="(curve,i) in aux.automation" :key="curve.id" variant="outlined" class="my-2 pa-3">
+                  <div class="studio-row"><v-select :model-value="curve.target" :items="returnTargets(aux)" label="Return control" @update:model-value="returnTargetChanged(aux,i,$event)" /><v-select v-model="curve.interpolation" :items="returnParameterDefinitions(aux)[curve.target]?.options ? ['step'] : ['linear','smooth','step']" label="Curve" @update:model-value="studioChanged" /><v-btn icon="mdi-delete" aria-label="Delete return curve" @click="aux.automation.splice(i,1); studioChanged()" /></div>
+                  <AutomationCurveEditor :curve="curve" :definition="returnParameterDefinitions(aux)[curve.target]" :base-value="returnBaseValue(aux,curve.target)" :context="`${track.id}:${tab}:${aux.id}`" @change="aux.automation[i]=$event; studioChanged()" />
+                </v-card>
               </v-expansion-panel-text></v-expansion-panel></v-expansion-panels>
             </v-card>
           </v-window-item>
@@ -174,7 +168,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { clonePresetData, type PresetData } from '../presets';
-import { normalizeDevelopment, normalizeStudio, parameterDefinitions, type ControlValue, type StepControl, type AuxiliaryReturn, type ReturnProcessor, type Automation } from '../domain/development';
+import { normalizeDevelopment, normalizeStudio, parameterDefinitions, returnParameterDefinitions, type ControlValue, type StepControl, type AuxiliaryReturn, type ReturnProcessor, type Automation } from '../domain/development';
+import AutomationCurveEditor from './AutomationCurveEditor.vue';
+import { retargetCurve } from '../domain/automationEditor';
 import { validateProject } from '../domain/projectValidation';
 import { createSampleAsset, importWavAsset } from '../audio/sampleAssets';
 import { renderBrowserDevelopment } from '../audio/browserDevelopment';
@@ -213,14 +209,15 @@ function moveSection(index:number) { const sections=development.value.sections; 
 function addStep() { const pattern = development.value.patterns.find(p=>p.id===stepPattern.value); if(pattern) pattern.steps ??= []; (pattern?.steps ?? development.value.steps).push({step:0,gate:1,offsetBeats:0,condition:{},locks:{}}); changed(); }
 function baseValue(target:string):ControlValue { if(target.startsWith('send.')) return development.value.sends[target.slice(5)] ?? -96;
   if(target.startsWith('modulation.')) return 0;
-  if(target.startsWith('lane.')) { const [,lane,key]=target.split('.'); return track.value.drumLanes[Number(lane)].parameters[key]; }
-  return (track.value as unknown as Record<string,ControlValue>)[target]; }
+  if(target.startsWith('lane.')) { const [,lane,key]=target.split('.'); return track.value.drumLanes[Number(lane)]?.parameters[key] ?? 0; }
+  return (track.value as unknown as Record<string,ControlValue>)[target] ?? 0; }
 function addLock(step:StepControl) { step.locks ??= {}; step.locks[lockTarget.value]=baseValue(lockTarget.value); changed(); }
 function addCurve() { development.value.automation.push({id:uid('motion'),target:'filterFrequency',interpolation:'smooth',clock:'song',points:[{beat:0,value:track.value.filterFrequency},{beat:16,value:track.value.filterFrequency}]}); changed(); }
-function curveTargetChanged(curve:Automation) {
-  const definition=definitions.value[curve.target];
-  if(definition?.scope==='bus'){curve.clock='song';delete curve.lane;}
-  if(definition?.options)curve.interpolation='step';
+function curveTargetChanged(curve:Automation, target:string) {
+  const definition=definitions.value[target];
+  if(!definition)return;
+  const index=development.value.automation.indexOf(curve);
+  development.value.automation[index]=retargetCurve(curve,target,definition,baseValue(target));
   changed();
 }
 function snapshotLaneAllowed(id:string) { return Object.keys(development.value.snapshots.find(s=>s.id===id)?.values ?? {}).every(target=>definitions.value[target]?.scope==='voice'); }
@@ -230,8 +227,9 @@ function laneSend(id:string,lane:number) {return development.value.automation.fi
 function setLaneSend(id:string,lane:number,value:number) {const existing=development.value.automation.find(c=>c.target===`send.${id}`&&c.lane===lane);if(existing)existing.points[0]={beat:0,value};else development.value.automation.push({id:uid('send'),target:`send.${id}`,lane,clock:'song',interpolation:'step',points:[{beat:0,value}]});changed();}
 function addProcessor(aux:AuxiliaryReturn) { const id=uid('effect'); const p:ReturnProcessor=processorType.value==='delay'?{id,type:'delay',beats:0.75,feedback:0.4,cutoff:5000,drive:6,mode:'stereo'}:processorType.value==='filter'?{id,type:'filter',frequency:4000,mode:'lowpass'}:processorType.value==='gain'?{id,type:'gain',gain:0}:{id,type:'saturation',drive:6}; aux.chain.push(p); studioChanged(); }
 function setProcessor(processor:ReturnProcessor,key:string,value:unknown) { (processor as unknown as Record<string,unknown>)[key]=typeof (processor as unknown as Record<string,unknown>)[key]==='number'?Number(value):value; studioChanged(); }
-function returnTargets(aux:AuxiliaryReturn) { return ['level',...aux.chain.flatMap(p=>Object.keys(p).filter(k=>!['id','type'].includes(k)).map(k=>`${p.id}.${k}`))]; }
-function returnModes(aux:AuxiliaryReturn,target:string){return aux.chain.find(p=>target===`${p.id}.mode`)?.type==='delay'?['mono','stereo','ping-pong']:['lowpass','highpass'];}
+function returnTargets(aux:AuxiliaryReturn) { return Object.entries(returnParameterDefinitions(aux)).map(([value,definition])=>({value,title:definition.label})); }
+function returnBaseValue(aux:AuxiliaryReturn,target:string):ControlValue { if(target==='level')return aux.level;const dot=target.lastIndexOf('.');const processor=aux.chain.find(p=>p.id===target.slice(0,dot));return (processor as unknown as Record<string,ControlValue>)?.[target.slice(dot+1)] ?? 0; }
+function returnTargetChanged(aux:AuxiliaryReturn,index:number,target:string) { const definition=returnParameterDefinitions(aux)[target];if(!definition)return;aux.automation[index]=retargetCurve(aux.automation[index],target,definition,returnBaseValue(aux,target));studioChanged(); }
 function removeReturn(index:number) { const id=studio.value.returns[index].id; studio.value.returns.splice(index,1); draft.value.tracks.forEach(t=>{ if(t.development){const d=t.development;delete d.sends[id];d.automation=d.automation.filter(c=>c.target!==`send.${id}`);d.snapshots.forEach(s=>delete s.values[`send.${id}`]);[...d.steps,...d.patterns.flatMap(p=>p.steps ?? [])].forEach(s=>{if(s.locks)delete s.locks[`send.${id}`];});d.patterns.forEach(p=>{if(p.overrides)delete p.overrides[`send.${id}`];});} }); studioChanged(); }
 async function importSamples(event:Event) { error.value=''; try { const files=(event.target as HTMLInputElement).files; for(const file of Array.from(files ?? [])) { const asset=await importWavAsset(new Uint8Array(await file.arrayBuffer()),file.name); if(!studio.value.assets.some(a=>a.hash===asset.hash)) studio.value.assets.push(asset); } studioChanged(); } catch(e){error.value=String(e);} }
 function addSampleSource() { development.value.samples.push({alternatives:[{asset:studio.value.assets[0].hash,minVelocity:0,maxVelocity:1}],selection:'round-robin',start:0,gain:0,rootNote:60,tune:0,attack:0.002,release:0.03,mode:'one-shot',...(track.value.trackKind==='rhythmic'?{lane:0}:{})}); changed(); }
