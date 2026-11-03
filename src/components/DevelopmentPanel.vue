@@ -114,7 +114,7 @@
                 <v-btn icon="mdi-delete" @click="removeReturn(index)" /></div>
               <v-expansion-panels v-if="track.trackKind==='rhythmic'"><v-expansion-panel title="Individual lane sends"><v-expansion-panel-text>
                 <div class="studio-row"><v-text-field v-for="(lane,n) in track.drumLanes" :key="n" :model-value="laneSend(aux.id,n)" type="number" :label="`${lane.voiceId} send (dB)`" @update:model-value="setLaneSend(aux.id,n,Number($event))" /></div>
-                <p>Lane sends are song curves starting at beat 0. Edit their development in Motion.</p>
+                <p>Lane sends are song curves starting at beat 0. Edit them in Automation.</p>
               </v-expansion-panel-text></v-expansion-panel></v-expansion-panels>
               <div v-for="(processor,i) in aux.chain" :key="processor.id" class="studio-row">
                 <span>{{ processor.type }}</span>

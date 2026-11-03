@@ -1,7 +1,10 @@
 {
   "name": "gaterunner",
-  "version": "2026.11.02",
+  "version": "2026.11.03",
   "scripts": {
+    "help:generate": "tsx scripts/generateHelp.ts",
+    "help:check": "tsx scripts/generateHelp.ts --check",
+    "test:help-browser": "node scripts/checkHelpBrowser.mjs",
     "build": "run-p type-check \"build-only {@}\" --",
     "build-only": "vite build",
     "build:cli": "tsc -p tsconfig.cli.json",

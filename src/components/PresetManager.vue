@@ -44,6 +44,7 @@
             <v-list-item title="Export Preset" prepend-icon="mdi-export-variant" @click="exportCurrentPreset" />
             <v-list-item title="Export Library" prepend-icon="mdi-database-export-outline" @click="exportPresetLibrary" />
             <v-list-item title="Import JSON" prepend-icon="mdi-file-import-outline" @click="triggerPresetImport" />
+            <v-list-item title="Presets & sharing help" prepend-icon="mdi-help-circle-outline" @click="$emit('help')" />
           </v-list>
         </v-menu>
         <v-btn class="project-save-button" icon="mdi-content-save-outline" variant="text" size="small" title="Save preset" aria-label="Save preset" :disabled="!currentPreset || !isDirty" @click="saveCurrentPreset" />
@@ -418,7 +419,7 @@ export default defineComponent({
       required: true,
     },
   },
-  emits: ['dirty-change'],
+  emits: ['dirty-change', 'help'],
   data() {
     const selectedPreset = this.initialLibrary.presets.find((preset) => preset.id === this.initialLibrary.selectedPresetId)
       ?? this.initialLibrary.presets[0]

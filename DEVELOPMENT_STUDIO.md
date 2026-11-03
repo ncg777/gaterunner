@@ -1,4 +1,7 @@
-# Development studio — 2026.10.7
+# Development studio
+
+For step-by-step instructions and the current GUI reference, see the
+[help manual](HELP.md#help-phrases). This guide covers scheduling, rendering and API contracts.
 
 Graphical automation was added in **2026.11.02**. In the **Automation** dock or
 **Routing → Return motion**, each curve has a beat/value graph. Click empty space
@@ -12,16 +15,16 @@ beats since each attack; song-clock curves show beats from song start. Discrete
 controls appear as labeled bands and use step interpolation. Snapshot cues retain
 their existing controls, and opening older projects does not rewrite automation.
 
-The optional **Phrases, motion & studio** panel develops a recognizable groove by
+The **Phrases**, **Articulation** and **Automation** dock views develop a recognizable groove by
 changing phrases, articulation, space and sound. Integer-mask sequences remain the
 primary authoring format. Adding variation does not require adding attacks: ties,
 sparse phrases, darker hats and echo throws are independent choices.
 
 ## Open the demonstration
 
-Run `yarn dev`, open **Preset Actions → Import JSON**, and select
-`cli/fixtures/development-demo.json`. Select the bass, drums or chords and expand
-**Phrases, motion & studio**. Press Play to prepare and play the developed project.
+Run `yarn dev`, open **Project → Import JSON**, and select
+`cli/fixtures/development-demo.json`. Select the bass, drums or chords and open
+**Phrases** in the editor dock. Press Play to prepare and play the developed project.
 The Render tab can preview/download a range, export stems, or bounce a source into
 the Samples pool. The fixture is an application test project, not an album release.
 Its two metallic samples are generated locally by `cli/createDevelopmentDemo.ts`.
@@ -154,8 +157,8 @@ one, and overlapping voices do not share mutable lock state. Bus locks are rejec
 because an event cannot privately change a shared mixer/effect bus. Use track
 `gain`, `reverbWet`, `echoWet`, `echoFeedback` motion curves for those controls.
 Shared sends support voice/lane scope (`send.RETURN_ID`); a per-hit send lock cannot
-alter the dry level. The Dub returns tab provides individual lane sends as constant
-song curves, which can be developed further in Motion.
+alter the dry level. The Routing dock provides individual lane sends as constant
+song curves, which can be developed further in Automation.
 
 Targets and ranges come from `parameterDefinitions()` and the existing drum
 definitions (`lane.INDEX.PARAMETER`). Instrument modulation destinations are
@@ -245,7 +248,8 @@ above full scale without clipping.
 Track post-insert stems include their track effects and global dry trim. Global
 reverb and each auxiliary return are separate wet stems. Sum only files marked
 `recombine: true` in `stems.json`, then apply master gain and GateRunner master
-soft clipping once. This reproduces the appropriate pre-master mix within Float32
+soft clipping and Master Pulse once (using the range start as the song-time offset).
+This reproduces the appropriate mix within Float32
 summation rounding. Independently clipped/mastered stems cannot
 recombine through nonlinear processing. Optional track/lane pre-insert sources
 are marked `recombine: false`: they omit shared track inserts and cannot reproduce
@@ -273,7 +277,9 @@ it. Renderer changes must bump `RENDERER_VERSION`.
 Browser exports run in a worker; cancellation terminates it. CLI/API AbortSignal
 rendering runs in a cancellable worker, preserving completed disk entries.
 Custom in-process caches yield between tracks and return blocks. Developed browser
-Play prepares audio before starting playback; editing/mute/solo stops prepared
+Play resolves the schedule and uses live playback for supported controls. Sample
+sources, returns, snapshots and other unsupported live controls require rendered
+audio preparation before playback. Editing/mute/solo stops prepared
 playback (including preparation) and the next Play prepares the current project.
 Muting preserves phrase lengths, song activation boundaries and random identities;
 API callers can use `mutedTrackIds` for the same behavior. This is suitable for

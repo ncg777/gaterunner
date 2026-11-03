@@ -8,7 +8,7 @@ WAV, a reusable preset, or a shareable URL.
 
 **[Open the live app](https://ncg777.github.io/gaterunner/)**
 
-**Read next:** [Quick Start](#quick-start) | [Examples](#examples) |
+**Read next:** [Complete help & tutorials](HELP.md) | [Quick Start](#quick-start) | [Examples](#examples) |
 [Encoding](#how-the-encoding-works) | [Feature Guide](#feature-guide) |
 [CLI](#cli-and-automation) | [Developer Guide](#developer-guide) |
 [MCP server](MCP.md) |
@@ -48,7 +48,15 @@ It is useful for:
   and share a working draft through its URL.
 - **Installable web app:** use the hosted PWA or run the Vue application locally.
 
-Version **2026.11.02** adds graphical automation in **Automation** and
+Version **2026.11.03** replaces the long help dialog with a compact, searchable
+guide: a grouped table of contents, seven tutorials, detailed feature references,
+section jumps, related topics and Back navigation. Press **F1** or the editor's
+**Help** button for context, then **Open controls** to return to the relevant panel.
+On phones the contents and article share the same space. The [full manual](HELP.md)
+is generated from the same content as in-app help and includes corrected timing,
+wavetable, storage and export instructions.
+
+Version **2026.11.02** added graphical automation in **Automation** and
 **Routing → Return motion**. Click a graph to add points, drag handles to shape a
 curve, and use the selected-point inputs or expandable **All points** table for
 precise values. Beat snapping defaults to a quarter beat; choose another division
@@ -73,8 +81,9 @@ effects work in browser playback, browser WAV export and native CLI rendering.
 
 Version **2026.10.7** added optional phrase banks, musical sections, conditional
 choices, per-step accents/ties/slides and drum locks, motion curves/sound snapshots,
-shared dub returns, portable samples and resampling. Open **Phrases, motion &
-studio** for these controls. Existing projects retain their original behavior.
+shared dub returns, portable samples and resampling. Use **Phrases**, **Articulation**,
+**Automation**, **Routing**, **Samples** and **Render** in the editor dock for these
+controls. Existing projects retain their original behavior.
 The [development studio guide](DEVELOPMENT_STUDIO.md) covers the demonstration,
 processing rules, compatibility, API, excerpt/stem export and measured performance.
 
@@ -266,21 +275,21 @@ the previous library and draft. Export JSON libraries for portable backups.
 
 ### Multidimensional Tonewheel Wavetables
 
-Each melodic track can turn its drawbar registration into a sparse multidimensional
-wavetable from the **Generator** tab.
+Each additive or Partial Bank track can morph Tonewheel, Waveform, Sequence and
+Binary source snapshots in a sparse multidimensional wavetable from **Generator**.
 
-- Enabling the wavetable creates a useful **Brightness** axis with the current sound
-  at one end and a bright registration at the other.
+- First enabling the wavetable creates a **Brightness** axis and **Configuration 1**
+  and **Configuration 2**, both copied from the current source. Edit the configurations
+  to create different endpoints; enabling alone does not create a brighter sound.
 - Add independent morph axes without having to fill every corner of a hypercube.
 - Move the axis controls to crossfade smoothly between all nearby configurations.
-- **Capture configuration here** snapshots the interpolated sound at the current
-  position; configurations can then be renamed, moved, and edited.
-- The current interpolated registration is also stored in the legacy drawbar field.
-  Older presets therefore sound unchanged, and older GateRunner versions can still
-  play a representative snapshot of newly saved presets.
+- **Copy configuration here** copies the selected source at the current axis
+  position; it does not capture the interpolated blend. Rename and edit the copy.
+- Legacy drawbar-only configurations remain readable. Mixed source configurations
+  retain their own source snapshots; older app versions may not reproduce them.
 - Add up to eight **Vector LFOs** and route each one independently and bipolarly to
   every morph axis, inspired by Prophet VS vector motion and Wavestation wave sequencing.
-- LFOs support free rates or dotted/triplet tempo divisions, free/note/bar phase modes,
+- LFOs support free rates or dotted/triplet tempo divisions, free/note/song phase modes,
   bipolar or unipolar output, phase offset, smoothing, and smooth-random motion.
 - Note retrigger restarts the track-wide vector trajectory for all sounding voices so
   the shared timbral space stays coherent during polyphonic passages.
@@ -366,7 +375,7 @@ MIDI retains the track's original note events.
   high-frequency damping. **Pluck brightness** is a matrix destination. Tuning is
   clamped to 20–8,000 Hz (or one quarter of the sample rate, if lower).
 - **Granular sampler** selects one existing sample asset. Import a WAV in
-  **Phrases, motion & studio → Samples**, then select it in **Grain sample**.
+  **Samples** in the editor dock, then select it in **Grain sample**.
   Root note defines sample tuning; grain size, density, position, position scatter,
   pitch scatter and seed shape the cloud. **Grain position** and **Grain size**
   are matrix destinations. Hann windows and overlap normalization bound the level;
@@ -820,6 +829,7 @@ are evaluated, and an empty matrix allocates no additional browser audio graph.
 | `src/components/` | Vue and Vuetify controls, editors, dialogs, and track views |
 | `src/audio/` | Synthesis, effects, modulation, rendering, and WAV utilities |
 | `src/domain/` | Music-domain behavior shared by UI features |
+| `src/help/`, `HELP.md` | Shared help content, search, and generated user manual |
 | `src/presets.ts` | Preset defaults, cloning, normalization, migration, and URL state |
 | `cli/` | MIDI/WAV command-line entry points, native renderer, workers, and benchmarks |
 | `src/__tests__/`, `cli/*.test.ts` | Browser-engine and CLI behavior tests |
@@ -839,6 +849,8 @@ the source of truth when behavior must match between browser and CLI output.
 | `yarn node --import tsx --test --experimental-test-module-mocks cli/*.test.ts src/__tests__/*.test.ts` | Run Node-compatible tests |
 | `yarn build` | Type-check and create the production browser build |
 | `yarn build:cli` | Compile the CLI to `dist-cli/` |
+| `yarn help:generate` / `yarn help:check` | Regenerate the user manual / check it matches in-app help |
+| `yarn test:help-browser` | Check help navigation and desktop/mobile layouts in isolated Chrome |
 | `yarn bench:wav` | Run the WAV renderer benchmark |
 
 ### Browser Audio Checks
@@ -860,8 +872,9 @@ where they share a documented behavior.
   browser and CLI boundaries.
 3. Add or update a nearby test. Use `src/__tests__/` for shared/browser-engine logic
   and `cli/*.test.ts` for native CLI behavior.
-4. Update this README when a user-facing control, preset field, CLI option, export
-  contract, or compatibility guarantee changes.
+4. Update `src/help/content.ts` and run `yarn help:generate` when user-facing behavior
+   changes. Update this README for changed CLI options, export contracts or compatibility
+   guarantees. [Help maintenance](HELP_MAINTENANCE.md) lists the source checks.
 5. Run the checks below before opening a pull request.
 
 ```sh
