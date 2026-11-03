@@ -48,6 +48,18 @@ It is useful for:
   and share a working draft through its URL.
 - **Installable web app:** use the hosted PWA or run the Vue application locally.
 
+Version **2026.11.02** adds graphical automation in **Automation** and
+**Routing → Return motion**. Click a graph to add points, drag handles to shape a
+curve, and use the selected-point inputs or expandable **All points** table for
+precise values. Beat snapping defaults to a quarter beat; choose another division
+or Off. Arrow keys adjust focused points, Delete removes them, and Escape cancels
+a drag. **From**, **To**, and **Fit points** control the visible beat range. Track
+and return curves retain their existing project format and playback behavior.
+
+![Graphical automation editor](screenshots/automation-desktop.png)
+
+[Mobile automation editor](screenshots/automation-mobile.png).
+
 Version **2026.10.13** adds an optional second synth engine per melodic track.
 In **Generator**, choose **Amplitude modulation (AM)** or **Ring modulation (RM)**
 under **Combine engines**, then edit **Engine A · Carrier** and **Engine B · Modulator**.

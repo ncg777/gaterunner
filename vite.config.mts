@@ -76,6 +76,9 @@ self.addEventListener('activate', event => event.waitUntil((async () => {
   },
   server: {
     port: 3000,
+    // Browser checks keep disposable Chrome profiles in dist/. Watching their
+    // locked session files can terminate the Windows development server.
+    watch: { ignored: ['**/dist/**', '**/dist-cli/**'] },
   },
   css: {
     preprocessorOptions: {

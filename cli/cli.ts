@@ -144,7 +144,7 @@ function parseWaveshaperJson(value: string): WaveshaperSettings {
 program
   .name('gaterunner')
   .description('Generate a MIDI/WAV file from a GateRunner sequence')
-  .version('2026.10.9')
+  .version('2026.11.02')
   .option('-o, --output <file>', 'Output file path (required for generation)')
   .option('-f, --format <type>', 'Output format: midi or wav', 'midi')
   .option('--bpm <number>', 'Shared tempo in beats per minute (1-499)', '90')
