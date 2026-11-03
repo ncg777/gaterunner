@@ -23,6 +23,7 @@
           :ask-for-text-input="askForTextInput"
           :show-notice="showNotice"
           @dirty-change="handlePresetDirtyChange"
+          @help="openHelp('presets')"
         />
         <v-btn
           icon="mdi-help-circle-outline"
@@ -30,7 +31,7 @@
           size="small"
           title="Help & reference"
           aria-label="Help and reference"
-          @click="showHelp = true"
+          @click="openHelp()"
         />
       </header>
       <div class="transport-bar" aria-label="Transport">
@@ -105,6 +106,7 @@
             >Audio / MIDI</v-btn>
           </template>
           <v-list density="compact" class="transport-action-menu">
+            <v-list-item title="Audio / MIDI help" prepend-icon="mdi-help-circle-outline" @click="transportMenuOpen = false; openHelp(useMidiOutput ? 'midi' : 'audio')" />
             <v-list-item
               v-if="!useMidiOutput"
               title="Live audio buffering"
@@ -256,6 +258,7 @@
           </div>
           <div v-if="!useMidiOutput" class="inspector-section master-inspector">
             <span class="eyebrow">MASTER OUTPUT</span>
+            <button class="context-help" aria-label="Help: master output" title="Master output help" @click="openHelp('master')"><v-icon size="16">mdi-help-circle-outline</v-icon></button>
             <EditableSlider
               :label="Number(masterGain).toFixed(1) + ' dB'"
               :min="-96"
@@ -398,6 +401,7 @@
                 <button :class="{ active: dockView === 'samples' }" @click="openDock('samples')">Samples</button>
                 <button :class="{ active: dockView === 'render' }" @click="openDock('render')">Render</button>
               </nav>
+              <button class="context-help dock-help" aria-label="Help for current editor" title="Help for current editor (F1)" @click="openContextHelp"><v-icon size="16">mdi-help-circle-outline</v-icon><span>Help</span></button>
               <button
                 class="dock-toggle"
                 :title="detailOpen ? 'Collapse editor' : 'Expand editor'"
@@ -475,7 +479,7 @@
           </v-card-actions>
         </v-card>
       </v-dialog>
-      <HelpDialog v-model="showHelp" :app-version="appVersion" />
+      <HelpDialog v-model="showHelp" :app-version="appVersion" :topic="helpTopic" @navigate="navigateFromHelp" />
       <LiveAudioDialog
         v-if="!useMidiOutput"
         v-model="showLiveAudio"
@@ -515,6 +519,7 @@ import { renderBrowserDevelopment } from './audio/browserDevelopment';
 import { canPlayDevelopmentLive, scheduleLiveDevelopmentSends } from './audio/liveDevelopment';
 import ExportProgressDialog from './components/ExportProgressDialog.vue';
 import HelpDialog from './components/HelpDialog.vue';
+import { dockHelpTopics, type HelpTopic } from './help/content';
 import LiveAudioDialog from './components/LiveAudioDialog.vue';
 import { beginLiveScheduling, createLiveContext, exportLiveDiagnostics, readLiveBuffering, recordLiveGraphBuild, resetLiveScheduling, saveLiveBuffering, stopLiveDiagnostics, type LiveBuffering } from './audio/liveAudio';
 import PresetManager from './components/PresetManager.vue';
@@ -788,6 +793,7 @@ export default defineComponent({
       trackLoops: markRaw({}) as Record<string, Tone.Part<TrackScheduledEvent>>,
       trackFadeLoops: markRaw({}) as Record<string, Tone.Part<{ time: number }>>,
       showHelp: false,
+      helpTopic: null as string | null,
       trackSynths: markRaw({}) as Record<string, TrackAudioChain>,
       reverbChain: null as ReverbAudioChain | null,
       useMidiOutput: false,
@@ -968,6 +974,20 @@ export default defineComponent({
     },
   },
   methods: {
+    openHelp(topic: string | null = null) {
+      this.helpTopic = topic;
+      this.showHelp = true;
+    },
+    openContextHelp() {
+      const topic = this.dockView === 'editor'
+        ? (this.$refs.trackEditor as InstanceType<typeof EditorSurface> | undefined)?.currentHelpTopic()
+        : dockHelpTopics[this.dockView];
+      this.openHelp(topic ?? 'workspace');
+    },
+    navigateFromHelp(target: NonNullable<HelpTopic['target']>) {
+      if (target.kind === 'editor') this.openEditor(target.value);
+      else this.openDock(target.value);
+    },
     openDock(view: string) {
       this.dockView = view;
       this.detailOpen = true;
@@ -1006,6 +1026,11 @@ export default defineComponent({
       if (playing) await this.startSequencer();
     },
     handleWorkspaceKey(event: KeyboardEvent) {
+      if (event.key === 'F1' && !event.repeat && !event.defaultPrevented && !document.querySelector('.v-overlay--active')) {
+        event.preventDefault();
+        this.openContextHelp();
+        return;
+      }
       const target = event.target as HTMLElement | null;
       if (event.code !== 'Space' || event.repeat || event.altKey || event.ctrlKey || event.metaKey
         || target?.closest('input, textarea, select, button, [role="button"], [role="combobox"], [role="slider"], [role="tab"], [contenteditable="true"], .v-overlay--active')

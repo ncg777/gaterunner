@@ -1,199 +1,161 @@
 <script setup lang="ts">
-defineProps<{
-  appVersion: string;
-}>();
+import { computed, nextTick, ref, watch } from 'vue';
+import { helpTopics, type HelpTopic } from '../help/content';
+import { searchHelp, matchingHelpSection } from '../help/search';
 
+const props = defineProps<{ appVersion: string; topic?: string | null }>();
 const visible = defineModel<boolean>({ required: true });
+const emit = defineEmits<{ navigate: [target: NonNullable<HelpTopic['target']>] }>();
+const query = ref(''), activeId = ref('welcome'), contentsOpen = ref(false);
+const searchInput = ref<HTMLInputElement>(), article = ref<HTMLElement>(), heading = ref<HTMLElement>();
+const history = ref<{ id: string; scroll: number }[]>([]);
+const active = computed(() => helpTopics.find(topic => topic.id === activeId.value) ?? helpTopics[0]);
+const groups = [...new Set(helpTopics.map(topic => topic.group))].map(name => ({ name, topics: helpTopics.filter(topic => topic.group === name) }));
+const results = computed(() => searchHelp(query.value));
+const searching = computed(() => !!query.value.trim());
+const related = computed(() => active.value.related.map(id => helpTopics.find(topic => topic.id === id)!).filter(Boolean));
+const topicById = Object.fromEntries(helpTopics.map(topic => [topic.id, topic]));
+
+async function selectTopic(id: string, record = true) {
+  if (!helpTopics.some(topic => topic.id === id)) id = 'welcome';
+  if (record && id !== activeId.value) history.value.push({ id: activeId.value, scroll: article.value?.scrollTop ?? 0 });
+  activeId.value = id;
+  contentsOpen.value = false;
+  await nextTick();
+  if (article.value) article.value.scrollTop = 0;
+  heading.value?.focus({ preventScroll: true });
+}
+async function goBack() {
+  const previous = history.value.pop();
+  if (!previous) return;
+  await selectTopic(previous.id, false);
+  if (article.value) article.value.scrollTop = previous.scroll;
+}
+async function openResult(topic: HelpTopic) {
+  await selectTopic(topic.id);
+  const section = matchingHelpSection(topic, query.value);
+  if (section !== undefined) jumpToSection(section);
+}
+function jumpToSection(index: number) {
+  const section = article.value?.querySelector<HTMLElement>(`#help-section-${index}`);
+  section?.scrollIntoView({ block: 'start' });
+  section?.focus({ preventScroll: true });
+}
+function openControls() {
+  if (!active.value.target) return;
+  visible.value = false;
+  emit('navigate', active.value.target);
+}
+function focusSearch() { searchInput.value?.focus(); }
+watch(() => [visible.value, props.topic] as const, ([open, topic]) => {
+  if (open && topic) { query.value = ''; void selectTopic(topic); }
+});
+watch(query, () => { if (searching.value) contentsOpen.value = true; });
+function afterEnter() { if (props.topic) heading.value?.focus({ preventScroll: true }); else focusSearch(); }
 </script>
 
 <template>
-  <v-dialog v-model="visible" max-width="800px">
-    <v-card class="pa-4 bg-black">
-      <v-card-title class="pa-4">
-        <span class="text-h5 font-weight-bold">
-          GateRunner <small class="version">v{{ appVersion }}</small>
-        </span>
-        <v-spacer />
-        <v-btn icon class="close-btn" title="Close help" @click="visible = false">
-          <v-icon>mdi-close</v-icon>
-        </v-btn>
-      </v-card-title>
-      <v-divider />
-      <v-card-text class="pa-4">
-        <h4 class="mb-2">How the Sequencer Works</h4>
-        <p>The sequencer allows you to customize the following parameters:</p>
-        <p>GateRunner stores your work as named presets. Changes affect the current draft immediately for playback and URL sharing, but the preset itself is only updated when you use <strong>Save</strong> or <strong>Save As</strong>. You can also export a single preset or the full preset library to JSON and import them back later.</p>
-        <p><strong>Automation graphs</strong>: Open Automation or Routing → Return motion. Click to add points, drag to move them, and expand All points for precise values. Snap defaults to ¼ beat; numeric input remains exact. Use From, To and Fit points to navigate. Focus a point for arrow-key editing or Delete; Escape cancels a drag. Playback stops when an edit commits. Discrete controls use stepped value bands.</p>
-        <ul>
-          <li><strong>Preset</strong>: Pick a named preset, create a new one, save your current draft, or delete presets you no longer need.</li>
-          <li><strong>Preset Browser</strong>: Open the preset browser to organize presets into nested folders, search by name/path, and move or delete folders and presets.</li>
-          <li><strong>Forte number</strong>: The pitch-class set to use as Forte number with transposition (see <a target="_blank" href="https://en.wikipedia.org/wiki/List_of_set_classes">Forte numbers</a>).</li>
-          <li><strong>BPM</strong>: Controls the tempo of the sequence.</li>
-          <li><strong>A4</strong>: Master concert pitch in Hz for all tracks (default 440; some prefer 432).</li>
-          <li><strong>Master</strong>: Output trim in dB (-96 to +12, default 0) for the summed mix. Every track and the reverb return feed one master bus that applies this trim and then a soft-clip curve which is exactly linear below 0.75 and asymptotic to full scale above it. Playback, browser WAV export, and native CLI WAV rendering all share that stage, so an export sounds like realtime playback rather than hard-clipping against the 24-bit ceiling. Lower this value if a dense mix sounds squashed. CLI equivalent: <code>--master-gain &lt;dB&gt;</code>; presets carry it as <code>masterGain</code>.</li>
-          <li><strong>Track Activation (B)</strong>: Optional collapsible song-level sequence of nonnegative decimal bitmasks. Blank disables gating. When set, its <code>N</code> values split the full longest-track loop into <code>N</code> equal wall-clock chunks. Bit 0 controls the first track, bit 1 the second, and so on (deleting a track shifts later bits). A mask of <code>0</code> silences every track for that chunk. Activation uses each note's final post-time-warp onset; inactive onsets are omitted, and active notes are clipped at the first later inactive chunk boundary. Example: <code>1 2 3 0</code>. The track strip darkens inactive chunks.</li>
-          <li><strong>Rhythmic tracks</strong>: Add a rhythmic track to use a synthesized GM-oriented drum kit instead of the melodic pitch-class encoder. Its ordered lanes map to GM percussion notes, with lane 1 using the least-significant velocity bits. Each sequence value is a decimal BigInt mask; the selected 1-7 velocity bits per lane allow simultaneous hits and velocity variation. Assign an XOR group (1-8) to choke other members of that group so only one can be active; the default is no group. When two grouped voices fire on the same step, the later/higher lane wins. Rhythmic tracks default to MIDI channel 10, but the channel remains editable for hardware routing.</li>
-          <li><strong>Numerator/Denominator</strong>: Set per-track rhythmic grid while all tracks share one tempo.</li>
-          <li><strong>Tracks</strong>: Each preset can contain multiple tracks with their own MIDI channel, waveform, gain, sequence, octave shift, note length, amp/pitch envelopes, polyphony, modulation, waveshaper, tanh drive, chorus, flanger, phaser, filter, echo, and reverb send.</li>
-          <li><strong>Generator</strong>: Choose Additive, Partial Bank, Resonant noise, Vocal choir, Modal percussion, Variable pulse, Two-operator FM, Plucked string or Granular sampler. Envelopes, glide, the track filter and effects remain shared.</li>
-          <li><strong>Sequence</strong>: Input a sequence of numbers per track to generate notes based on their binary representation.</li>
-          <li><strong>Octave Shift</strong>: Adjusts the octave of the notes played for the selected track.</li>
-          <li><strong>Track Gain</strong>: Sets each track's audio level in dB. Use the velocity multiplier to control MIDI note velocity independently.</li>
-          <li><strong>Note length</strong>: Multiplies the durations of the selected track's notes, then adds the optional fixed length measured in that track's steps (for example, a denominator of 4 makes one step a sixteenth note).</li>
-          <li><strong>Track Delay</strong>: Number of bars to wait before the track starts playing.</li>
-          <li><strong>Track Phase</strong>: Shifts notes by 0-1 steps within each sequence. Notes that cross the sequence end wrap to its beginning. Fractional values preserve the pattern length, repeats, delay, and padding.</li>
-          <li><strong>Track Repeats</strong>: Number of times the track's pattern is repeated. After its repeats, the track stays silent until the longest track finishes, then everything loops.</li>
-          <li><strong>Track Length View</strong>: The track strip shows each track's delay, repeats, and total duration in beats/bars with compact selectable blocks.</li>
-          <li><strong>Tanh Drive</strong>: Applies the selected dB gain before the always-active legacy tanh lookup, independently of the optional waveshaper. The tanh stage is bounded near +/-0.7616 before track gain and downstream effects, not at the final track output.</li>
-          <li><strong>Modulation</strong>: Track envelopes and LFOs live in one tab with compact, collapsible editors: routed sources, amp/pitch/filter envelopes, track and effect LFOs, vector LFOs, and engine-specific motion. Each drum lane's decays, pitch sweeps, and filter envelopes remain in Drum Sounds. Amounts for pitch and filter envelopes are in semitones (can be negative); pitch Curve is exponential steepness (0 = linear).</li>
-          <li><strong>Master Pulse</strong>: In Master Output, pulse the entire stereo mix, including reverb, with Sine/Triangle tremolo or an isochronic-style Pulse. Choose 0.1–80 Hz or a tempo division, set Depth, and adjust Pulse width and Edge softness in Pulse mode. Stereo channels stay linked. Frequency shortcuts label example bands without promising mental states. The envelope follows master clipping, resets on Play/Restart, stays continuous across loops, and is included in WAV exports. MIDI is unchanged; stems carry the settings for applying the master stage once after recombination.</li>
-          <li><strong>Instrument/Modulation/Filter</strong>: Shape each track with amp/pitch envelopes, unison voices, tremolo, vibrato, and a key-following multimode filter.</li>
-          <li><strong>Effects</strong>: Add optional per-track feedback echo and send each track into the global pink-noise convolution reverb.</li>
-          <li><strong>Reverb</strong>: The global reverb controls apply to playback, browser WAV export, and native CLI WAV rendering. Decay Curvature (0.1–10) shapes the impulse fade: 1 preserves the exponential decay, lower values fade earlier, and higher values hold longer. Decay duration and pre-delay stay fixed. Both engines use the same energy-normalized pink-noise impulse, keeping wet levels consistent across playback and export sample rates. CLI equivalent: <code>--reverb '{"enabled":true,"decay":3,"decayCurve":1,"preDelay":0.02,"dry":0,"wet":-7,"lowCut":39,"highCut":119}'</code>.</li>
-          <li><strong>WAV export</strong>: Files are 48 kHz 24-bit PCM with TPDF dither applied before quantization, in both the browser and the CLI.</li>
-          <li><strong>Chorus/Flanger/Phaser</strong>: Tempo-synced modulation effects whose LFO completes one cycle per selected note division (e.g. 4/1 sweeps over four whole notes, 1/8T warbles per eighth triplet), so they follow the BPM automatically.</li>
-          <li><strong>Phaser</strong>: A classic phaser pedal: a cascade of first-order allpass stages (each stage pair creates one notch) whose poles are spaced one octave apart around the Center frequency and swept by the LFO over ±(Sweep % of 5 octaves). Stages picks the pole count (classic pedals use 4), Feedback resonates the notches, Resonance sharpens each pole, and Wet sets the dry/phase-shifted mix (always at least 50% wet so the notches stay audible).</li>
-          <li><strong>Multidimensional Tonewheel</strong>: With the Tonewheel partial source, build a morphable sine-partial spectrum from sparse drawbar configurations and animate its position with routed vector LFOs.</li>
-          <li><strong>Breath noise</strong>: Add one filtered pink-noise layer to each melodic event. Level controls the blend, while Harmonic tracks the event's mean pitch to set the filter center.</li>
-          <li><strong>Import/Export</strong>: Export one preset or the full library as JSON for backup and sharing, then import those files later without overwriting your existing presets. Libraries use IndexedDB to accommodate embedded samples and large arrangements; existing saved presets migrate automatically. A failed save keeps your previous library and draft.</li>
-          <li><strong>WAV Export</strong>: Render and download an offline WAV mix of all tracks in the current draft, including an automatic rest trail for releases and effects.</li>
-        </ul>
-
-        <h3 class="mt-4 mb-2">Studio workspace</h3>
-        <p>The transport stays above the arrangement and editor. Press <strong>Space</strong> outside editable controls to play or stop. Switch to <strong>Mixer</strong> for track and master faders. Double-click a pattern to edit it, or drag track rows to reorder them. The note/drum grid edits the same values as the sequence field; row and step navigation reach longer patterns. For developed tracks, <strong>Editing pattern</strong> selects the base sequence or a saved phrase. The dock also opens Phrases, Articulation, Automation, Routing, Samples and Render. Use <strong>Project</strong> for preset actions, <strong>Audio / MIDI</strong> for devices and buffering, and <strong>Export</strong> for MIDI, WAV and stems.</p>
-
-        <p>Track previews show scheduled note positions and lengths, including note length, phase, time warp and phrase articulation. On phones and small screens, track controls sit above the timeline and the transport stays visible while scrolling. Use each track's <strong>⋮</strong> menu to duplicate, delete or move it up/down by touch.</p>
-
-        <h3 class="mt-4 mb-2">Melodic Sound Palette</h3>
-        <p>In <strong>Generator → Combine engines</strong>, choose <strong>AM</strong> or <strong>RM</strong> to use two independent engines on a track. <strong>Engine A · Carrier</strong> supplies the sound; <strong>Engine B · Modulator</strong> shapes its amplitude. AM uses a unipolar modulator; RM uses a bipolar modulator to create sum and difference frequencies. Depth blends from A's original sound, and B's frequency ratio changes its tuning. B has its own source modulation panel. Both engines share the track's notes, amplitude envelope, pitch envelope, glide, filter and effects. <strong>Single engine</strong> and zero depth preserve the original sound; switching off retains B's settings.</p>
-        <p>The <strong>Generator</strong> tab first selects a synth engine. <strong>Additive</strong> offers Tonewheel, Waveform, Sequence and Binary partial sources with spectrum shaping and multidimensional wavetable morphing. <strong>Resonant noise</strong> excites a tunable resonator bank with real noise. <strong>Vocal choir</strong> passes a detuned voiced source and breath through five vowel formants per note.</p>
-        <ul>
-          <li><strong>Waveform spectra</strong>: Sine has only the fundamental; sawtooth has signed 1/n coefficients; square has odd 1/n coefficients; triangle has alternating odd 1/n² coefficients. Periodic waveforms use up to 64 harmonics, limited further by pitch during playback. Fixed-duty pulse spectra are also available.</li>
-          <li><strong>Pulse 25% and 12.5%</strong>: Use fixed narrow-duty spectra for brighter, leaner tones without a per-voice PWM graph.</li>
-          <li><strong>Breath noise</strong>: Adds one pink-noise source per track event. Level sets its gain and Harmonic sets the pitch-relative center of its band-pass filter.</li>
-          <li><strong>Modal percussion</strong>: Bell, bar, glass or harmonic modes with independent decays, high-mode damping, strike brightness and a noise transient.</li>
-          <li><strong>Variable pulse</strong>: Continuous width with 1–64 harmonics; route an envelope or LFO to Pulse width in Modulation.</li>
-          <li><strong>Two-operator FM</strong>: Sine carrier/modulator, fractional ratio, modulation index and modulation ADSR. Route additional motion to FM index.</li>
-          <li><strong>Plucked string</strong>: Seeded excitation, fractional-delay tuning (20–8,000 Hz), string decay, brightness and pluck position. Overlapping mono legato notes preserve the string.</li>
-          <li><strong>Granular sampler</strong>: Import a WAV in Studio → Samples and choose it in Grain sample. Root note, size, density, position, scatter and seed shape the cloud. Up to 32 windowed grains overlap per voice; stereo assets become mono before pan/effects.</li>
-          <li><strong>Generator modulation</strong>: New matrix destinations include Modal damping, Pulse width, FM index, Pluck brightness, Grain position and Grain size. Shared pitch, level, pan and filter routes also work. Live browser sources require HTTPS or localhost.</li>
-          <li><strong>Legacy presets</strong>: Retired generatorType/fmSynth and virtual-analog fields are ignored during import. The new Two-operator FM engine uses its own settings. Existing waveforms, envelopes, sequences and effects are retained.</li>
-        </ul>
-
-        <h4 class="mt-3 mb-2">Procedural Partial Sources</h4>
-        <ul>
-          <li><strong>Sequence</strong>: Natural, Fibonacci, primes, powers of two, triangular numbers, Lucas numbers, divisor counts, Stern's diatomic sequence, and Euler's totient sequence start at harmonic 1. Thue–Morse and Recamán start at n = 0, so their first amplitude is zero. Values set amplitudes, not pitches.</li>
-          <li><strong>Binary basics</strong>: At n = 0, 1, 2, …, choose popcount, parity, a selected bit (0–5), raw Gray code, Gray-code popcount, or bit length. The first value controls harmonic 1; every binary mode starts with silence.</li>
-          <li><strong>Binary structure</strong>: Ruler counts trailing zeros in n + 1. Longest one-run measures the longest consecutive group of set bits, while one-run count measures separate groups. Rudin–Shapiro returns the parity of overlapping 11 pairs.</li>
-          <li><strong>Bit reversal</strong>: Reverses the lowest 1–6 bits of n. Width 3 starts 0, 4, 2, 6, 1, 5, 3, 7; indices repeat every 2³ values because bits above the selected width are ignored.</li>
-          <li><strong>Amplitude mapping</strong>: Choose linear, power, square-root, inverse, logarithmic, inverse square-root, saturating, or raw modulo mapping. Inverse mappings preserve zero as silence. Modulo uses value % modulus, so exact multiples become silent.</li>
-          <li><strong>Harmonic masks</strong>: Keep odd, even, prime, Fibonacci, power-of-two, square, triangular, or Thue–Morse harmonic numbers. Periodic keeps one zero-based offset in each period: period 4 and offset 0 keep harmonics 1, 5, 9, …. Any nonempty mask can be inverted; choosing None clears inversion.</li>
-          <li><strong>Transform order</strong>: Choose 1–64 harmonics, then apply amplitude mapping → harmonic mask/inversion → tilt (−24 to +24 dB/octave) → optional peak normalization.</li>
-          <li><strong>Spectrum preview</strong>: Bars show magnitudes from 0 to −60 dB relative to the largest partial, with its actual amplitude printed below. Negative Fourier coefficients affect phase, not bar direction. Values below −60 dB are hidden; an all-zero spectrum is explicitly marked silent. Tonewheel previews interpolate the base morph position without LFO animation. Previews exclude breath noise, envelopes, effects, and pitch-dependent band limiting.</li>
-          <li><strong>Partial Bank</strong>: Give partials fractional frequency positions with 20 functions, including power stretch, stiff string, subharmonics, prime and Fibonacci series, pitch grids, clusters, ripple, seeded detuning, and custom expressions. The existing partial source supplies amplitudes. Morph between two position functions; route envelopes or LFOs to Position / Target a, b, c or Position morph. Custom expressions use n for the original frequency ratio and a, b, c for parameters. Anchor keeps 1× at the played note. The preview shows static positions without modulation. Unison count changes apply to new notes.</li>
-          <li><strong>Resonant noise</strong>: Select white, pink or brown noise; tune 1-8 resonators with Q, spacing, odd/even balance, spectral tilt and dry noise blend. Base frequency is the center at A4. Tracking follows note pitch and glide. An independent ADSR and LFO move the entire resonator bank in semitones.</li>
-          <li><strong>Vocal choir</strong>: Blend Ah, Eh, Ee, Oh and Oo, with timed per-note transitions. Adjust vocal tract shift, bandwidth, glottal brightness, breath, 1-8 singers, ensemble detune and vibrato. Expand Individual formants to tune and level each of the five resonances separately.</li>
-          <li><strong>Compatibility</strong>: Active legacy wind, resonance and frozen-noise waveforms migrate to Resonant noise. Choir Ah/Oh migrate to Vocal choir. Inactive waveform metadata in Tonewheel, Sequence or Binary tracks does not change their engine. Stored settings remain available when switching engines. Old spectra inside additive wavetable snapshots remain readable for compatibility.</li>
-        </ul>
-
-        <h3 class="mt-4 mb-2">Waveshaper and Tanh Drive</h3>
-        <p>The <strong>Drive</strong> tab provides an optional waveshaper for melodic and rhythmic tracks. Its Input Drive, Mix, and DC block are independent of the existing Tanh Drive control.</p>
-        <p>Signal order: <code>track source sum -&gt; waveshaper -&gt; limiterGain (Tanh Drive) -&gt; tanh lookup -&gt; track gain -&gt; downstream effects -&gt; reverb dry/wet -&gt; master gain -&gt; master soft clip</code>.</p>
-        <ul>
-          <li><strong>Curves</strong>: Choose from 33 built-ins or select Custom. The sine family includes Sine Fold (<code>sin(k*x)</code>), Sine Phase (<code>sin(k*x+p)</code>), Cosine Bend, Nested Sine (<code>sin(a*sin(b*x))</code>), Sine Phase Modulation, Dual Sine, Odd/Even Harmonic Sine, Power Sine, and Damped Sine. Other groups provide saturation, folding and rectification, polynomials, bells, and identity.</li>
-          <li><strong>Custom formula</strong>: <code>x</code> is the signed input sample, not time; <code>PI</code> and <code>E</code> are constants. Valid free variables become parameter controls automatically: <code>sin(k*x+p)</code> creates controls for <code>k</code> and <code>p</code>, while <code>sin(PI*x/2)</code> needs none.</li>
-          <li><strong>Parameters</strong>: Each custom control stores a value plus editable Min, Max, and Step. Min must be less than Max, and Step must be positive and no larger than the range. The waveshaper graph is a read-only transfer preview; waveshaper parameter automation is not supported.</li>
-          <li><strong>Signed domain</strong>: The transfer curve covers <code>[-1, 1]</code>. Driven inputs outside that range use the nearest endpoint, matching native Web Audio lookup. Finite formula outputs are clipped to <code>[-1, 1]</code>, not rescaled.</li>
-          <li><strong>Invalid math</strong>: Invalid syntax or non-finite results detected during curve validation bypass the whole new effect, including its drive, wet path, and DC filter. For example, <code>sqrt(x)</code> fails on negative inputs and <code>1/x</code> fails at zero. The legacy tanh stage stays active.</li>
-          <li><strong>Input Drive and Mix</strong>: Input Drive (-24 to +36 dB) drives only the wet path before shaping. Mix (0%-100%) blends it with the untouched dry signal. Turning Waveshaper off bypasses this effect without deleting its settings.</li>
-          <li><strong>DC block</strong>: Optionally filters the shaped wet signal with a 10 Hz high-pass filter. Browser playback, browser WAV export, and native CLI WAV rendering use shared coefficients. Neither transfer stage uses oversampling, so strong shaping can alias.</li>
-          <li><strong>Tanh Drive</strong>: This separate -48 to +72 dB gain (<code>limiterGain</code>) feeds the always-active tanh lookup after the new effect. The legacy table also clamps its input at -1 and +1, limiting this stage to approximately <code>+/-0.7616</code> (<code>tanh(1)</code>), not unrestricted tanh approaching +/-1. Track gain and downstream effects can change that level.</li>
-          <li><strong>Presets</strong>: Missing waveshaper settings default to off, Sine Fold, 0 dB Input Drive, 100% Mix, and DC block on. Switching curves retains custom formulas, parameter values/ranges/steps, and per-built-in values. These settings survive Save/Save As, copying and merging tracks, and preset/library JSON export-import; edits mark the draft as changed even when the effect is off.</li>
-          <li><strong>WAV and MIDI</strong>: Browser playback and browser WAV export use the same graph. Native CLI WAV rendering implements the same nonlinear stages, not the entire browser synth/effects graph. The CLI previously omitted legacy tanh; it now always runs, including at 0 dB with the new effect off, so old CLI WAV renders and reference hashes change. MIDI notes and timing are unchanged.</li>
-          <li><strong>CLI settings</strong>: Use <code>--limiter-gain &lt;dB&gt;</code> and <code>--waveshaper &lt;json&gt;</code> for single-track input, or camelCase <code>limiterGain</code> and nested <code>waveshaper</code> in each <code>--tracks</code> object. For example: <code>{"enabled":true,"curve":"sine-fold","mix":75}</code>. Track JSON uses <code>sequence</code>; presets map it from <code>sequenceInput</code>. Omitted per-track settings inherit top-level fallbacks, while a supplied waveshaper object uses its own defaults. <code>--preset</code> loads per-track settings from a single-preset or selected library export instead of individual generation flags.</li>
-        </ul>
-
-        <h3 class="mt-4 mb-2">Multidimensional Tonewheel Wavetable</h3>
-        <p>Open the <strong>Generator</strong> tab and choose the <strong>Tonewheel</strong> partial source to turn a melodic track's nine drawbars into a morphable spectrum. Instead of keeping one fixed drawbar registration, you place named registrations at points in a space with up to 16 independent morph axes. GateRunner continuously interpolates the drawbars at the current position, so one axis could represent brightness, another body, and another harmonic complexity.</p>
-        <p>This feature affects only the Tonewheel source's additive sine-partial spectrum. Waveform, Sequence, Binary, and rhythmic tracks do not use its drawbars or morphing.</p>
-
-        <h4 class="mt-3 mb-2">Axes and Configurations</h4>
-        <ul>
-          <li><strong>Enable Multidimensional wavetable</strong>: Enabling it for the first time creates a <em>Brightness</em> axis plus <em>Original</em> and <em>Bright</em> starting configurations. Disabling it returns the track to its single fixed set of drawbars without deleting the stored wavetable.</li>
-          <li><strong>Morph axes</strong>: Each axis has a name and a current value from 0% to 100%. The current values form the base position used for playback. Use <strong>Add morph axis</strong> to add another independent direction; existing configurations receive a centered 50% coordinate on the new axis.</li>
-          <li><strong>Configurations</strong>: A configuration stores a name, one position per axis, and all nine drawbar levels. Select <strong>Configuration to edit</strong> to rename it, move it in the morph space, or change its registration.</li>
-          <li><strong>Capture configuration here</strong>: Adds a point at the current axis position and initializes its drawbars from the sound currently interpolated there. You can then edit that point into a new registration.</li>
-          <li><strong>Sparse interpolation</strong>: You do not need to define every corner of a multidimensional grid. GateRunner weights nearby configurations by inverse squared distance. Landing exactly on a configuration uses its drawbars exactly; elsewhere, closer configurations contribute more strongly.</li>
-          <li><strong>Limits and removal</strong>: A wavetable supports up to 16 axes and 64 configurations. Removing an axis also removes its coordinate and LFO route from every stored item. Removing the final axis disables the wavetable, and at least one configuration must remain while it is enabled.</li>
-        </ul>
-
-        <h4 class="mt-3 mb-2">Vector Modulation</h4>
-        <p>Open <strong>Modulation</strong> to edit up to eight vector LFOs that animate the morph position. For each axis, the movement is its base value plus the LFO output multiplied by <strong>Global depth</strong> and that axis's <strong>Route</strong>. The final position is constrained to the 0%-100% range. Multiple enabled LFOs are applied in list order.</p>
-        <ul>
-          <li><strong>Shape</strong>: Choose sine, triangle, rising or falling saw, square, sample-and-hold, or smooth random motion.</li>
-          <li><strong>Polarity</strong>: Bipolar motion ranges from -1 to +1 around the base position. Unipolar motion ranges from 0 to +1; a negative route can make that motion travel downward instead.</li>
-          <li><strong>Rate</strong>: With <strong>Tempo sync</strong> enabled, the selected note division is the duration of one complete LFO cycle; dotted and triplet divisions are available. With sync disabled, set a free rate from 0.01 Hz to 20 Hz.</li>
-          <li><strong>Phase mode</strong>: <em>Free running</em> follows transport time continuously. <em>Retrigger on note event</em> restarts the phase for each track-wide note event. <em>Retrigger when song is played</em> restarts it at playback start.</li>
-          <li><strong>Start phase and smoothing</strong>: Start phase offsets the cycle from 0° to almost 360°. Smoothing softens abrupt or random changes, which is especially useful with square and sample-and-hold shapes.</li>
-          <li><strong>Axis routes</strong>: Each route ranges from -100% to +100%. A value of 0% disconnects that LFO from the axis, positive values follow the LFO, and negative values reverse it. One LFO can move several axes at different strengths and directions.</li>
-          <li><strong>Frequency modulation</strong>: An LFO may use an earlier LFO in the list as its frequency-modulation source. The <strong>FM index</strong> sets the phase deviation in cycles; positive and negative values bend the destination motion in opposite directions. Only earlier LFOs are offered as sources, preventing circular modulation.</li>
-          <li><strong>Global depth</strong>: Scales all routes from that LFO at once. Setting depth to 0%, disabling the LFO, or setting every route to 0% leaves the base morph position unchanged.</li>
-        </ul>
-
-        <h3 class="mt-4 mb-2">How Notes Are Computed in the Encoding Scheme</h3>
-        <p>This application uses a binary-based encoding system to determine which notes are played from numerical values. Here's how it works:</p>
-
-        <ol>
-          <li><strong>Binary Representation of Numbers:</strong>
-            <ul>
-              <li>Each number's absolute value is converted into binary, with bit 0 at position 0, bit 1 at position 1, and so on. For example:</li>
-              <ul>
-                <li>The number <code>5</code> becomes <code>101</code>.</li>
-                <li>The number <code>10</code> becomes <code>0101</code>.</li>
-              </ul>
-              <li>Negative numbers are supported and in this case the note indices are computed as you would expect.</li>
-            </ul>
-          </li>
-          <li><strong>Pitch Class Assignment:</strong>
-            <ul>
-              <li>Each binary digit corresponds to a position in the selected pitch class set, with the octave shift, going up and down octavewise to the minimal and maximal MIDI pitch. For example, to give a general idea without considering the octave, for 3-11B.00 you would get:
-                <ul>
-                  <li>Position 0 = C</li>
-                  <li>Position 1 = E</li>
-                  <li>Position 2 = G</li>
-                  <li>Position 3 = C</li>
-                  <li>...</li>
-                </ul>
-              </li>
-            </ul>
-          </li>
-          <li><strong>Chords:</strong>
-            <ul>
-              <li>If multiple <code>1</code>s are present, the corresponding notes form a chord.</li>
-              <li>Example: The number <code>7</code> (<code>111</code>) maps to C, E, and G.</li>
-            </ul>
-          </li>
-        </ol>
-      </v-card-text>
-      <v-divider />
-      <v-card-actions class="pa-4">
-        <v-spacer />
-        <v-btn color="primary" @click="visible = false">Close</v-btn>
-      </v-card-actions>
-    </v-card>
+  <v-dialog v-model="visible" eager max-width="1120" :fullscreen="$vuetify.display.width <= 700" aria-labelledby="help-title" @after-enter="afterEnter">
+    <div class="help-shell" @keydown.f1.prevent.stop="focusSearch">
+      <header class="help-header">
+        <div class="help-brand"><v-icon size="20">mdi-book-open-page-variant-outline</v-icon><strong id="help-title">GateRunner help</strong><small>{{ appVersion }}</small></div>
+        <button class="help-close" aria-label="Close help" title="Close help (Escape)" @click="visible = false"><v-icon size="20">mdi-close</v-icon></button>
+      </header>
+      <div class="help-tools">
+        <button :disabled="!history.length" aria-label="Previous help topic" title="Back to previous topic" @click="goBack"><v-icon size="18">mdi-arrow-left</v-icon></button>
+        <button class="help-contents-toggle" :aria-expanded="contentsOpen" aria-controls="help-contents" @click="contentsOpen = !contentsOpen">{{ contentsOpen ? 'Read topic' : 'Contents' }}</button>
+        <div class="help-search">
+          <v-icon size="18" aria-hidden="true">mdi-magnify</v-icon>
+          <input ref="searchInput" v-model="query" type="search" aria-label="Search help" placeholder="Search features, controls & tutorials…" autocomplete="off" @keydown.enter.prevent="results[0] && openResult(results[0].topic)">
+          <button v-if="query" class="help-clear" aria-label="Clear help search" @click="query = ''; focusSearch()"><v-icon size="16">mdi-close</v-icon></button>
+        </div>
+        <span class="help-count" role="status" aria-live="polite">{{ searching ? `${results.length} results` : `${helpTopics.length} topics` }}</span>
+      </div>
+      <div class="help-layout" :class="{ 'show-contents': contentsOpen }">
+        <nav id="help-contents" class="help-contents" aria-label="Help table of contents">
+          <template v-if="searching">
+            <h2 class="help-group-title">Search results</h2>
+            <p v-if="!results.length" class="help-no-results">No topics match “{{ query }}”. Try fewer words or a control name.<button @click="query = ''">Show all topics</button></p>
+            <button v-for="result in results" :key="result.topic.id" class="help-topic-link help-result" :class="{ selected: activeId === result.topic.id }" :aria-current="activeId === result.topic.id ? 'page' : undefined" @click="openResult(result.topic)">
+              <strong>{{ result.topic.title }}</strong><span>{{ result.excerpt }}</span>
+            </button>
+          </template>
+          <template v-else>
+            <div v-for="group in groups" :key="group.name" class="help-group">
+              <h2 class="help-group-title">{{ group.name }}</h2>
+              <button v-for="topic in group.topics" :key="topic.id" class="help-topic-link" :class="{ selected: activeId === topic.id }" :aria-current="activeId === topic.id ? 'page' : undefined" @click="selectTopic(topic.id)">{{ topic.title }}</button>
+            </div>
+          </template>
+        </nav>
+        <article ref="article" class="help-article" aria-labelledby="help-topic-title" tabindex="0">
+          <div class="help-location">{{ active.group }}<span>{{ active.location }}</span></div>
+          <h2 id="help-topic-title" ref="heading" tabindex="-1">{{ active.title }}</h2>
+          <p class="help-summary">{{ active.summary }}</p>
+          <div class="help-topic-tools">
+            <button v-if="active.target" class="help-open-controls" @click="openControls">Open controls <v-icon size="14">mdi-arrow-top-right</v-icon></button>
+            <nav v-if="active.sections.length > 1" aria-label="On this page" class="help-section-links"><button v-for="(section, index) in active.sections" :key="index" @click="jumpToSection(index)">{{ section.title }}</button></nav>
+          </div>
+          <section v-for="(section, index) in active.sections" :key="`${active.id}-${index}`" class="help-section">
+            <h3 :id="`help-section-${index}`" tabindex="-1">{{ section.title }}</h3>
+            <p v-for="paragraph in section.paragraphs" :key="paragraph">{{ paragraph }}</p>
+            <ul v-if="section.bullets"><li v-for="item in section.bullets" :key="item">{{ item }}</li></ul>
+            <ol v-if="section.steps" class="help-steps"><li v-for="item in section.steps" :key="item">{{ item }}</li></ol>
+            <div v-if="section.table" class="help-table-scroll"><table><caption class="help-sr-only">{{ section.title }}</caption><thead><tr><th v-for="label in section.table.headings" :key="label" scope="col">{{ label }}</th></tr></thead><tbody><tr v-for="(row, rowIndex) in section.table.rows" :key="rowIndex"><th scope="row">{{ row[0] }}</th><td v-for="(cell, cellIndex) in row.slice(1)" :key="cellIndex">{{ cell }}</td></tr></tbody></table></div>
+            <pre v-if="section.code"><code>{{ section.code }}</code></pre>
+            <div v-if="section.topics" class="help-quick-links"><button v-for="id in section.topics" :key="id" @click="selectTopic(id)"><strong>{{ topicById[id].title.replace('Tutorial: ', '') }} <span aria-hidden="true">→</span></strong><span>{{ topicById[id].summary }}</span></button></div>
+            <div v-if="section.links" class="help-external-links"><a v-for="link in section.links" :key="link.href" :href="link.href" target="_blank" rel="noopener noreferrer">{{ link.label }} ↗</a></div>
+          </section>
+          <nav class="help-related" aria-label="Related help topics"><strong>Related</strong><button v-for="topic in related" :key="topic.id" @click="selectTopic(topic.id)">{{ topic.title }} <span aria-hidden="true">→</span></button></nav>
+        </article>
+      </div>
+    </div>
   </v-dialog>
 </template>
 
 <style scoped>
-.version {
-  margin-left: 1em;
-  color: var(--instrument-muted);
-  font-size: 0.6em;
-}
-
-.close-btn {
-  position: absolute;
-  top: 16px;
-  right: 16px;
+.help-shell { display: flex; flex-direction: column; height: min(820px, 90dvh); min-height: 0; overflow: hidden; background: #20262c; color: #e5eaf0; font: 13px/1.55 "Segoe UI", sans-serif; border: 1px solid #47515c; border-radius: 10px; }
+.help-header, .help-brand, .help-tools, .help-search { display: flex; align-items: center; }
+.help-header { padding: 10px 14px; gap: 12px; border-bottom: 1px solid #39434e; }
+.help-brand { gap: 9px; flex: 1; min-width: 0; }
+.help-brand strong { font-size: 15px; }.help-brand small { color: #a8b5c2; font-size: 11px; }
+button { color: inherit; font: inherit; cursor: pointer; border-radius: 4px; }
+.help-close, .help-tools > button, .help-clear { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; }
+button:hover { background: #34424b; }button:disabled { opacity: .35; cursor: default; }
+button:focus-visible, input:focus-visible, article:focus-visible { outline: 2px solid #a1dacb; outline-offset: -2px; }
+h2:focus, h3:focus { outline: none; }
+.help-tools { flex: 0 0 auto; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #39434e; }
+.help-search { flex: 1; min-width: 0; gap: 8px; padding: 0 8px; border: 1px solid #53626d; border-radius: 5px; background: #161d22; }
+.help-search input { min-width: 0; width: 100%; height: 34px; color: inherit; font: inherit; outline-offset: 0; }
+.help-search input::placeholder { color: #a8b5c2; }.help-search input::-webkit-search-cancel-button { display: none; }
+.help-count { font-size: 11px; color: #afbdc9; white-space: nowrap; }
+.help-layout { display: grid; grid-template-columns: 255px minmax(0, 1fr); min-height: 0; flex: 1; }
+.help-contents { overflow: auto; overscroll-behavior: contain; padding: 10px 8px 18px; border-right: 1px solid #39434e; background: #192127; }
+.help-group + .help-group { margin-top: 13px; }
+.help-group-title { color: #9eafbd; text-transform: uppercase; letter-spacing: .08em; font-size: 10px; margin: 4px 8px; }
+.help-topic-link { display: block; text-align: left; width: 100%; padding: 5px 8px; line-height: 1.4; font-size: 12px; border-left: 2px solid transparent; }
+.help-topic-link.selected { border-left-color: #a1dacb; color: #c6f4e7; background: #2a403f; }
+.help-result { padding: 9px 8px; border-bottom: 1px solid #313e46; }.help-result strong, .help-result span { display: block; }.help-result span { color: #b2bec8; font-size: 11px; margin-top: 4px; }
+.help-no-results { margin: 12px 8px; }.help-no-results button { display: block; color: #b0e5d9; margin-top: 12px; padding: 6px; text-decoration: underline; }
+.help-article { min-width: 0; overflow: auto; overscroll-behavior: contain; padding: 18px 24px 24px; scroll-padding-top: 16px; }
+.help-location { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #a1dacb; }.help-location span { display: block; color: #afbdc9; text-transform: none; letter-spacing: 0; font-size: 11px; margin-top: 3px; }
+.help-article h2 { font-size: 24px; line-height: 1.2; font-weight: 650; margin: 7px 0; }.help-summary { color: #c0cbd4; margin-bottom: 12px; }
+.help-topic-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid #3a454f; }
+.help-open-controls { border: 1px solid #648b81; background: #29413d; color: #c6f4e7; padding: 4px 9px; white-space: nowrap; }
+.help-section-links { display: flex; flex-wrap: wrap; gap: 4px 12px; }.help-section-links button { color: #b0e5d9; text-decoration: underline; font-size: 11px; padding: 2px 0; }
+.help-section { margin-top: 18px; }.help-section h3 { color: #f0f4f7; font-size: 15px; margin: 0 0 7px; }.help-section p + p { margin-top: 9px; }
+.help-section ul, .help-section ol { padding-left: 22px; margin-top: 8px; }.help-section li { padding-left: 2px; margin: 6px 0; }.help-steps li { padding-left: 5px; margin: 11px 0; }.help-steps li::marker { font-weight: 700; color: #a1dacb; }
+.help-table-scroll { overflow-x: auto; margin-top: 9px; }table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.5; }th, td { text-align: left; vertical-align: top; padding: 7px 9px; border-bottom: 1px solid #3a454f; }thead th { background: #2b363f; font-weight: 600; color: #c7d5df; }tbody th { width: 29%; font-weight: 600; color: #d2e4df; }tbody tr:nth-child(even) { background: #232d35; }
+pre { overflow-x: auto; margin-top: 10px; padding: 12px; background: #151c21; border: 1px solid #3a454f; border-radius: 5px; font: 12px/1.65 Consolas, monospace; }
+.help-related { border-top: 1px solid #3a454f; margin-top: 22px; padding-top: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 5px 12px; }.help-related strong { color: #afbdc9; font-size: 11px; }.help-related button { color: #b0e5d9; padding: 4px 0; font-size: 12px; }
+.help-quick-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }.help-quick-links button { text-align: left; padding: 9px 11px; border: 1px solid #435750; background: #283b37; }.help-quick-links button:hover { background: #344d46; }.help-quick-links strong { display: block; color: #c6f4e7; text-transform: capitalize; }.help-quick-links button > span { display: block; margin-top: 3px; color: #c0cbd4; font-size: 11px; }.help-external-links { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 12px; }.help-external-links a { color: #b0e5d9; }.help-external-links a:focus-visible { outline: 2px solid #a1dacb; }
+.help-tools > .help-contents-toggle { display: none; }.help-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+@media (max-width: 700px) {
+  .help-shell { height: 100dvh; border-radius: 0; border: 0; }.help-brand { flex-wrap: wrap; gap: 5px; }.help-brand small { font-size: 10px; }
+  .help-tools { gap: 4px; padding: 7px; }.help-tools > .help-contents-toggle { display: inline-flex; font-size: 11px; padding: 0 5px; }.help-count { display: none; }
+  .help-search { gap: 4px; padding: 0 5px; }.help-search input { font-size: 12px; }
+  .help-layout { display: block; overflow: hidden; }.help-article, .help-contents { height: 100%; }.help-article { padding: 15px; }.help-article h2 { font-size: 21px; }
+  .help-contents { display: none; border-right: 0; }.show-contents .help-contents { display: block; }.show-contents .help-article { display: none; }
+  .help-topic-link { padding: 9px 10px; font-size: 13px; }.help-section-links button { padding: 5px 0; }tbody th { width: 34%; }th, td { padding: 7px 6px; }
+  .help-quick-links { grid-template-columns: 1fr; }
 }
 </style>

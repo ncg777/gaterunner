@@ -6,7 +6,7 @@
     <template v-if="mode === 'granular'">
       <v-select :model-value="settings.granular.asset" label="Grain sample" :items="assets.map(a => ({ title: a.name, value: a.hash }))"
         variant="outlined" @update:modelValue="update('asset', $event)" />
-      <p v-if="!assets.length" class="text-body-2 mb-3">Import a WAV in Phrases, motion &amp; studio → Samples, then choose it here.</p>
+      <p v-if="!assets.length" class="text-body-2 mb-3">Open Samples in the editor dock, import a WAV, then choose it here.</p>
       <p v-else-if="!assets.some(a => a.hash === settings.granular.asset)" class="text-body-2 mb-3">Choose an available sample to play this generator.</p>
     </template>
     <v-row>

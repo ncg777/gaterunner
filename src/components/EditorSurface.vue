@@ -573,7 +573,7 @@
                 <v-btn prepend-icon="mdi-axis-arrow" variant="outlined" block @click="addWavetableDimension">Add morph axis</v-btn>
               </v-col>
               <v-col cols="12" md="6">
-                <v-btn prepend-icon="mdi-content-save-plus-outline" variant="outlined" block @click="addWavetableConfiguration">Capture configuration here</v-btn>
+                <v-btn prepend-icon="mdi-content-copy" variant="outlined" block @click="addWavetableConfiguration">Copy configuration here</v-btn>
               </v-col>
             </v-row>
             <v-row v-if="selectedTonewheelConfiguration">
@@ -840,6 +840,7 @@
 
 <script lang="ts">
 import SequenceGrid from './SequenceGrid.vue';
+import { editorHelpTopics } from '../help/content';
 import { defineComponent, type PropType } from 'vue';
 import EditableSlider from './EditableSlider.vue';
 import SynthEngineControls from './SynthEngineControls.vue';
@@ -1139,6 +1140,10 @@ export default defineComponent({
     },
   },
   methods: {
+    currentHelpTopic(): string {
+      return this.activeControlTab === 'sequence' && this.draftTrack.trackKind === 'rhythmic'
+        ? 'drums' : editorHelpTopics[this.activeControlTab] ?? 'engines';
+    },
     setSequencePattern(id: string) {
       this.sequencePatternId = this.draftTrack.development?.patterns.some(pattern => pattern.id === id) ? id : '';
     },
