@@ -127,13 +127,13 @@ Create, hear and save a short melodic pattern.
 
 ### Build the pattern
 
-1. Use Project → New and give the preset a name. If asked about an existing draft, save it first if you want to keep it.
+1. Use Project → New to start an unnamed draft with the default pattern. Use Clear instead for a blank sequence. Neither action creates a saved preset. If asked about an existing draft, save it first if you want to keep it.
 2. Select a melodic track. In the inspector, choose Forte number 7-35.11. Its pitch classes are C, D, E, F, G, A, B.
 3. Open Sequence and enter 1 2 4 8 3 5 7 0. Powers of two select one position; combined bits select chords.
 4. In Playback, set Numerator to 4, Denominator to 4, Track Note Length to 50% and Fixed Note Length to 0. Each step is a sixteenth note; eight steps take two beats.
 5. Press Play, or Space outside an editable control. You should hear four single notes followed by three chords; the last step starts nothing. Stop before continuing.
 6. Click cells in the note grid to change the same sequence. Use Double to repeat its contents or + 16 steps to append empty steps.
-7. Use Project → Save, or Save As to keep a separate version. The status changes from Unsaved changes to Saved.
+7. Use Project → Save and enter a name to keep the draft in your library. After saving, Save updates that preset and Save As keeps a separate version. The status changes from Draft or Unsaved changes to Saved.
 
 ### Try another sound
 
@@ -315,18 +315,22 @@ Save drafts, organize the local library and move projects between devices.
 
 ### Draft versus saved preset
 
+Unnamed drafts show Untitled draft and a Draft status. Save or export the draft to keep it after closing or reloading the page. Loading another preset, New and Clear ask before discarding an unsaved draft; cancelling keeps your work.
+
 | Action | Result |
 | --- | --- |
-| Save | Updates the selected preset with the current draft. |
+| Save | Updates the selected preset, or asks for a name to save an unnamed draft for the first time. |
 | Save As | Creates a separately named preset from the draft. |
-| New / Rename / Delete | Create a project, change its name or remove it. Loading another preset or creating a new one can require discarding unsaved changes. |
-| Export Preset | Downloads the current draft as a single-preset JSON file. |
-| Export Library | Downloads the library with the current draft substituted for its selected preset. This does not save that draft back to browser storage. |
+| New | Starts an unnamed draft with default settings and the default pattern, without adding to the library. |
+| Clear | Starts an unnamed draft with default settings and one empty melodic track, without changing saved presets. |
+| Rename / Delete | Change the selected saved preset’s name or remove it. These actions are unavailable for unnamed drafts. |
+| Export Preset | Downloads the current draft as a single-preset JSON file, even before it has a saved name. |
+| Export Library | Downloads the library with the current draft substituted for its selected preset, or included as an extra preset if unnamed. This does not save that draft back to browser storage. |
 | Import JSON | Adds presets/folders from a single preset, library or portable project without overwriting existing presets. Imported IDs are remapped as needed. |
 
 ### Preset Browser
 
-Click the preset name to open the browser. Search names or folder paths, choose a folder in the tree, and use New Folder or New Preset. Folder and preset menus support rename, move and delete. Folder deletion also removes its descendants after confirmation. Merge tracks into current adds all tracks from another preset after confirmation, retaining the current project’s shared tempo and harmony. Save the merged draft when ready.
+Click the preset name or Untitled draft to open the browser. Search names or folder paths, choose a folder in the tree, and use New Folder or New Preset. New Preset in the browser creates a named library entry; Project → New starts an unnamed working draft. Folder and preset menus support rename, move and delete. Folder deletion also removes its descendants after confirmation. Merge tracks into current adds all tracks from another preset to the working draft, including unnamed drafts, after confirmation, retaining the current project’s shared tempo and harmony. Save the merged draft when ready.
 
 ### Storage and portability
 

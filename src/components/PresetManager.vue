@@ -10,13 +10,13 @@
           @click="openPresetBrowser"
         >
           <div class="preset-browser-launch-content">
-            <span class="preset-browser-launch-name">{{ currentPreset?.name ?? 'No preset selected' }}</span>
+            <span class="preset-browser-launch-name">{{ currentPreset?.name ?? 'Untitled draft' }}</span>
             <span class="preset-browser-launch-path">{{ currentPresetFolderPathLabel }}</span>
           </div>
         </v-btn>
         <div class="preset-state-pill" :class="{ dirty: isDirty }">
           <v-icon size="16">{{ isDirty ? 'mdi-circle-edit-outline' : 'mdi-check-circle-outline' }}</v-icon>
-          <span>{{ isDirty ? 'Unsaved changes' : 'Saved' }}</span>
+          <span>{{ isDraft ? 'Draft' : isDirty ? 'Unsaved changes' : 'Saved' }}</span>
         </div>
         <v-menu v-model="presetMenuOpen" location="bottom end">
           <template #activator="{ props }">
@@ -34,12 +34,13 @@
             <v-list-item
               title="Save"
               prepend-icon="mdi-content-save-outline"
-              :disabled="!currentPreset || !isDirty"
+              :disabled="!isDirty || isPersisting"
               @click="saveCurrentPreset"
             />
             <v-list-item title="Save As" prepend-icon="mdi-content-save-edit-outline" @click="saveAsPreset" />
-            <v-list-item title="New" prepend-icon="mdi-plus-box-outline" @click="createNewPreset" />
-            <v-list-item title="Delete" prepend-icon="mdi-delete-outline" @click="deleteCurrentPreset" />
+            <v-list-item title="New" prepend-icon="mdi-plus-box-outline" :disabled="isPersisting" @click="createNewPreset" />
+            <v-list-item title="Clear" prepend-icon="mdi-eraser" :disabled="isPersisting" @click="clearPreset" />
+            <v-list-item title="Delete" prepend-icon="mdi-delete-outline" :disabled="!currentPreset" @click="deleteCurrentPreset" />
             <v-divider class="my-1" />
             <v-list-item title="Export Preset" prepend-icon="mdi-export-variant" @click="exportCurrentPreset" />
             <v-list-item title="Export Library" prepend-icon="mdi-database-export-outline" @click="exportPresetLibrary" />
@@ -47,7 +48,7 @@
             <v-list-item title="Presets & sharing help" prepend-icon="mdi-help-circle-outline" @click="$emit('help')" />
           </v-list>
         </v-menu>
-        <v-btn class="project-save-button" icon="mdi-content-save-outline" variant="text" size="small" title="Save preset" aria-label="Save preset" :disabled="!currentPreset || !isDirty" @click="saveCurrentPreset" />
+        <v-btn class="project-save-button" icon="mdi-content-save-outline" variant="text" size="small" title="Save preset" aria-label="Save preset" :disabled="!isDirty || isPersisting" @click="saveCurrentPreset" />
       </div>
     </div>
 
@@ -76,28 +77,6 @@
           <v-spacer></v-spacer>
           <v-btn variant="text" @click="cancelPresetRename">Cancel</v-btn>
           <v-btn color="primary" @click="confirmPresetRename" :disabled="!canSubmitPresetRename">Rename</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-
-    <v-dialog v-model="showCreatePresetDialog" max-width="460px">
-      <v-card class="rename-dialog-card">
-        <v-card-title class="text-h6">New Preset</v-card-title>
-        <v-card-text>
-          <v-text-field
-            ref="createPresetInputRef"
-            v-model="createPresetInput"
-            label="Preset name"
-            density="comfortable"
-            variant="outlined"
-            autofocus
-            @keydown.enter.prevent="confirmCreatePreset"
-          />
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer></v-spacer>
-          <v-btn variant="text" @click="cancelCreatePreset">Cancel</v-btn>
-          <v-btn color="primary" @click="confirmCreatePreset" :disabled="!canSubmitCreatePreset">Create</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -197,7 +176,7 @@
                   v-for="entry in presetBrowserSearchResults"
                   :key="entry.preset.id"
                   class="preset-item-row"
-                  :class="{ active: entry.preset.id === presetLibrary.selectedPresetId }"
+                  :class="{ active: entry.preset.id === currentPreset?.id }"
                 >
                   <button type="button" class="preset-item-load" @click="loadPresetFromBrowser(entry.preset.id)">
                     <span class="preset-item-name">{{ entry.preset.name }}</span>
@@ -214,7 +193,7 @@
                       <v-list-item
                         title="Merge tracks into current"
                         prepend-icon="mdi-playlist-plus"
-                        :disabled="entry.preset.id === presetLibrary.selectedPresetId"
+                        :disabled="entry.preset.id === currentPreset?.id"
                         @click="mergeTracksFromPreset(entry.preset.id)"
                       />
                       <v-list-item title="Rename preset" prepend-icon="mdi-form-textbox" @click="renamePresetFromBrowser(entry.preset.id)" />
@@ -254,7 +233,7 @@
                   v-for="preset in activePresetFolderPresets"
                   :key="preset.id"
                   class="preset-item-row"
-                  :class="{ active: preset.id === presetLibrary.selectedPresetId }"
+                  :class="{ active: preset.id === currentPreset?.id }"
                 >
                   <button type="button" class="preset-item-load" @click="loadPresetFromBrowser(preset.id)">
                     <span class="preset-item-name">{{ preset.name }}</span>
@@ -270,7 +249,7 @@
                       <v-list-item
                         title="Merge tracks into current"
                         prepend-icon="mdi-playlist-plus"
-                        :disabled="preset.id === presetLibrary.selectedPresetId"
+                        :disabled="preset.id === currentPreset?.id"
                         @click="mergeTracksFromPreset(preset.id)"
                       />
                       <v-list-item title="Rename preset" prepend-icon="mdi-form-textbox" @click="renamePresetFromBrowser(preset.id)" />
@@ -342,6 +321,7 @@ import {
   buildUniquePresetNameInFolder,
   createFolder,
   createNamedPreset,
+  clonePresetData,
   deleteFolderRecursive,
   deletePreset,
   getFolderPath,
@@ -429,6 +409,7 @@ export default defineComponent({
       presetLibrary: this.initialLibrary,
       activePresetFolderId: selectedPreset?.folderId ?? null as string | null,
       dirtyState: this.initialDirty,
+      isDraft: false,
       showPresetBrowser: false,
       presetBrowserSearch: '',
       expandedPresetFolderIds: [] as string[],
@@ -443,14 +424,13 @@ export default defineComponent({
       presetBrowserNameInput: '',
       showRenamePresetDialog: false,
       renamePresetInput: '',
-      showCreatePresetDialog: false,
-      createPresetInput: '',
       presetMenuOpen: false,
       isPersisting: false,
     };
   },
   computed: {
     currentPreset(): NamedPreset | null {
+      if (this.isDraft) return null;
       return this.presetLibrary.presets.find((preset) => preset.id === this.presetLibrary.selectedPresetId)
         ?? this.presetLibrary.presets[0]
         ?? null;
@@ -463,7 +443,7 @@ export default defineComponent({
     },
     currentPresetFolderPathLabel(): string {
       if (!this.currentPreset) {
-        return '/';
+        return 'Not saved in library';
       }
       const segments = this.currentPresetFolderPath.map((folder) => folder.name);
       return segments.length > 0 ? segments.join(' / ') : '/';
@@ -562,9 +542,6 @@ export default defineComponent({
       if (!this.currentPreset) return false;
       return sanitizePresetName(this.renamePresetInput) !== this.currentPreset.name;
     },
-    canSubmitCreatePreset(): boolean {
-      return this.createPresetInput.trim().length > 0;
-    },
   },
   watch: {
     draftData: {
@@ -576,7 +553,7 @@ export default defineComponent({
   },
   methods: {
     syncDirtyState() {
-      this.dirtyState = this.currentPreset ? !arePresetDataEqual(this.draftData, this.currentPreset.data) : false;
+      this.dirtyState = this.currentPreset ? !arePresetDataEqual(this.draftData, this.currentPreset.data) : true;
       this.$emit('dirty-change', this.dirtyState);
     },
     formatFolderPath(folderId: string | null): string {
@@ -710,12 +687,12 @@ export default defineComponent({
     async mergeTracksFromPreset(presetId: string) {
       const sourcePreset = this.presetLibrary.presets.find((preset) => preset.id === presetId);
       const currentPreset = this.currentPreset;
-      if (!sourcePreset || !currentPreset || sourcePreset.id === currentPreset.id) return;
+      if (!sourcePreset || sourcePreset.id === currentPreset?.id) return;
 
       const trackCount = sourcePreset.data.tracks.length;
       const shouldMerge = await this.askForConfirmation(
         'Merge Preset Tracks',
-        `Add ${trackCount} track${trackCount === 1 ? '' : 's'} from "${sourcePreset.name}" to "${currentPreset.name}"? Current song settings will stay unchanged.`,
+        `Add ${trackCount} track${trackCount === 1 ? '' : 's'} from "${sourcePreset.name}" to "${currentPreset?.name ?? 'Untitled draft'}"? Current song settings will stay unchanged.`,
         'Merge',
       );
       if (!shouldMerge) return;
@@ -772,40 +749,6 @@ export default defineComponent({
       if (!(await this.renameCurrentPreset(this.renamePresetInput))) return;
       this.cancelPresetRename();
     },
-    openCreatePresetDialog() {
-      this.createPresetInput = this.buildUniquePresetName('New preset', this.activePresetFolderId);
-      this.showCreatePresetDialog = true;
-      this.focusCreatePresetInput();
-    },
-    focusCreatePresetInput() {
-      this.$nextTick(() => {
-        window.requestAnimationFrame(() => {
-          const input = (this.$refs.createPresetInputRef as { $el?: HTMLElement } | undefined)?.$el?.querySelector('input') as HTMLInputElement | null;
-          input?.focus();
-          input?.select();
-        });
-      });
-    },
-    cancelCreatePreset() {
-      this.showCreatePresetDialog = false;
-      this.createPresetInput = '';
-    },
-    async confirmCreatePreset() {
-      if (!this.canSubmitCreatePreset) return;
-
-      const folderId = this.activePresetFolderId;
-      const preset = {
-        ...createNamedPreset(this.buildUniquePresetName(this.createPresetInput, folderId), DEFAULT_PRESET_DATA),
-        folderId,
-      };
-      if (!(await this.persistPresetLibrary({
-        ...this.presetLibrary,
-        presets: [...this.presetLibrary.presets, preset],
-        selectedPresetId: preset.id,
-      }))) return;
-      this.applyDraftData(preset.data);
-      this.cancelCreatePreset();
-    },
     async persistPresetLibrary(library: PresetLibrary): Promise<boolean> {
       if (this.isPersisting) {
         this.showNotice('A preset save is still in progress. Please retry when it finishes.', 'info');
@@ -834,6 +777,7 @@ export default defineComponent({
 
       const nextLibrary = { ...library, selectedPresetId: preset.id };
       if (!(await this.persistPresetLibrary(nextLibrary))) return false;
+      this.isDraft = false;
       this.activePresetFolderId = preset.folderId;
       this.applyDraftData(preset.data);
       this.syncDirtyState();
@@ -856,7 +800,10 @@ export default defineComponent({
     },
     async saveCurrentPreset() {
       const currentPreset = this.currentPreset;
-      if (!currentPreset) return;
+      if (!currentPreset) {
+        await this.saveAsPreset();
+        return;
+      }
 
       const updatedPreset = updatePresetData(currentPreset, this.draftData);
       if (!(await this.persistPresetLibrary({
@@ -868,12 +815,13 @@ export default defineComponent({
       this.showNotice(`Saved preset "${updatedPreset.name}".`, 'success');
     },
     async saveAsPreset() {
-      const folderId = this.currentPreset?.folderId ?? null;
+      const currentPreset = this.currentPreset;
+      const folderId = currentPreset ? currentPreset.folderId : this.activePresetFolderId;
       const requestedName = await this.askForTextInput({
-        title: 'Save Preset Copy',
+        title: currentPreset ? 'Save Preset Copy' : 'Save Preset',
         label: 'Preset name',
-        initialValue: this.buildUniquePresetName(`${this.currentPreset?.name ?? 'Preset'} Copy`, folderId),
-        confirmLabel: 'Create',
+        initialValue: this.buildUniquePresetName(currentPreset ? `${currentPreset.name} Copy` : 'New preset', folderId),
+        confirmLabel: currentPreset ? 'Create' : 'Save',
       });
       if (requestedName === null) return;
 
@@ -886,16 +834,28 @@ export default defineComponent({
         presets: [...this.presetLibrary.presets, newPreset],
         selectedPresetId: newPreset.id,
       }))) return;
+      this.isDraft = false;
       this.activePresetFolderId = folderId;
       this.applyDraftData(newPreset.data);
       this.syncDirtyState();
       this.showNotice(`Created preset "${newPreset.name}".`, 'success');
     },
     async createNewPreset() {
+      await this.startDraft(false);
+    },
+    async clearPreset() {
+      await this.startDraft(true);
+    },
+    async startDraft(empty: boolean) {
       this.presetMenuOpen = false;
-      if (!(await this.confirmDiscardChanges('Create a new preset and discard them'))) return;
-      this.activePresetFolderId = this.currentPreset?.folderId ?? null;
-      this.$nextTick(() => this.openCreatePresetDialog());
+      if (this.isPersisting) return;
+      if (!(await this.confirmDiscardChanges(`${empty ? 'Clear the project' : 'Start a new draft'} and discard them`))) return;
+      this.activePresetFolderId = this.currentPreset?.folderId ?? this.activePresetFolderId;
+      const data = clonePresetData(DEFAULT_PRESET_DATA);
+      if (empty) data.tracks[0].sequenceInput = '';
+      this.isDraft = true;
+      this.applyDraftData(data);
+      this.syncDirtyState();
     },
     async deleteCurrentPreset() {
       const currentPreset = this.currentPreset;
@@ -933,7 +893,13 @@ export default defineComponent({
     },
     buildLibraryForExport(): PresetLibrary {
       const currentPreset = this.currentPreset;
-      if (!currentPreset) return this.presetLibrary;
+      if (!currentPreset) {
+        const draft = {
+          ...createNamedPreset(this.buildUniquePresetName('Untitled draft', this.activePresetFolderId), this.draftData),
+          folderId: this.activePresetFolderId,
+        };
+        return { ...this.presetLibrary, presets: [...this.presetLibrary.presets, draft], selectedPresetId: draft.id };
+      }
       return {
         ...this.presetLibrary,
         presets: this.presetLibrary.presets.map((preset) => preset.id === currentPreset.id ? updatePresetData(preset, this.draftData) : preset),
@@ -941,8 +907,9 @@ export default defineComponent({
     },
     exportCurrentPreset() {
       const currentPreset = this.currentPreset;
-      if (!currentPreset) return;
-      const exportPreset = updatePresetData(currentPreset, this.draftData);
+      const exportPreset = currentPreset
+        ? updatePresetData(currentPreset, this.draftData)
+        : createNamedPreset('Untitled draft', this.draftData);
       this.downloadJson(`gaterunner-preset-${this.currentPresetFilenamePart()}-${this.formattedDate()}.json`, buildSinglePresetExport(exportPreset));
     },
     exportPresetLibrary() {
@@ -984,6 +951,7 @@ export default defineComponent({
         if (!(await this.persistPresetLibrary(nextLibrary))) return;
         if (shouldLoad) {
           const preset = nextLibrary.presets.find(entry => entry.id === mergeResult.selectedPresetId)!;
+          this.isDraft = false;
           this.activePresetFolderId = preset.folderId;
           this.applyDraftData(preset.data);
           this.syncDirtyState();
@@ -996,14 +964,11 @@ export default defineComponent({
       }
     },
     async loadPresetFromBrowser(presetId: string) {
-      const before = this.presetLibrary.selectedPresetId;
       if (!(await this.handlePresetSelection(presetId))) return;
-      if (this.presetLibrary.selectedPresetId !== before) {
-        this.showPresetBrowser = false;
-      }
+      this.showPresetBrowser = false;
     },
     async handlePresetSelection(nextPresetId: string): Promise<boolean> {
-      const currentPresetId = this.presetLibrary.selectedPresetId;
+      const currentPresetId = this.currentPreset?.id;
       if (!nextPresetId || nextPresetId === currentPresetId) return false;
       if (!(await this.confirmDiscardChanges('Load another preset and discard them'))) return false;
       return this.loadPresetById(nextPresetId);
