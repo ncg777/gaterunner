@@ -5,12 +5,13 @@ import { compileControl, type TrackDevelopment } from '../domain/development.js'
 export interface FilterLfoOptions {
   enabled: boolean;
   frequencyHz: number;
+  cycleBeats?: number;
   amount: number;
   waveform: LfoWaveform;
   initPhase: number;
   retrigger?: LfoPhaseMode;
   a4?: number;
-  development?: { controls: TrackDevelopment; baseMidi: number; bpm: number };
+  development?: { controls: TrackDevelopment; baseMidi: number };
 }
 
 const CONTROL_INTERVAL = 1 / 200;
@@ -65,7 +66,10 @@ export class FilterLfo {
   }
 
   private localTime(time: number): number {
-    return Math.max(0, time - this.startAtTime(time));
+    const start = this.startAtTime(time);
+    if (this.options?.cycleBeats === undefined) return Math.max(0, time - start);
+    const { bpm, PPQ } = this.filter.context.transport;
+    return Math.max(0, bpm.getTicksAtTime(time) - bpm.getTicksAtTime(start)) / PPQ;
   }
 
   set(options: FilterLfoOptions): void {
@@ -122,11 +126,12 @@ export class FilterLfo {
 
   private detuneAtTime(time: number): number {
     const options = this.options!;
-    let offset = sampleLfoAtTime(this.state, this.localTime(time), options.frequencyHz,
+    const rate = options.cycleBeats === undefined ? options.frequencyHz : 1 / options.cycleBeats;
+    let offset = sampleLfoAtTime(this.state, this.localTime(time), rate,
       options.waveform, options.initPhase) * options.amount;
     if (this.developedCutoff && options.development) {
-      const start = this.songStarts.filter(start => start <= time + 1e-9).at(-1) ?? 0;
-      offset += Number(this.developedCutoff(Math.max(0, time - start) * options.development.bpm / 60)) - options.development.baseMidi;
+      const transport = this.filter.context.transport;
+      offset += Number(this.developedCutoff(transport.getTicksAtTime(time) / transport.PPQ)) - options.development.baseMidi;
     }
     const baseMidi = 69 + 12 * Math.log2(Number(this.filter.frequency.getValueAtTime(time)) / (options.a4 ?? 440));
     return (Math.max(0, Math.min(127, baseMidi + offset)) - baseMidi) * 100;
@@ -142,6 +147,7 @@ export class FilterLfo {
     // Fill the look-ahead window on the context clock, including offline rendering.
     const end = this.filter.context.now() + CONTROL_INTERVAL * 2;
     const options = this.options!;
+    const rate = options.cycleBeats === undefined ? options.frequencyHz : 1 / options.cycleBeats;
     const stepped = options.waveform === 'square' || options.waveform === 'sample-hold';
     while (this.nextTime <= end) {
       const time = this.nextTime;
@@ -150,8 +156,8 @@ export class FilterLfo {
         this.filter.detune.setValueAtTime(this.detuneAtTime(start), start);
       }
       const value = this.detuneAtTime(time);
-      const wraps = Math.floor(this.localTime(time) * options.frequencyHz + options.initPhase)
-        !== Math.floor(this.localTime(time - CONTROL_INTERVAL) * options.frequencyHz + options.initPhase);
+      const wraps = Math.floor(this.localTime(time) * rate + options.initPhase)
+        !== Math.floor(this.localTime(time - CONTROL_INTERVAL) * rate + options.initPhase);
       if (stepped || (wraps && (options.waveform === 'saw-up' || options.waveform === 'saw-down'))) {
         this.filter.detune.setValueAtTime(value, time);
       } else {

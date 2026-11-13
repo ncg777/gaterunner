@@ -68,7 +68,7 @@
           <span class="transport-label" role="status">{{ isStarting ? playbackPreparation : isRunning ? 'PLAYING' : 'POSITION' }}</span>
           <strong>{{ transportPosition }}</strong>
         </div>
-        <label class="tempo-display">
+        <label class="tempo-display" :title="developmentPlayer ? 'Stop rendered playback to change tempo' : undefined">
           <span class="transport-label">TEMPO</span>
           <span>
             <input
@@ -77,6 +77,7 @@
               max="499"
               step="1"
               :value="bpm"
+              :disabled="isStarting || !!developmentPlayer"
               aria-label="Tempo in BPM"
               @change="setTempo"
             />
@@ -545,7 +546,7 @@ import { getMasterBus, disposeMasterBus, setMasterGainDb, setMasterPulse, resetM
 import { normalizeMasterPulse, type MasterPulseSettings } from './audio/masterPulse';
 import MasterPulseControls from './components/MasterPulseControls.vue';
 import { sleepWhenSilent, type AudioSleep } from './audio/idleAudio';
-import { buildTrackFadeEnvelope } from './audio/trackFade';
+import { buildTrackFadeEnvelope, getTrackFadeGain } from './audio/trackFade';
 import { getStepDurations } from './audio/stepDurations';
 import { applyTrackPhase } from './audio/trackPhase';
 import { Phaser } from './audio/phaser';
@@ -557,7 +558,7 @@ import {
   type WaveshaperAudioChain,
 } from './audio/waveshaperEffect';
 import { setTremoloSpread, setChorusSpread } from './audio/tremolo';
-import { getLfoFrequencyHz, type LfoWaveform } from './audio/lfo';
+import { getLfoFrequencyHz, getLfoSyncRateSeconds, type LfoWaveform } from './audio/lfo';
 import { FilterLfo } from './audio/filterLfo';
 import { CHOIR_FORMANT_BANDS, getChoirFormantBandGainLinear, type FormantBand } from './audio/choir';
 import { normalizeSynthEngine, resolveSynthMode, resolveGeneratorEngine } from './audio/synthEngine';
@@ -771,6 +772,7 @@ export default defineComponent({
       developmentController: null as AbortController | null,
       developmentSendCleanup: null as (() => void) | null,
       developmentEndEvent: null as number | null,
+      developmentEndTimer: null as number | null,
       trackMixStates: {} as Record<string, TrackMixState>,
       selectedTrackId: initialState.selectedTrackId as string | null,
       reverbEnabled: initialState.draft.reverb.enabled,
@@ -790,8 +792,9 @@ export default defineComponent({
       audioContextResumeHandler: null as (() => void) | null,
       audioSleep: null as AudioSleep | null,
       lastScheduledAudioEnd: 0,
-      trackLoops: markRaw({}) as Record<string, Tone.Part<TrackScheduledEvent>>,
-      trackFadeLoops: markRaw({}) as Record<string, Tone.Part<{ time: number }>>,
+      trackLoops: markRaw({}) as Record<string, Tone.Part<[Tone.Unit.Time, TrackScheduledEvent]>>,
+      trackFadeLoops: markRaw({}) as Record<string, Tone.Part<{ time: Tone.Unit.Time }>>,
+      activeTrackFades: markRaw(new Map<string, (when: number) => void>()),
       showHelp: false,
       helpTopic: null as string | null,
       trackSynths: markRaw({}) as Record<string, TrackAudioChain>,
@@ -830,6 +833,7 @@ export default defineComponent({
       dockView: 'editor',
       timelineZoom: 1,
       playbackSeconds: 0,
+      playbackBeats: 0,
       playbackOrigin: 0,
       playbackTimer: null as number | null,
       playbackGeneration: 0,
@@ -841,13 +845,21 @@ export default defineComponent({
       if (this.playbackTimer !== null) window.clearInterval(this.playbackTimer);
       this.playbackTimer = null;
       this.playbackSeconds = 0;
+      this.playbackBeats = 0;
       if (running) {
         this.playbackOrigin = Tone.now();
         this.playbackTimer = window.setInterval(() => {
-          this.playbackSeconds = this.developmentPlayer
-            ? Math.max(0, Tone.now() - this.playbackOrigin)
-            : this.developmentSchedule ? Tone.getTransport().seconds
-              : Tone.getTransport().seconds % this.loopDurationSeconds;
+          const context = Tone.getContext();
+          if (this.developmentPlayer) {
+            this.playbackSeconds = Math.max(0, context.currentTime - this.playbackOrigin);
+            return;
+          }
+          const transport = context.transport;
+          const loopBeats = this.loopDurationSeconds * this.bpm / 60;
+          const beats = transport.getTicksAtTime(context.currentTime) / transport.PPQ;
+          this.playbackBeats = this.developmentSchedule ? beats : beats % loopBeats;
+          this.playbackSeconds = this.developmentSchedule ? transport.getSecondsAtTime(context.currentTime)
+            : this.playbackBeats * 60 / transport.bpm.getValueAtTime(context.currentTime);
         }, 60);
       }
     },
@@ -860,7 +872,8 @@ export default defineComponent({
       return `${minutes}:${seconds}.${String(milliseconds % 1000).padStart(3, '0')}`;
     },
     playheadProgress(): number {
-      return Math.min(1, this.playbackSeconds / this.loopDurationSeconds);
+      const position = this.developmentPlayer ? this.playbackSeconds : this.playbackBeats * 60 / this.bpm;
+      return Math.min(1, position / this.loopDurationSeconds);
     },
     pitchClassNames(): string[] {
       return (PCS12.parseForte(this.forte)?.asSequence() ?? []).map(n => ['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'][n]);
@@ -1014,9 +1027,29 @@ export default defineComponent({
     setTempo(event: Event) {
       const input = event.target as HTMLInputElement;
       const value = Number(input.value);
-      if (input.value && Number.isFinite(value)) {
-        this.bpm = Math.max(1, Math.min(499, Math.round(value)));
-        this.handleDraftChange();
+      const bpm = Math.max(1, Math.min(499, Math.round(value)));
+      if (input.value && Number.isFinite(value) && bpm !== this.bpm && !this.isStarting && !this.developmentPlayer) {
+        this.bpm = bpm;
+        const context = Tone.getContext();
+        // The clock has already queued audio through its lookahead window.
+        // Change rate beyond that window, with room for sub-tick callbacks.
+        const transport = context.transport;
+        const now = context.now();
+        const tick = transport.getTicksAtTime(now);
+        const when = this.isRunning
+          ? now + transport.bpm.getDurationOfTicks(Math.ceil(tick) + 1 - tick, now) : now;
+        transport.bpm.cancelScheduledValues(when).setValueAtTime(bpm, when);
+        void setMasterPulse(getMasterBus(), this.masterPulse, bpm, when).catch(error => {
+          this.showPlaybackErrorMessage(`Master Pulse could not start: ${String(error)}`);
+        });
+        if (!this.useMidiOutput) {
+          for (const track of this.tracks) {
+            const chain = this.trackSynths[track.id];
+            if (chain) this.updateTrackTempoEffects(track, chain, when);
+          }
+          for (const retime of this.activeTrackFades.values()) retime(when);
+        }
+        this.refreshDirtyState();
       }
       input.value = String(this.bpm);
     },
@@ -1389,7 +1422,7 @@ export default defineComponent({
       noteVelocities?: number[][],
       drumVoiceIds?: DrumVoiceId[][],
     ): TrackScheduledEvent[] {
-      if (this.developmentSchedule?.tracks[trackIndex]?.track.id === track.id && usesDevelopment(this.getDraftData())) {
+      if (this.developmentSchedule?.tracks[trackIndex]?.track.id === track.id) {
         return this.developmentSchedule.tracks[trackIndex].events.map(event => ({ ...event, step: event.step ?? 0 }));
       }
       return buildLegacyTrackEvents({ track, quant: this.getTrackQuant(track), actualNotes: trackNotes,
@@ -1770,7 +1803,7 @@ export default defineComponent({
       if (this.developmentPlayer || this.developmentController) this.stopSequencer();
       const rebuildLoops = options.rebuildLoops ?? true;
       const createMissingChains = options.createMissingChains ?? this.isRunning;
-      Tone.getTransport().bpm.value = this.bpm;
+      if (Tone.getTransport().bpm.value !== this.bpm) Tone.getTransport().bpm.value = this.bpm;
       setMasterGainDb(getMasterBus(), this.masterGain);
       void setMasterPulse(getMasterBus(), this.masterPulse, this.bpm).catch(error => {
         this.showPlaybackErrorMessage(`Master Pulse could not start: ${String(error)}`);
@@ -1892,7 +1925,10 @@ export default defineComponent({
       return this.reverbChain as ReverbAudioChain;
     },
     getTrackEchoMaxDelay(track: PresetTrackData): number {
-      return Math.max(1, this.getEchoDelaySeconds(track.echoDelay));
+      if (!track.echoEnabled) return 1;
+      const delay = this.getEchoDelaySeconds(track.echoDelay);
+      // Give live echoes room to slow down without reallocating their delay line.
+      return Math.min(179, Math.max(1, Tone.getContext().isOffline ? delay : 2 * delay));
     },
     createTrackAudioChain(options: { echoPingPong?: boolean; maxDelay?: number; phaserStages?: number; phaserCenterFrequency?: number } = {}): TrackAudioChain {
       preparePeriodicWaveContext(Tone.getContext());
@@ -2286,9 +2322,9 @@ export default defineComponent({
      */
     syncTrackChainNodeOptions(track: PresetTrackData, chain: TrackAudioChain) {
       const maxDelay = this.getTrackEchoMaxDelay(track);
-      if (chain.echoPingPong !== track.echoPingPong || chain.maxDelay < maxDelay) {
+      if (chain.echoPingPong !== track.echoPingPong || (track.echoEnabled && this.getEchoDelaySeconds(track.echoDelay) > chain.maxDelay)) {
         chain.echoPingPong = track.echoPingPong;
-        chain.maxDelay = Math.max(chain.maxDelay, maxDelay);
+        chain.maxDelay = maxDelay;
         if (chain.echo) {
           chain.echo.disconnect();
           chain.echo.dispose();
@@ -2519,30 +2555,10 @@ export default defineComponent({
       chain.filterLfo?.refresh(startTime);
     },
     getEchoDelaySeconds(delay: EchoDelayValue): number {
-      const match = delay.match(/^1\/(\d+)([DT])?$/);
-      if (!match) {
-        return 60 / this.bpm;
-      }
-
-      const denominator = Number.parseInt(match[1], 10);
-      const modifier = match[2];
-      const quarterNoteSeconds = 60 / this.bpm;
-      const wholeNoteSeconds = quarterNoteSeconds * 4;
-      const modifierRatio = modifier === 'D' ? 1.5 : modifier === 'T' ? 2 / 3 : 1;
-      return (wholeNoteSeconds / denominator) * modifierRatio;
+      return getLfoSyncRateSeconds(delay, this.bpm);
     },
     getModulationRateSeconds(rate: ModulationRateValue): number {
-      const match = rate.match(/^(\d+)\/(\d+)([DT])?$/);
-      if (!match) {
-        return 60 / this.bpm;
-      }
-
-      const numerator = Number.parseInt(match[1], 10);
-      const denominator = Number.parseInt(match[2], 10);
-      const modifier = match[3];
-      const wholeNoteSeconds = (60 / this.bpm) * 4;
-      const modifierRatio = modifier === 'D' ? 1.5 : modifier === 'T' ? 2 / 3 : 1;
-      return (wholeNoteSeconds * numerator / denominator) * modifierRatio;
+      return getLfoSyncRateSeconds(rate, this.bpm);
     },
     /** Tempo-synced LFO rate: one full modulation cycle per selected note division. */
     getModulationRateHz(rate: ModulationRateValue): number {
@@ -2788,6 +2804,8 @@ export default defineComponent({
                   syncRate: track.filterLfoRate,
                   bpm: this.bpm,
                 }),
+                lfoCycleBeats: !chain.sourceBus.context.isOffline && track.filterLfoSync
+                  ? getLfoSyncRateSeconds(track.filterLfoRate, 60) : undefined,
                 lfoAmount: track.filterLfoAmount,
                 lfoWaveform: track.filterLfoWaveform as LfoWaveform,
                 lfoInitPhase: track.filterLfoInitPhase,
@@ -2797,7 +2815,7 @@ export default defineComponent({
                   ? { controls: { ...track.development,
                     automation: track.development.automation.filter(curve => curve.target === 'filterFrequency'),
                     steps: [], patterns: [], sections: [], snapshots: [], snapshotCues: [], samples: [], sends: {},
-                  }, baseMidi: track.filterFrequency, bpm: this.bpm } : undefined,
+                  }, baseMidi: track.filterFrequency } : undefined,
             },
           } as Parameters<PitchEnvelopeSynth['set']>[0];
           // PolySynth.set typings only expose base SynthOptions; PitchEnvelopeSynth accepts the extras.
@@ -2845,6 +2863,8 @@ export default defineComponent({
           sync: track.filterLfoSync, rateHz: track.filterLfoRateHz,
           syncRate: track.filterLfoRate, bpm: this.bpm,
         }),
+        cycleBeats: !chain.sourceBus.context.isOffline && track.filterLfoSync
+          ? getLfoSyncRateSeconds(track.filterLfoRate, 60) : undefined,
         amount: track.filterLfoAmount,
         waveform: track.filterLfoWaveform as LfoWaveform,
         initPhase: track.filterLfoInitPhase,
@@ -2974,7 +2994,6 @@ export default defineComponent({
         track.filterLfoInitPhase,
         track.filterLfoRetrigger,
         this.developmentSchedule ? JSON.stringify(track.development?.automation) : '',
-        this.bpm,
         track.polyphony,
         track.glideTime,
         track.glideMode,
@@ -3075,10 +3094,23 @@ export default defineComponent({
         if (!existing && !createMissingChains) {
           continue;
         }
-        // Always go through getOrCreateTrackChain: an existing chain may no longer
-        // fit the track (e.g. a lower bpm pushes the echo delay past its maxDelay).
         const chain = this.getOrCreateTrackChain(track);
         this.updateTrackChainSettings(track, chain);
+      }
+    },
+    updateTrackTempoEffects(track: PresetTrackData, chain: TrackAudioChain, when: number) {
+      chain.chorus?.frequency.setValueAtTime(this.getModulationRateHz(track.chorusRate), when);
+      chain.flangerLfo?.frequency.setValueAtTime(this.getModulationRateHz(track.flangerRate), when);
+      chain.phaser?.lfo.frequency.setValueAtTime(this.getModulationRateHz(track.phaserRate), when);
+      if (chain.echo) {
+        const delay = this.getEchoDelaySeconds(track.echoDelay);
+        if (delay > chain.maxDelay && chain.maxDelay < 179) {
+          this.updateTrackChainSettings(track, chain);
+          return;
+        }
+        const delayTime = chain.echo.delayTime;
+        delayTime.cancelAndHoldAtTime(when);
+        delayTime.linearRampToValueAtTime(Math.min(chain.maxDelay, delay), when + 0.02);
       }
     },
     async getMidi(): Promise<Midi> {
@@ -3127,6 +3159,9 @@ export default defineComponent({
       if (this.developmentEndEvent !== null) {
         Tone.getTransport().clear(this.developmentEndEvent); this.developmentEndEvent = null;
       }
+      if (this.developmentEndTimer !== null) {
+        Tone.getContext().clearTimeout(this.developmentEndTimer); this.developmentEndTimer = null;
+      }
       // These parts are disposed immediately. An explicit origin avoids Tone's
       // current transport tick rounding slightly below zero just after Start.
       for (const loop of Object.values(this.trackLoops)) {
@@ -3139,6 +3174,7 @@ export default defineComponent({
         loop.dispose();
       }
       this.trackFadeLoops = markRaw({});
+      this.activeTrackFades.clear();
       // A restart must not glide in from the pitch that was playing when the transport stopped.
       for (const chain of Object.values(this.trackSynths)) {
         chain.fadeGain.gain.cancelScheduledValues(Tone.now());
@@ -3205,44 +3241,69 @@ export default defineComponent({
 
       this.stopTrackLoops();
 
-      const totalLoopDuration = this.developmentSchedule?.duration ?? this.getLoopDurationSecondsFromTrackLengths();
+      const transport = Tone.getTransport();
+      // Convert the resolved events to ticks once. A developed arrangement keeps
+      // the tempo at which its event data was resolved for subsequent rebuilds.
+      const scheduleBpm = this.developmentSchedule ? this.developmentSchedule.beats / this.developmentSchedule.duration * 60 : this.bpm;
+      const totalLoopDuration = this.developmentSchedule?.duration ?? this.loopDurationSeconds;
+      const ticksPerSecond = transport.PPQ * scheduleBpm / 60;
+      const loopEnd = { '4n': totalLoopDuration * scheduleBpm / 60 };
 
       for (const entry of this.allTrackActualNotes) {
         if (!this.isTrackAudible(entry.track.id)) {
           continue;
         }
 
-        const events = this.buildTrackEvents(entry.track, entry.notes, totalLoopDuration, entry.trackIndex, entry.noteVelocities, entry.drumVoiceIds);
+        const events = this.buildTrackEvents(entry.track, entry.notes, totalLoopDuration, entry.trackIndex,
+          entry.noteVelocities, entry.drumVoiceIds);
         if (events.length === 0) {
           continue;
         }
 
         const trackId = entry.track.id;
-        const part = markRaw(new Tone.Part<TrackScheduledEvent>((when, event) => {
-          this.playTrackStep(this.trackById.get(trackId) ?? entry.track, event, when);
-        }, events));
+        const part = markRaw(new Tone.Part<[Tone.Unit.Time, TrackScheduledEvent]>((when, event) => {
+          const duration = transport.bpm.getDurationOfTicks(event.duration * ticksPerSecond, when);
+          this.playTrackStep(this.trackById.get(trackId) ?? entry.track, { ...event, duration }, when);
+        }, events.map(event => [{ '4n': event.time * scheduleBpm / 60 }, event])));
         part.loop = !this.developmentSchedule;
         part.loopStart = 0;
-        part.loopEnd = totalLoopDuration;
+        part.loopEnd = loopEnd;
         part.start(0);
         this.trackLoops[entry.track.id] = part;
 
-        if (entry.track.fadeIn > 0 || entry.track.fadeOut > 0) {
-          const fadePart = markRaw(new Tone.Part<{ time: number }>((when) => {
+        if (!this.useMidiOutput && (entry.track.fadeIn > 0 || entry.track.fadeOut > 0)) {
+          const fadePart = markRaw(new Tone.Part<{ time: Tone.Unit.Time }>((when) => {
             const currentTrack = this.trackById.get(trackId) ?? entry.track;
-            const currentNotes = this.computeActualNotes(currentTrack);
             const chain = this.getOrCreateTrackChain(currentTrack);
-            this.scheduleTrackFadeEnvelope(
-              currentTrack,
-              currentNotes,
-              chain.fadeGain.gain,
-              when,
-              chain.drumReverbFadeGain.gain,
-            );
-          }, [{ time: this.getTrackDelaySeconds(entry.track) }]));
+            const startTick = transport.bpm.getTicksAtTime(when);
+            const barTicks = currentTrack.numerator * transport.PPQ;
+            const activeBeats = this.developmentSchedule && currentTrack.development?.enabled && currentTrack.development.sections.length
+              ? trackDurationBeats(currentTrack) - currentTrack.delay * currentTrack.numerator
+              : currentTrack.repeats * (this.computeActualNotes(currentTrack).length / currentTrack.denominator
+                + (currentTrack.paddingBefore + currentTrack.paddingAfter) * currentTrack.numerator);
+            const activeTicks = activeBeats * transport.PPQ;
+            const fadeIn = currentTrack.fadeIn * barTicks;
+            const fadeOut = currentTrack.fadeOut * barTicks;
+            const points = buildTrackFadeEnvelope(activeTicks, fadeIn, fadeOut);
+            const schedule = (time: number) => {
+              const elapsed = Math.max(0, transport.bpm.getTicksAtTime(time) - startTick);
+              if (elapsed >= activeTicks) return;
+              for (const gain of [chain.fadeGain.gain, chain.drumReverbFadeGain.gain]) {
+                if (time === when) gain.cancelScheduledValues(time);
+                else gain.cancelAndHoldAtTime(time);
+                gain.setValueAtTime(getTrackFadeGain(elapsed, activeTicks, fadeIn, fadeOut), time);
+                for (const point of points) {
+                  if (point.time <= elapsed) continue;
+                  gain.linearRampToValueAtTime(point.gain, transport.bpm.getTimeOfTick(startTick + point.time));
+                }
+              }
+            };
+            this.activeTrackFades.set(trackId, schedule);
+            schedule(when);
+          }, [{ time: { '4n': entry.track.delay * entry.track.numerator } }]));
           fadePart.loop = !this.developmentSchedule;
           fadePart.loopStart = 0;
-          fadePart.loopEnd = totalLoopDuration;
+          fadePart.loopEnd = loopEnd;
           fadePart.start(0);
           this.trackFadeLoops[entry.track.id] = fadePart;
         }
@@ -3258,9 +3319,12 @@ export default defineComponent({
             Number(event.locks?.release ?? event.settings?.release ?? track.release))),
           this.reverbEnabled ? this.reverbPreDelay + this.reverbDecay : 0,
           ...this.tracks.map(track => track.echoEnabled ? this.getEchoDelaySeconds(track.echoDelay) * (1 + track.echoFeedback * 8) : 0));
-        this.developmentEndEvent = Tone.getTransport().scheduleOnce(when => {
-          Tone.getDraw().schedule(() => { if (generation === this.playbackGeneration) this.stopSequencer(); }, when);
-        }, totalLoopDuration + tail);
+        const context = transport.context;
+        this.developmentEndEvent = transport.scheduleOnce(when => {
+          this.developmentEndTimer = context.setTimeout(() => {
+            if (generation === this.playbackGeneration) this.stopSequencer();
+          }, when + tail - context.currentTime);
+        }, loopEnd);
       }
     },
     showPlaybackErrorMessage(message: string) {
@@ -3433,7 +3497,8 @@ export default defineComponent({
       const context = Tone.getContext();
       // A full delay/predelay window prevents sleeping between sparse echoes.
       // Test both output channels, and require sustained silence below -120 dBFS.
-      const effectGap = Math.max(0, ...Object.values(this.trackSynths).map(chain => chain.maxDelay));
+      const effectGap = Math.max(1, ...this.tracks.filter(track => this.trackSynths[track.id]?.echo)
+        .map(track => this.getEchoDelaySeconds(track.echoDelay)));
       const reverbGap = this.reverbEnabled ? this.reverbPreDelay + this.reverbDecay : 0;
       const sleep = sleepWhenSilent(context, getMasterBus(context).clipper,
         Math.max(context.currentTime + context.lookAhead, this.lastScheduledAudioEnd),
@@ -3487,7 +3552,7 @@ export default defineComponent({
         const envelope = this.developmentSchedule ? Object.fromEntries(
           (['attack', 'decay', 'sustain', 'release'] as const).map(key => [key,
             Number(event.locks?.[key] ?? event.settings?.[key] ?? track[key])])) as { attack: number; decay: number; sustain: number; release: number } : undefined;
-        this.triggerTrackVoice(track, chain, arr, `${noteDuration}s`, when, vel, event.time, envelope);
+        this.triggerTrackVoice(track, chain, arr, `${noteDuration}s`, when, vel, undefined, envelope);
       }
       } finally {
         finishDiagnostic();

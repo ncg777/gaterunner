@@ -20,6 +20,9 @@ class MasterPulseProcessor extends AudioWorkletProcessor {
     super();
     this.port.onmessage = ({ data }) => {
       if (data.type === 'dispose') { this.disposed = true; return; }
+      if (data.type === 'settings') {
+        this.events = this.events.filter(event => event.type !== 'settings' || event.frame < data.frame);
+      }
       this.events.push(data as PulseEvent);
       this.events.sort((a, b) => a.frame - b.frame);
     };

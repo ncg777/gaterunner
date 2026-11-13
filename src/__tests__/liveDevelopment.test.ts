@@ -41,7 +41,8 @@ test('live send automation schedules a bounded window in song time and releases 
   const context = { now: () => now,
     on: (event: string, cb: () => void) => handlers.set(event, cb),
     off: (event: string) => handlers.delete(event),
-    transport: { on: (event: string, cb: (time: number) => void) => handlers.set(event, cb), off: (event: string) => handlers.delete(event) } };
+    transport: { PPQ: 192, getTicksAtTime: (time: number) => Math.max(0, time - 10) * 192,
+      on: (event: string, cb: (time: number) => void) => handlers.set(event, cb), off: (event: string) => handlers.delete(event) } };
   const send = { gain: { linearRampToValueAtTime: (value: number, time: number) => calls.push({ value, time }),
     cancelAndHoldAtTime: () => { cancelled = true; } } };
   const dispose = scheduleLiveDevelopmentSends(context as never, input, new Map([[input.tracks[0].id, send as never]]));

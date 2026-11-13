@@ -1,6 +1,6 @@
 {
   "name": "gaterunner",
-  "version": "2026.11.03",
+  "version": "2026.11.13",
   "scripts": {
     "help:generate": "tsx scripts/generateHelp.ts",
     "help:check": "tsx scripts/generateHelp.ts --check",

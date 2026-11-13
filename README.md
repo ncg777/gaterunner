@@ -48,6 +48,10 @@ It is useful for:
   and share a working draft through its URL.
 - **Installable web app:** use the hosted PWA or run the Vue application locally.
 
+Version **2026.11.13** keeps the loop and playhead in time when you change BPM
+during live audio or MIDI playback. Tempo changes take effect after the queued
+audio window. Stop rendered Development playback before changing its tempo.
+
 Version **2026.11.03** replaces the long help dialog with a compact, searchable
 guide: a grouped table of contents, seven tutorials, detailed feature references,
 section jumps, related topics and Back navigation. Press **F1** or the editor's

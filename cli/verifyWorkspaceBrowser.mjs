@@ -89,8 +89,7 @@ try {
     const app = document.querySelector('#app').__vue_app__._instance.proxy;
     const initialScaleReady = app.scale.length > 0;
     const { clonePresetData, DEFAULT_PRESET_DATA } = await import('/gaterunner/src/presets.ts');
-    const { nextTick } = await import('/gaterunner/node_modules/.vite/deps/vue.js');
-    const tick = async () => { await nextTick(); await new Promise(r => setTimeout(r, 30)); };
+    const tick = async () => { await app.$nextTick(); await new Promise(r => setTimeout(r, 30)); };
     const project = clonePresetData(DEFAULT_PRESET_DATA);
     project.reverb.enabled = false; project.tracks[0].sequenceInput = '1 2 4 8 3 5 7 0'; project.tracks[0].repeats = 2;
     project.forte = '7-35.11';
@@ -140,8 +139,7 @@ try {
     name.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true })); await tick();
     const typingDoesNotPlay = !app.isRunning; name.blur();
     document.body.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true, cancelable: true }));
-    for (let i=0; i<100 && !app.isRunning; i++) await new Promise(r=>setTimeout(r, 50));
-    await new Promise(r=>setTimeout(r, 200));
+    for (let i=0; i<100 && (!app.isRunning || app.playbackSeconds === 0); i++) await new Promise(r=>setTimeout(r, 50));
     const keyboardPlays = app.isRunning && app.playbackSeconds > 0;
     document.body.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true, cancelable: true })); await tick();
     const keyboardStops = !app.isRunning && app.playbackSeconds === 0;
@@ -158,6 +156,11 @@ try {
       editorTabs: reachable.length, studioViews: studioViews.length, tempoUpdates, typingDoesNotPlay, keyboardPlays, keyboardStops, stopCancelsStart, reorders, midiModeHasSequence };
   })()`);
   for (const [name, result] of Object.entries(checks)) assert.equal(result, name === 'editorTabs' ? 13 : name === 'studioViews' ? 6 : true, name);
+  const liveTempo = await evaluate(`(async () => {
+    const { runLiveTempoChecks } = await import('/gaterunner/src/__tests__/liveTempo.browser.ts');
+    return runLiveTempoChecks(document.querySelector('#app').__vue_app__._instance.proxy);
+  })()`);
+  console.log('Live tempo changes passed:', liveTempo);
   const review = await evaluate(`(async () => {
     const app = document.querySelector('#app').__vue_app__._instance.proxy;
     const { normalizePresetData } = await import('/gaterunner/src/presets.ts');

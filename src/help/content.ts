@@ -163,7 +163,7 @@ export const helpTopics: HelpTopic[] = [
     sections: [
       { title: 'Workspace map', table: { headings: ['Area', 'What it does'], rows: [
         ['Project bar', 'Browse the preset library; rename, save, import and export projects. Unsaved changes refers to the current draft.'],
-        ['Transport', 'Play/Stop, Return to start, tempo (1–499 BPM), song-loop duration, Audio / MIDI and Export. Return to start restarts only if already playing.'],
+        ['Transport', 'Play/Stop, Return to start, tempo (1–499 BPM), song-loop duration, Audio / MIDI and Export. Live tempo changes preserve your place in the loop. Stop rendered Development playback before changing tempo. Return to start restarts only if already playing.'],
         ['Inspector', 'Global Forte set and A4 tuning, selected-track gain/velocity, shortcuts to devices and master output. Hide it to make more room.'],
         ['Arrangement', 'Select a track, inspect its scheduled notes, zoom the timeline, and add melodic or rhythmic tracks. Double-click a pattern to edit it.'],
         ['Mixer', 'Track and master faders, mute/solo and instrument access. Track gain affects internal audio; velocity affects note dynamics and MIDI.'],
