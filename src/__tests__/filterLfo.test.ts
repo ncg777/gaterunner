@@ -12,7 +12,7 @@ test('developed cutoff runs without an LFO and follows the song clock across not
   const controls = normalizeDevelopment({ enabled: true, automation: [{ id: 'cutoff', target: 'filterFrequency',
     interpolation: 'linear', clock: 'song', points: [{ beat: 0, value: 69 }, { beat: 1, value: 81 }] }] })!;
   lfo.set({ enabled: true, amount: 0, frequencyHz: 1, waveform: 'sine', initPhase: 0, retrigger: 'note',
-    development: { controls, baseMidi: 69, bpm: 60 } });
+    development: { controls, baseMidi: 69 } });
   f.start(0.1); f.advance(0.6);
   assert.ok(Math.abs(f.filter.detune.getValueAtTime(0.6) - 600) < 1e-6);
   lfo.triggerNote(0.6); f.advance(0.8);
@@ -53,6 +53,8 @@ function fixture(lookAhead = 0, isOffline = false) {
   };
   const transport = {
     state: 'stopped',
+    PPQ: 192,
+    getTicksAtTime: (time: number) => Math.max(0, time - songStart) * 192,
     getSecondsAtTime: (time: number) => time - songStart,
     on: (_event: string, callback: (time: number) => void) => starts.add(callback),
     off: (_event: string, callback: (time: number) => void) => starts.delete(callback),

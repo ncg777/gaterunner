@@ -1,6 +1,6 @@
 # GateRunner help
 
-User guide for **2026.11.03**.
+User guide for **2026.11.13**.
 
 This manual and the searchable in-app help share one source. In the app, use the Help button or F1; editor Help buttons open the relevant topic.
 
@@ -288,7 +288,7 @@ Move between the arrangement, mixer, inspector and track editors.
 | Area | What it does |
 | --- | --- |
 | Project bar | Browse the preset library; rename, save, import and export projects. Unsaved changes refers to the current draft. |
-| Transport | Play/Stop, Return to start, tempo (1–499 BPM), song-loop duration, Audio / MIDI and Export. Return to start restarts only if already playing. |
+| Transport | Play/Stop, Return to start, tempo (1–499 BPM), song-loop duration, Audio / MIDI and Export. Live tempo changes preserve your place in the loop. Stop rendered Development playback before changing tempo. Return to start restarts only if already playing. |
 | Inspector | Global Forte set and A4 tuning, selected-track gain/velocity, shortcuts to devices and master output. Hide it to make more room. |
 | Arrangement | Select a track, inspect its scheduled notes, zoom the timeline, and add melodic or rhythmic tracks. Double-click a pattern to edit it. |
 | Mixer | Track and master faders, mute/solo and instrument access. Track gain affects internal audio; velocity affects note dynamics and MIDI. |

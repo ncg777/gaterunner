@@ -35,6 +35,7 @@ export interface VoiceFilterOptions {
   amount: number;
   lfoEnabled: boolean;
   lfoFrequencyHz: number;
+  lfoCycleBeats?: number;
   lfoAmount: number;
   lfoWaveform: LfoWaveform;
   lfoInitPhase: number;
@@ -562,6 +563,7 @@ export class PitchEnvelopeSynth extends Tone.Synth {
     this.filterLfo?.set({
       enabled: options.enabled && (options.lfoEnabled || !!options.development),
       frequencyHz: options.lfoFrequencyHz,
+      cycleBeats: options.lfoCycleBeats,
       amount: options.lfoEnabled ? options.lfoAmount : 0,
       waveform: options.lfoWaveform,
       initPhase: options.lfoInitPhase,

@@ -12,6 +12,7 @@ export interface MasterBus {
   pulseControl?: AudioWorkletNode;
   pulseSettings?: MasterPulseSettings;
   pulseBpm?: number;
+  pulseTime?: number;
   pulseReady?: Promise<void>;
   disposed: boolean;
   onStart: (time: number) => void;
@@ -52,9 +53,10 @@ export function setMasterGainDb(bus: MasterBus, db: number) {
 }
 
 /** Prepare before starting playback/offline rendering; live edits reuse the same oscillator. */
-export async function setMasterPulse(bus: MasterBus, value: unknown, bpm: number): Promise<void> {
+export async function setMasterPulse(bus: MasterBus, value: unknown, bpm: number, time = bus.input.context.now()): Promise<void> {
   bus.pulseSettings = normalizeMasterPulse(value);
   bus.pulseBpm = bpm;
+  bus.pulseTime = time;
   if (bus.disposed || (!bus.pulseSettings.enabled && !bus.pulseReady)) return;
   const context = bus.input.context;
   if (!bus.pulseReady) {
@@ -81,7 +83,7 @@ export async function setMasterPulse(bus: MasterBus, value: unknown, bpm: number
   }
   await bus.pulseReady;
   if (bus.disposed) return;
-  bus.pulseControl?.port.postMessage({ type: 'settings', frame: Math.round(context.now() * context.sampleRate),
+  bus.pulseControl?.port.postMessage({ type: 'settings', frame: Math.round(bus.pulseTime * context.sampleRate),
     settings: bus.pulseSettings, bpm: bus.pulseBpm });
 }
 

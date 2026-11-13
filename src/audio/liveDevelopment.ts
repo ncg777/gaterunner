@@ -38,17 +38,18 @@ export function scheduleLiveDevelopmentSends(context: Tone.BaseContext, project:
   const interval = 1 / 200;
   const animated = controls.filter(control => control.constant === undefined);
   const level = (value: number) => project.reverb.enabled ? 10 ** ((value + project.reverb.wet) / 20) : 0;
-  let next = 0, origin = 0, started = false;
+  const transport = context.transport;
+  let next = 0, started = false;
   const tick = () => {
     if (!started) return;
     const end = context.now() + interval * 2;
     for (; next <= end; next += interval) {
-      const beat = Math.max(0, next - origin) * project.bpm / 60;
+      const beat = transport.getTicksAtTime(next) / transport.PPQ;
       for (const { send, at } of animated) send.gain.linearRampToValueAtTime(level(Number(at(beat))), next);
     }
   };
   const start = (time: number) => {
-    origin = next = time; started = true;
+    next = time; started = true;
     for (const { send, constant } of controls) if (constant !== undefined) send.gain.setValueAtTime(level(constant), time);
     if (animated.length) tick();
   };
